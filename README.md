@@ -15,13 +15,26 @@ Both install the CLI into its own isolated venv and put `condash` on your `$PATH
 
 ### System prerequisite (Linux)
 
-`condash` uses [pywebview](https://pywebview.flowrl.com/) to open a native window backed by the system's webview. On Ubuntu/Debian you need:
+By default, `condash` uses [pywebview](https://pywebview.flowrl.com/) to open a native window backed by the system's webview. On Ubuntu/Debian, that requires both the GTK webview library and Python's GTK bindings:
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-0   # or libwebkit2gtk-4.0-37 on older releases
+sudo apt install \
+    libwebkit2gtk-4.1-0 \
+    gir1.2-webkit2-4.1 \
+    python3-gi \
+    python3-gi-cairo
+# on older releases: libwebkit2gtk-4.0-37 + gir1.2-webkit2-4.0
 ```
 
-`pip` cannot install this — it has to come from the distro package manager.
+`pip` cannot install these — they have to come from the distro package manager. The Python `gi` module in particular is shipped as a system package and is **not** available on PyPI.
+
+Because pipx creates an isolated venv that does not see system site-packages by default, install condash with the `--system-site-packages` flag so it can find `gi`:
+
+```bash
+pipx install --system-site-packages condash
+```
+
+If `gi` is missing or you'd rather skip the native window entirely, set `native = false` in your config (see [First launch](#first-launch)) — condash will then serve the dashboard in your usual browser instead.
 
 ### Development from a source checkout
 
@@ -46,13 +59,21 @@ The template is fully commented out. Uncomment and edit the lines you need:
 
 ```toml
 conception_path = "/path/to/conception"
+port = 0          # 0 = OS picks a free port; set e.g. 3434 to pin one
+native = true     # false = open in your browser instead of a desktop window
 
 [repositories]
 primary = ["repo-a", "repo-b"]
 secondary = ["repo-c", "repo-d"]
 ```
 
-`conception_path` is required. `[repositories]` is optional — repos are looked up as sibling directories of `conception_path`. Once `conception_path` is set, run `condash` to launch the dashboard.
+`conception_path` is required. Everything else is optional:
+
+- `port` — TCP port for the embedded HTTP server. `0` (default) lets the OS pick a free port. Set a fixed value if you want to reach the dashboard from your browser at `http://127.0.0.1:<port>`.
+- `native` — `true` (default) opens a desktop window via pywebview. `false` skips the native window and lets you use any browser; useful if you don't have GTK/Qt Python bindings installed.
+- `[repositories]` — repos are looked up as sibling directories of `conception_path`.
+
+Once `conception_path` is set, run `condash` to launch the dashboard.
 
 ## CLI
 

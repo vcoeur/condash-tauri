@@ -176,14 +176,14 @@ def _register_routes() -> None:
 
 
 def run(cfg: CondashConfig) -> None:
-    """Launch the native condash window."""
+    """Launch the condash dashboard (native window or browser, per config)."""
     legacy.init(cfg)
     _register_routes()
     ui.run(
-        native=True,
+        native=cfg.native,
         title="condash",
         window_size=(1400, 900),
         reload=False,
-        show=False,
-        port=0,
+        show=not cfg.native,
+        port=cfg.port,
     )

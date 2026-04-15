@@ -197,6 +197,8 @@ def _full_payload(target: Path, cfg: CondashConfig) -> dict[str, Any]:
     return {
         "config_file": str(target),
         "conception_path": str(cfg.conception_path),
+        "port": cfg.port,
+        "native": cfg.native,
         "repositories_primary": cfg.repositories_primary,
         "repositories_secondary": cfg.repositories_secondary,
     }

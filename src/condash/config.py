@@ -4,6 +4,8 @@ Config file lives at ``~/.config/condash/config.toml`` (or ``$XDG_CONFIG_HOME``
 if set). Schema:
 
     conception_path = "/path/to/conception"
+    port = 0          # 0 = let the OS pick a free port
+    native = true     # false = serve in your browser instead of a window
 
     [repositories]
     primary = ["repo-a", "repo-b"]
@@ -31,6 +33,16 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # (projects/, incidents/, documents/). Required.
 # conception_path = "/path/to/conception"
 
+# port: TCP port the embedded HTTP server binds to. 0 means "let the OS
+# pick a free port" (default). Set a fixed port if you want to reach the
+# dashboard from your browser at http://127.0.0.1:<port>.
+# port = 0
+
+# native: true (default) opens a native desktop window via pywebview.
+# Set to false to serve the dashboard in your usual browser instead —
+# useful if you don't have GTK/Qt Python bindings installed.
+# native = true
+
 # [repositories]
 # primary:   repos shown at the top of the dashboard's repo strip
 # secondary: repos shown in the collapsed/secondary section
@@ -47,6 +59,8 @@ class CondashConfig:
     conception_path: Path
     repositories_primary: list[str] = field(default_factory=list)
     repositories_secondary: list[str] = field(default_factory=list)
+    port: int = 0
+    native: bool = True
 
 
 def config_path() -> Path:
@@ -111,10 +125,23 @@ def _parse(data: dict, source: Path) -> CondashConfig:
     repos = data.get("repositories") or {}
     primary = list(repos.get("primary") or [])
     secondary = list(repos.get("secondary") or [])
+
+    port_raw = data.get("port", 0)
+    if not isinstance(port_raw, int) or not 0 <= port_raw <= 65535:
+        raise ConfigIncompleteError(
+            f"{source}: 'port' must be an integer between 0 and 65535"
+        )
+
+    native_raw = data.get("native", True)
+    if not isinstance(native_raw, bool):
+        raise ConfigIncompleteError(f"{source}: 'native' must be a boolean")
+
     return CondashConfig(
         conception_path=conception_path,
         repositories_primary=[str(r) for r in primary],
         repositories_secondary=[str(r) for r in secondary],
+        port=port_raw,
+        native=native_raw,
     )
 
 
