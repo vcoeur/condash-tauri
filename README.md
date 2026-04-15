@@ -121,6 +121,10 @@ No `sudo` and no system-wide changes. To remove it later: `condash uninstall-des
 
 The native window also picks up the same icon at runtime via pywebview, so it appears in your taskbar / Alt-Tab switcher.
 
+## Claude Code skill
+
+A minimal example [`SKILL.md`](SKILL.md) ships at the repo root — drop it into `~/.claude/skills/condash/` (or `<project>/.claude/skills/condash/`) to drive the non-interactive CLI surface from a Claude Code session: `condash init`, `condash config show / edit`, `condash tidy`, and `condash install-desktop`. Launching the native window from inside an agent is deliberately out of scope — run `condash` by hand for that.
+
 ## Status
 
 Version 0.2.0 — adds an in-app config editor (gear icon next to the theme toggle) and three vendor-neutral `[open_with]` launcher slots that replace the previous hardcoded IntelliJ / VS Code / terminal buttons. Also fixes the v0.1.5 desktop-launcher crash where the window icon was forwarded via the wrong pywebview kwarg dict. Still Linux-first overall; macOS and Windows should work but are less tested.

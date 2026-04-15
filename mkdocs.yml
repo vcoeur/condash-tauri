@@ -2,7 +2,7 @@ site_name: condash
 site_url: https://condash.vcoeur.com/
 site_description: Standalone desktop dashboard for markdown-based projects, incidents, and documents — live-rendered from the files you edit by hand.
 site_author: Alice Voland
-copyright: "&copy; Alice Voland"
+copyright: 'Developed by Alice Voland &middot; <a href="https://vcoeur.com">vcoeur.com</a>'
 
 repo_url: https://github.com/vcoeur/condash
 repo_name: vcoeur/condash

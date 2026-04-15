@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "condash"
-version = "0.2.0"
+version = "0.2.1"
 description = "Standalone desktop dashboard for markdown-based conception projects, incidents, and documents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,7 +43,8 @@ dev = [
 condash = "condash.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/vcoeur/condash"
+Homepage = "https://condash.vcoeur.com/"
+Documentation = "https://condash.vcoeur.com/"
 Repository = "https://github.com/vcoeur/condash"
 Issues = "https://github.com/vcoeur/condash/issues"
 
