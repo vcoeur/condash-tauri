@@ -13,28 +13,19 @@ pipx install condash
 
 Both install the CLI into its own isolated venv and put `condash` on your `$PATH`. The dashboard will not launch until you have created and filled in a config file — see [First launch](#first-launch).
 
-### System prerequisite (Linux)
+### System prerequisites
 
-By default, `condash` uses [pywebview](https://pywebview.flowrl.com/) to open a native window backed by the system's webview. On Ubuntu/Debian, that requires both the GTK webview library and Python's GTK bindings:
-
-```bash
-sudo apt install \
-    libwebkit2gtk-4.1-0 \
-    gir1.2-webkit2-4.1 \
-    python3-gi \
-    python3-gi-cairo
-# on older releases: libwebkit2gtk-4.0-37 + gir1.2-webkit2-4.0
-```
-
-`pip` cannot install these — they have to come from the distro package manager. The Python `gi` module in particular is shipped as a system package and is **not** available on PyPI.
-
-Because pipx creates an isolated venv that does not see system site-packages by default, install condash with the `--system-site-packages` flag so it can find `gi`:
+None on Linux, macOS, or Windows. `condash` ships its native-window backend as a Python dependency: `pywebview[qt]` pulls `PyQt6` + `PyQt6-WebEngine` + `QtPy` from PyPI, and those wheels bundle Qt itself. A vanilla `pipx install condash` is therefore self-contained:
 
 ```bash
-pipx install --system-site-packages condash
+pipx install condash
 ```
 
-If `gi` is missing or you'd rather skip the native window entirely, set `native = false` in your config (see [First launch](#first-launch)) — condash will then serve the dashboard in your usual browser instead.
+- **Linux** — pywebview prefers GTK if `python3-gi` happens to be installed system-wide, but otherwise falls back to the bundled Qt backend with no extra setup.
+- **macOS** — pywebview uses the native Cocoa WebKit backend by default; Qt is available as a fallback.
+- **Windows** — pywebview uses the native Edge WebView2 backend by default; Qt is available as a fallback.
+
+Install size is ~100 MB because of the bundled Qt wheels — that's the cost of "works everywhere with one command". If you'd rather skip the native window entirely, set `native = false` in your config (see [First launch](#first-launch)) and condash will serve the dashboard in your usual browser at `http://127.0.0.1:<port>`.
 
 ### Development from a source checkout
 
