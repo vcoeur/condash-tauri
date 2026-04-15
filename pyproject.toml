@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "condash"
+version = "0.1.0"
+description = "Standalone desktop dashboard for markdown-based conception projects, incidents, and documents."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Alice Voland", email = "alice@vcoeur.com" },
+]
+keywords = ["dashboard", "markdown", "project-management", "nicegui", "kanban"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "nicegui>=2.0",
+    "pywebview>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+condash = "condash.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/vcoeur/condash"
+Repository = "https://github.com/vcoeur/condash"
+Issues = "https://github.com/vcoeur/condash/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/condash"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/condash",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
