@@ -71,6 +71,8 @@ markdown_extensions:
       custom_checkbox: true
 
 nav:
-  - Home: index.md
-  - Install: install.md
-  - Commands: commands.md
+  - Overview: index.md
+  - Conception convention: conception-convention.md
+  - Management skill: skill.md
+  - Getting started: getting-started.md
+  - Reference: reference.md
