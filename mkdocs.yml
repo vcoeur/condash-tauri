@@ -1,0 +1,76 @@
+site_name: condash
+site_url: https://condash.vcoeur.com/
+site_description: Standalone desktop dashboard for markdown-based projects, incidents, and documents — live-rendered from the files you edit by hand.
+site_author: Alice Voland
+copyright: "&copy; Alice Voland"
+
+repo_url: https://github.com/vcoeur/condash
+repo_name: vcoeur/condash
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.tabs.link
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/vcoeur/condash
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/condash/
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Commands: commands.md

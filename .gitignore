@@ -21,6 +21,9 @@ env/
 # uv
 .uv/
 
+# MkDocs build output (built in CI, deployed via GitHub Actions)
+site/
+
 # Testing / tooling caches
 .pytest_cache/
 .ruff_cache/
