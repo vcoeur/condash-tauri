@@ -19,7 +19,14 @@ from typing import Any
 import typer
 
 from . import __version__
-from .config import CondashConfig, config_path, load, save
+from .config import (
+    CondashConfig,
+    ConfigIncompleteError,
+    ConfigNotFoundError,
+    config_path,
+    load,
+    write_default_template,
+)
 
 app = typer.Typer(
     help="Standalone desktop dashboard for markdown-based conception items.",
@@ -32,9 +39,6 @@ config_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(config_app, name="config")
-
-
-_DEFAULT_CONCEPTION_PATH = Path.home() / "src" / "vcoeur" / "conception"
 
 
 @app.callback(invoke_without_command=True)
@@ -65,7 +69,7 @@ def _root(
         return
 
     # Default behaviour: launch the dashboard window.
-    cfg = load(path=config_file, conception_override=conception_path_override)
+    cfg = _load_or_exit(config_file, conception_path_override)
     if not cfg.conception_path.is_dir():
         typer.echo(
             f"condash: error: conception directory does not exist: {cfg.conception_path}",
@@ -86,10 +90,7 @@ def _root(
 def cmd_tidy(ctx: typer.Context) -> None:
     """Move done items into YYYY-MM/ archive dirs and exit."""
     obj = ctx.obj or {}
-    cfg = load(
-        path=obj.get("config_file"),
-        conception_override=obj.get("conception_override"),
-    )
+    cfg = _load_or_exit(obj.get("config_file"), obj.get("conception_override"))
     if not cfg.conception_path.is_dir():
         typer.echo(
             f"condash: error: conception directory does not exist: {cfg.conception_path}",
@@ -111,14 +112,13 @@ def cmd_tidy(ctx: typer.Context) -> None:
 
 @app.command("init")
 def cmd_init() -> None:
-    """Create the config file with defaults if missing; print the resolved path."""
+    """Write a commented config template if missing; print the resolved path."""
     target = config_path()
     created = _seed_default_config(target)
-    cfg = load(path=target)
     typer.echo(f"config_file: {target}")
-    typer.echo(f"conception_path: {cfg.conception_path}")
     if created:
-        typer.echo("(created with default values — run `condash config edit` to customise)")
+        typer.echo("(created from template — edit the file to set conception_path)")
+        typer.echo("Run `condash config edit` to open it in your editor.")
     else:
         typer.echo("(already present)")
 
@@ -164,20 +164,33 @@ def cmd_config_edit() -> None:
     created = _seed_default_config(target)
     editor = _resolve_editor()
     if created:
-        typer.echo(f"Created {target} with default values.")
+        typer.echo(f"Created {target} from template — uncomment values before saving.")
     typer.echo(f"Opening {target} in {editor!r}")
     subprocess.run([editor, str(target)], check=False)
 
 
 def _seed_default_config(target: Path) -> bool:
-    """Create a default config file at `target` if it does not exist."""
+    """Write the default config template at ``target`` if it does not exist."""
     if target.exists():
         return False
-    default = CondashConfig(
-        conception_path=_DEFAULT_CONCEPTION_PATH,
-    )
-    save(default, target)
+    write_default_template(target)
     return True
+
+
+def _load_or_exit(
+    config_file: Path | None,
+    conception_override: Path | None,
+) -> CondashConfig:
+    """Load the config or exit with an actionable error message."""
+    try:
+        return load(path=config_file, conception_override=conception_override)
+    except ConfigNotFoundError as exc:
+        _error(
+            f"No config file at {exc}. Run `condash init` to create one, "
+            f"then `condash config edit` to fill it in."
+        )
+    except ConfigIncompleteError as exc:
+        _error(f"{exc}. Run `condash config edit` to fix it.")
 
 
 def _full_payload(target: Path, cfg: CondashConfig) -> dict[str, Any]:

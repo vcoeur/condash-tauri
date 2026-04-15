@@ -7,8 +7,11 @@
 ## Install
 
 ```bash
-pip install condash
+pipx install condash
+# or: uv tool install condash
 ```
+
+Both install the CLI into its own isolated venv and put `condash` on your `$PATH`. The dashboard will not launch until you have created and filled in a config file — see [First launch](#first-launch).
 
 ### System prerequisite (Linux)
 
@@ -32,19 +35,24 @@ uv run condash               # launches the native window, reading ~/.config/con
 
 ## First launch
 
+`condash` does not ship with a working default config — it has no way to guess where your conception directory lives. Bootstrap one:
+
 ```bash
-condash
+condash init           # writes a commented template at ~/.config/condash/config.toml
+condash config edit    # opens the template in $VISUAL / $EDITOR
 ```
 
-On first start, `condash` writes a default config to `~/.config/condash/config.toml` and asks (on stdin) for the path of your conception directory. Edit the file afterwards if you want to change the path or repositories list:
+The template is fully commented out. Uncomment and edit the lines you need:
 
 ```toml
-conception_path = "/home/alice/src/vcoeur/conception"
+conception_path = "/path/to/conception"
 
 [repositories]
-primary = ["vcoeur.com", "alicepeintures.com"]
-secondary = ["conception", "ClaudeConfig"]
+primary = ["repo-a", "repo-b"]
+secondary = ["repo-c", "repo-d"]
 ```
+
+`conception_path` is required. `[repositories]` is optional — repos are looked up as sibling directories of `conception_path`. Once `conception_path` is set, run `condash` to launch the dashboard.
 
 ## CLI
 

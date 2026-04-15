@@ -6,23 +6,38 @@ if set). Schema:
     conception_path = "/path/to/conception"
 
     [repositories]
-    primary = ["repo1", "repo2"]
-    secondary = ["repo3", "repo4"]
+    primary = ["repo-a", "repo-b"]
+    secondary = ["repo-c", "repo-d"]
 
-First-run flow: if the file is missing, ``load`` prompts for a conception
-directory on stdin, writes a default config, and returns it.
+First-run flow: if the file is missing, ``condash init`` (or
+``condash config edit``) writes a commented template that the user must edit
+before condash can launch the dashboard. The template is shipped as
+``DEFAULT_CONFIG_TEMPLATE`` below — example values only, never real paths.
 """
 
 from __future__ import annotations
 
 import os
-import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_PRIMARY: list[str] = []
-DEFAULT_SECONDARY: list[str] = []
+DEFAULT_CONFIG_TEMPLATE = """\
+# condash configuration
+#
+# Uncomment and edit the values below before launching `condash`.
+
+# conception_path: absolute path to the directory holding your conception items
+# (projects/, incidents/, documents/). Required.
+# conception_path = "/path/to/conception"
+
+# [repositories]
+# primary:   repos shown at the top of the dashboard's repo strip
+# secondary: repos shown in the collapsed/secondary section
+# Both are lists of directory names found next to `conception_path`.
+# primary = ["repo-a", "repo-b"]
+# secondary = ["repo-c", "repo-d"]
+"""
 
 
 @dataclass
@@ -69,10 +84,29 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
     return target
 
 
+class ConfigNotFoundError(FileNotFoundError):
+    """Raised when the config file does not exist on disk."""
+
+
+class ConfigIncompleteError(ValueError):
+    """Raised when the config file exists but is missing required values."""
+
+
+def write_default_template(target: Path) -> None:
+    """Write the commented default template to ``target``."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
+    tmp.replace(target)
+
+
 def _parse(data: dict, source: Path) -> CondashConfig:
     conception_raw = data.get("conception_path")
     if not conception_raw:
-        raise ValueError(f"{source}: missing required key 'conception_path'")
+        raise ConfigIncompleteError(
+            f"{source}: missing required key 'conception_path' "
+            f"(edit the file and uncomment the example)"
+        )
     conception_path = Path(str(conception_raw)).expanduser()
     repos = data.get("repositories") or {}
     primary = list(repos.get("primary") or [])
@@ -84,47 +118,26 @@ def _parse(data: dict, source: Path) -> CondashConfig:
     )
 
 
-def _prompt_first_run(target: Path) -> CondashConfig:
-    print(f"condash: no config at {target}", file=sys.stderr)
-    print("condash: first-run setup", file=sys.stderr)
-    default = Path.home() / "src" / "vcoeur" / "conception"
-    prompt = f"conception directory [{default}]: "
-    try:
-        answer = input(prompt).strip()
-    except EOFError:
-        answer = ""
-    conception_path = Path(answer).expanduser() if answer else default
-    if not conception_path.is_dir():
-        print(
-            f"condash: warning: {conception_path} is not an existing directory",
-            file=sys.stderr,
-        )
-    cfg = CondashConfig(
-        conception_path=conception_path,
-        repositories_primary=list(DEFAULT_PRIMARY),
-        repositories_secondary=list(DEFAULT_SECONDARY),
-    )
-    save(cfg, target)
-    print(f"condash: wrote config to {target}", file=sys.stderr)
-    return cfg
-
-
 def load(
     path: Path | None = None,
     *,
     conception_override: Path | None = None,
 ) -> CondashConfig:
-    """Load config, running first-run prompt if the file is missing.
+    """Load config from disk.
+
+    Raises ``ConfigNotFoundError`` if the file does not exist and
+    ``ConfigIncompleteError`` if it exists but is missing required values.
+    The CLI is responsible for turning those into actionable error messages
+    that point the user at ``condash init`` or ``condash config edit``.
 
     ``conception_override`` is a one-shot runtime override (e.g. from
     ``--conception-path``) and is not written back to the config file.
     """
     target = path or config_path()
-    if target.is_file():
-        data = tomllib.loads(target.read_text(encoding="utf-8"))
-        cfg = _parse(data, target)
-    else:
-        cfg = _prompt_first_run(target)
+    if not target.is_file():
+        raise ConfigNotFoundError(target)
+    data = tomllib.loads(target.read_text(encoding="utf-8"))
+    cfg = _parse(data, target)
     if conception_override is not None:
         cfg.conception_path = Path(conception_override).expanduser()
     return cfg
