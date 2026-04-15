@@ -22,7 +22,9 @@ from __future__ import annotations
 import hashlib
 import html as html_mod
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -473,6 +475,42 @@ def _render_card(item):
     )
 
 
+def _is_sandbox_stub(repo_path: Path, status: str, rel: str) -> bool:
+    """Return True for harness-synthesized stub files that should not count
+    as real repo changes.
+
+    When condash runs inside a sandbox (e.g. Claude Code's bwrap harness),
+    the runtime binds zero-byte read-only copies of the user's home
+    dotfiles (``.bashrc``, ``.gitconfig``, ``.mcp.json``, …) into every
+    working directory so programs don't crash on missing config. These
+    show up as untracked files in ``git status`` but they are not real
+    changes, and the commit skill already filters them with the same
+    logic — we want condash's dirty-badge to agree.
+    """
+    if "D" in status:
+        return False
+    try:
+        st = (Path(repo_path) / rel).lstat()
+    except OSError:
+        return False
+    if stat.S_ISCHR(st.st_mode):
+        return True
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            return os.readlink(str(Path(repo_path) / rel)) == "/dev/null"
+        except OSError:
+            return False
+    if status != "??":
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    if st.st_size != 0:
+        return False
+    if st.st_mode & 0o222:
+        return False
+    return True
+
+
 def _git_status(path):
     try:
         branch = subprocess.run(
@@ -489,16 +527,18 @@ def _git_status(path):
         ).stdout
     except Exception:
         return "?", False, 0, []
-    lines = [ln for ln in status_out.splitlines() if ln]
     changed_files = []
-    for ln in lines:
+    for ln in status_out.splitlines():
         if len(ln) < 4:
             continue
+        status = ln[:2]
         rest = ln[3:]
         if " -> " in rest:
             rest = rest.split(" -> ", 1)[1]
+        if _is_sandbox_stub(path, status, rest):
+            continue
         changed_files.append(rest)
-    return branch, bool(lines), len(lines), changed_files
+    return branch, bool(changed_files), len(changed_files), changed_files
 
 
 def _git_worktrees(repo_path):
