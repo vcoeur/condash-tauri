@@ -34,6 +34,16 @@ from pathlib import Path
 # Populated by init() before any rendering / mutation function is called.
 BASE_DIR: Path = Path("/nonexistent")
 
+# Populated by init() from CondashConfig.workspace_path. ``None`` means the
+# user did not configure a code workspace, and the dashboard's repo strip is
+# suppressed entirely.
+_WORKSPACE: Path | None = None
+
+# Populated by init() from CondashConfig.worktrees_path. ``None`` means the
+# user has no extra git-worktrees sandbox; the "open in IDE" action then
+# only accepts paths inside ``_WORKSPACE``.
+_WORKTREES: Path | None = None
+
 # Populated by init() from CondashConfig.repositories_{primary,secondary}.
 _REPO_STRUCTURE: list[tuple[str, list[tuple[str, list[str]]]]] = []
 
@@ -45,8 +55,18 @@ def init(cfg) -> None:
     :class:`condash.config.CondashConfig` (typed as ``Any`` here to avoid
     a circular import at module load).
     """
-    global BASE_DIR, _REPO_STRUCTURE
+    global BASE_DIR, _WORKSPACE, _WORKTREES, _REPO_STRUCTURE
     BASE_DIR = Path(cfg.conception_path).expanduser().resolve()
+    _WORKSPACE = (
+        Path(cfg.workspace_path).expanduser().resolve()
+        if cfg.workspace_path is not None
+        else None
+    )
+    _WORKTREES = (
+        Path(cfg.worktrees_path).expanduser().resolve()
+        if cfg.worktrees_path is not None
+        else None
+    )
     _REPO_STRUCTURE = [
         ("Primary", [(name, []) for name in cfg.repositories_primary]),
         ("Secondary", [(name, []) for name in cfg.repositories_secondary]),
@@ -536,8 +556,13 @@ def _resolve_submodules(base_path, submodule_names):
 
 
 def _collect_git_repos():
-    """Find all git repos under the vcoeur workspace and group them."""
-    workspace = BASE_DIR.parent
+    """Find git repos under the configured workspace and group them.
+
+    Returns ``[]`` (no repo strip) when ``workspace_path`` is unset.
+    """
+    if _WORKSPACE is None:
+        return []
+    workspace = _WORKSPACE
     found = {}
     if workspace.is_dir():
         for child in sorted(workspace.iterdir()):
@@ -1032,7 +1057,12 @@ def _git_fingerprint():
     if _git_cache["fingerprint"] and now - _git_cache["timestamp"] < 30:
         return _git_cache["fingerprint"]
 
-    workspace = BASE_DIR.parent
+    if _WORKSPACE is None:
+        _git_cache["fingerprint"] = "no-workspace"
+        _git_cache["timestamp"] = now
+        return _git_cache["fingerprint"]
+
+    workspace = _WORKSPACE
     parts = []
     if workspace.is_dir():
         for child in sorted(workspace.iterdir()):
@@ -1183,9 +1213,12 @@ def _validate_open_path(path_str):
         return None
     if not p.is_dir():
         return None
-    workspace = BASE_DIR.parent.resolve()
-    worktrees = (Path.home() / "src" / "worktrees").resolve()
-    for root in (workspace, worktrees):
+    roots: list[Path] = []
+    if _WORKSPACE is not None:
+        roots.append(_WORKSPACE.resolve())
+    if _WORKTREES is not None:
+        roots.append(_WORKTREES.resolve())
+    for root in roots:
         try:
             p.relative_to(root)
             return p

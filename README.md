@@ -59,8 +59,10 @@ The template is fully commented out. Uncomment and edit the lines you need:
 
 ```toml
 conception_path = "/path/to/conception"
-port = 0          # 0 = OS picks a free port; set e.g. 3434 to pin one
-native = true     # false = open in your browser instead of a desktop window
+workspace_path  = "/path/to/code/workspace"   # optional; enables the repo strip
+worktrees_path  = "/path/to/git/worktrees"    # optional; "open in IDE" sandbox
+port            = 0                           # 0 = OS picks a free port; set e.g. 3434 to pin one
+native          = true                        # false = open in your browser instead of a desktop window
 
 [repositories]
 primary = ["repo-a", "repo-b"]
@@ -69,9 +71,11 @@ secondary = ["repo-c", "repo-d"]
 
 `conception_path` is required. Everything else is optional:
 
+- `workspace_path` — directory containing your code repositories. Every direct subdirectory that contains a `.git/` is shown in the dashboard's repo strip. If unset, the entire repo strip is hidden.
+- `worktrees_path` — second directory the "open in IDE" action treats as a safe sandbox alongside `workspace_path`. Useful if you keep extra git worktrees outside the main workspace tree.
 - `port` — TCP port for the embedded HTTP server. `0` (default) lets the OS pick a free port. Set a fixed value if you want to reach the dashboard from your browser at `http://127.0.0.1:<port>`.
 - `native` — `true` (default) opens a desktop window via pywebview. `false` skips the native window and lets you use any browser; useful if you don't have GTK/Qt Python bindings installed.
-- `[repositories]` — repos are looked up as sibling directories of `conception_path`.
+- `[repositories]` — `primary` and `secondary` are bare directory names (not paths) matched against what is found under `workspace_path`. Anything left over lands in an "Others" card. Both lists are ignored when `workspace_path` is unset.
 
 Once `conception_path` is set, run `condash` to launch the dashboard.
 

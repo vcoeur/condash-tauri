@@ -4,12 +4,24 @@ Config file lives at ``~/.config/condash/config.toml`` (or ``$XDG_CONFIG_HOME``
 if set). Schema:
 
     conception_path = "/path/to/conception"
-    port = 0          # 0 = let the OS pick a free port
-    native = true     # false = serve in your browser instead of a window
+    workspace_path  = "/path/to/code/workspace"   # optional; enables repo strip
+    worktrees_path  = "/path/to/git/worktrees"    # optional; "open in IDE" sandbox
+    port            = 0                           # 0 = OS picks a free port
+    native          = true                        # false = serve in browser
 
     [repositories]
     primary = ["repo-a", "repo-b"]
     secondary = ["repo-c", "repo-d"]
+
+``workspace_path`` is the directory condash scans for git repositories to
+display in the dashboard's repo strip. ``primary`` / ``secondary`` are bare
+directory names (matched against what the scan finds), not paths. If
+``workspace_path`` is unset, no scan happens and the repo strip is hidden
+entirely — including the catch-all "Others" group.
+
+``worktrees_path`` is a second directory the "open in IDE" action treats as
+a safe sandbox in addition to ``workspace_path``. Useful if you keep your
+git worktrees outside the main workspace tree. Optional.
 
 First-run flow: if the file is missing, ``condash init`` (or
 ``condash config edit``) writes a commented template that the user must edit
@@ -33,6 +45,18 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # (projects/, incidents/, documents/). Required.
 # conception_path = "/path/to/conception"
 
+# workspace_path: absolute path to a directory containing your code
+# repositories. condash scans every direct subdirectory that contains a
+# `.git/` and shows it in the dashboard's repo strip. Optional — if unset,
+# the repo strip is hidden entirely.
+# workspace_path = "/path/to/code/workspace"
+
+# worktrees_path: absolute path to a directory holding extra git worktrees.
+# The "open in IDE" action treats it as a safe sandbox alongside
+# `workspace_path`. Useful if your worktrees live outside the main workspace
+# tree (e.g. ~/src/worktrees/). Optional.
+# worktrees_path = "/path/to/git/worktrees"
+
 # port: TCP port the embedded HTTP server binds to. 0 means "let the OS
 # pick a free port" (default). Set a fixed port if you want to reach the
 # dashboard from your browser at http://127.0.0.1:<port>.
@@ -44,9 +68,11 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # native = true
 
 # [repositories]
-# primary:   repos shown at the top of the dashboard's repo strip
-# secondary: repos shown in the collapsed/secondary section
-# Both are lists of directory names found next to `conception_path`.
+# primary:   bare directory names (not paths) matched against what is found
+#            under `workspace_path`; shown in the top card of the repo strip.
+# secondary: same as primary, shown in the second card.
+# Anything else found under `workspace_path` lands in an "Others" card.
+# Both lists are ignored when `workspace_path` is unset.
 # primary = ["repo-a", "repo-b"]
 # secondary = ["repo-c", "repo-d"]
 """
@@ -57,6 +83,8 @@ class CondashConfig:
     """Runtime configuration for a condash session."""
 
     conception_path: Path
+    workspace_path: Path | None = None
+    worktrees_path: Path | None = None
     repositories_primary: list[str] = field(default_factory=list)
     repositories_secondary: list[str] = field(default_factory=list)
     port: int = 0
@@ -122,6 +150,21 @@ def _parse(data: dict, source: Path) -> CondashConfig:
             f"(edit the file and uncomment the example)"
         )
     conception_path = Path(str(conception_raw)).expanduser()
+
+    workspace_raw = data.get("workspace_path")
+    workspace_path: Path | None
+    if workspace_raw:
+        workspace_path = Path(str(workspace_raw)).expanduser()
+    else:
+        workspace_path = None
+
+    worktrees_raw = data.get("worktrees_path")
+    worktrees_path: Path | None
+    if worktrees_raw:
+        worktrees_path = Path(str(worktrees_raw)).expanduser()
+    else:
+        worktrees_path = None
+
     repos = data.get("repositories") or {}
     primary = list(repos.get("primary") or [])
     secondary = list(repos.get("secondary") or [])
@@ -138,6 +181,8 @@ def _parse(data: dict, source: Path) -> CondashConfig:
 
     return CondashConfig(
         conception_path=conception_path,
+        workspace_path=workspace_path,
+        worktrees_path=worktrees_path,
         repositories_primary=[str(r) for r in primary],
         repositories_secondary=[str(r) for r in secondary],
         port=port_raw,
