@@ -807,7 +807,7 @@ def run(cfg: CondashConfig) -> None:
     _register_routes()
     kwargs: dict = {
         "native": cfg.native,
-        "title": "Conception Dashboard (condash)",
+        "title": "Conception Dashboard",
         "reload": False,
         "show": not cfg.native,
         "port": cfg.port,
