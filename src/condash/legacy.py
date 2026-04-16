@@ -943,6 +943,17 @@ _ICON_SVGS = {
         '<polyline points="4 17 10 11 4 5"/>'
         '<line x1="12" y1="19" x2="20" y2="19"/></svg>'
     ),
+    # "Integrated terminal" — window frame with prompt arrow + cursor
+    # inside, signalling "open terminal inside the dashboard" rather
+    # than the external-terminal slot above.
+    "integrated_terminal": (
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" '
+        'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<rect x="3" y="4" width="18" height="16" rx="2"/>'
+        '<polyline points="7 11 10 14 7 17"/>'
+        '<line x1="12" y1="17" x2="16" y2="17"/></svg>'
+    ),
 }
 
 
@@ -958,6 +969,13 @@ def _render_git_actions(path):
             f"onclick=\"openPath(event,{js_path},'{slot_key}')\">"
             f"{_ICON_SVGS[slot_key]}</button>"
         )
+    integrated_title = "Open in integrated terminal"
+    items_html.append(
+        f'<button class="git-action-btn git-action-integrated-terminal" '
+        f'title="{h(integrated_title)}" aria-label="{h(integrated_title)}" '
+        f'onclick="openInTerminal(event,{js_path})">'
+        f"{_ICON_SVGS['integrated_terminal']}</button>"
+    )
     return f'<div class="git-actions">{"".join(items_html)}</div>'
 
 

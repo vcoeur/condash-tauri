@@ -1079,7 +1079,7 @@ body {
    rows regardless of button state. */
 .git-actions {
     display: flex; gap: 4px; flex-shrink: 0;
-    width: 102px;
+    width: 136px;
 }
 .git-action-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1515,6 +1515,31 @@ async function openPath(ev, path, tool) {
     }
 }
 
+/* Open the integrated terminal pane and spawn a fresh tab cwd'd at the
+   given path. The button lives next to the "open with" slots on every
+   git row; path is the same absolute directory those slots use, and is
+   re-validated server-side against the workspace/worktrees sandbox
+   before the pty is forked. */
+function openInTerminal(ev, path) {
+    if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+    var pane = document.getElementById('term-pane');
+    if (pane.hasAttribute('hidden')) {
+        pane.removeAttribute('hidden');
+        localStorage.setItem('term-open', '1');
+    }
+    var side = _termLastFocused === 'right' ? 'right' : 'left';
+    // Default tab label to the target directory basename so several tabs
+    // opened from different repos are visually distinct. Writes to
+    // customName, so double-click-to-rename still overrides it and the
+    // choice persists across reloads via _termPersistTabs.
+    var basename = String(path).replace(/\/+$/, '').split('/').pop() || '';
+    _termCreateTab(side, {cwd: path, customName: basename});
+    setTimeout(function() {
+        var tab = _termActiveTab();
+        if (tab) { _termSendResize(tab); tab.term.focus(); }
+    }, 0);
+}
+
 /* --- Collapsible submodule groups ---
    Toggles the .git-submodules container that sits immediately after a
    collapsible parent row. Button clicks inside the row stop propagation
@@ -1602,6 +1627,10 @@ function _persistTabState() {
 function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
     if ((_itemsStale || _gitStale) && tab !== _activeTab) {
+        // Commit the new tab first so _reloadInPlace's post-swap
+        // _rebindDashHandlers → switchTab(_activeTab) lands on it —
+        // otherwise the user has to click the tab a second time.
+        _activeTab = tab;
         _reloadInPlace();
         return;
     }
@@ -2428,7 +2457,9 @@ async function updateBaseline() {
         if (!res.ok) return;
         var data = await res.json();
         _lastFingerprint = data.fingerprint;
+        _lastGitFingerprint = data.git_fingerprint;
         _itemsStale = false;
+        _gitStale = false;
         _renderStale();
     } catch (e) {}
 }
@@ -2765,10 +2796,13 @@ function _termCreateTab(side, opts) {
 
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var wsUrl = proto + '//' + location.host + '/ws/term';
-    // Reattach path: pass the persisted session_id so the server binds this
-    // ws to the existing pty + replays its ring buffer instead of forking a
-    // fresh shell.
+    // Reattach path: session_id binds the ws to an existing pty + replays
+    // its ring buffer. Spawn path: cwd (when set) asks the server to fork
+    // the new shell in that directory; it's sandbox-validated server-side
+    // and silently ignored if invalid. The two are mutually exclusive —
+    // cwd has no meaning when reattaching.
     if (opts.session_id) wsUrl += '?session_id=' + encodeURIComponent(opts.session_id);
+    else if (opts.cwd) wsUrl += '?cwd=' + encodeURIComponent(opts.cwd);
     var ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     var tab = {

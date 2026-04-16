@@ -476,7 +476,18 @@ def _register_routes() -> None:
                 pass
 
         if session is None:
-            session = await _spawn_pty_session()
+            requested_cwd = ws.query_params.get("cwd") or None
+            override_cwd: str | None = None
+            if requested_cwd:
+                validated = legacy._validate_open_path(requested_cwd)
+                if validated is not None:
+                    override_cwd = str(validated)
+                else:
+                    print(
+                        f"[term] rejecting out-of-sandbox cwd: {requested_cwd!r}",
+                        file=sys.stderr,
+                    )
+            session = await _spawn_pty_session(override_cwd=override_cwd)
             if session is None:
                 try:
                     await ws.close()
@@ -513,14 +524,17 @@ def _register_routes() -> None:
         await _attach_ws(session, ws)
 
 
-async def _spawn_pty_session() -> PtySession | None:
+async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | None:
     """Fork a new shell in a pty, register it, and start its reader pump.
 
-    The child starts cwd'd at ``conception_path`` (else ``$HOME``) with
+    The child starts cwd'd at ``override_cwd`` (when supplied and the
+    directory exists), else ``conception_path`` (else ``$HOME``) with
     ``TERM=xterm-256color`` and is launched with ``-l`` so login rc-files
-    run. The pty's lifetime is independent of any WebSocket; the reader
-    pump keeps draining ``fd`` into ``session.buffer`` (and to
-    ``session.attached_ws`` if one is bound) until the shell exits.
+    run. ``override_cwd`` must already be sandbox-validated by the caller
+    — this function trusts it and does not re-check. The pty's lifetime
+    is independent of any WebSocket; the reader pump keeps draining
+    ``fd`` into ``session.buffer`` (and to ``session.attached_ws`` if one
+    is bound) until the shell exits.
     """
     import pty
 
@@ -529,7 +543,10 @@ async def _spawn_pty_session() -> PtySession | None:
         if _RUNTIME_CFG is not None
         else os.environ.get("SHELL") or "/bin/bash"
     )
-    cwd = str(legacy.BASE_DIR) if legacy.BASE_DIR.is_dir() else os.path.expanduser("~")
+    if override_cwd and os.path.isdir(override_cwd):
+        cwd = override_cwd
+    else:
+        cwd = str(legacy.BASE_DIR) if legacy.BASE_DIR.is_dir() else os.path.expanduser("~")
 
     pid, fd = pty.fork()
     if pid == 0:
