@@ -421,11 +421,21 @@ body {
 .term-mount { flex: 1; min-height: 0; padding: 4px 6px; }
 .term-mount .xterm { height: 100%; }
 
+/* Splitter: 9px hit-area with a 1px theme-aware hairline centred inside.
+   The inset top/bottom keeps the line from touching the tab strip or the
+   pane bottom. Combined with .term-mount's 6px horizontal padding this
+   gives ~10px total gutter between the two panes' xterm cell grids. */
 .term-splitter {
-    width: 5px; flex: 0 0 auto; background: #2a2b30; cursor: col-resize;
+    width: 9px; flex: 0 0 auto; cursor: col-resize;
+    position: relative; background: transparent;
+}
+.term-splitter::before {
+    content: "";
+    position: absolute; top: 6px; bottom: 6px; left: 4px;
+    width: 1px; background: var(--border);
     transition: background 0.1s;
 }
-.term-splitter:hover { background: var(--accent); }
+.term-splitter:hover::before { background: var(--accent); }
 .term-splitter[hidden] { display: none; }
 
 /* Tab strip — one chip per open pty. The active chip matches the pane
@@ -1047,7 +1057,11 @@ body {
 </style>
 </head>
 <body>
-<div class="app">
+<!-- #dash-main wraps all server-rendered content so _reloadInPlace() can
+     swap it without touching the terminal pane (a sibling below) or any
+     modal. Inline onclick handlers inside this block survive the swap;
+     document/window-level listeners are never invalidated. -->
+<div id="dash-main" class="app">
 <div class="topbar">
     <div class="tabs tabs-primary">
         <div class="tab active" data-tab="projects" onclick="switchTab('projects')">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
@@ -1410,8 +1424,12 @@ async function saveConfig(ev) {
             warnEl.textContent = 'Saved. The following changes need a condash restart to take effect: ' + restart.join(', ') + '. Reloading…';
             warnEl.style.display = 'block';
         }
-        // Brief pause so the user sees the warning, then refresh.
-        setTimeout(function(){ location.reload(); }, restart.length ? 1500 : 200);
+        // Brief pause so the user sees the warning, then refresh. When a
+        // restart is required (port change, etc.) we need a real reload so
+        // the browser talks to the new process; otherwise an in-place
+        // swap is enough and preserves terminal state.
+        var refresh = restart.length ? function(){ location.reload(); } : _reloadInPlace;
+        setTimeout(refresh, restart.length ? 1500 : 200);
     } catch (e) {
         errEl.textContent = 'Save failed: ' + e;
         errEl.style.display = 'block';
@@ -1538,7 +1556,7 @@ function _persistTabState() {
 function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
     if ((_itemsStale || _gitStale) && tab !== _activeTab) {
-        location.reload();
+        _reloadInPlace();
         return;
     }
     _activeTab = tab;
@@ -1592,7 +1610,7 @@ async function pickPriority(file, val, wrap) {
     });
     if (!res.ok) return;
     var result = await res.json();
-    if (result.moved) { location.reload(); return; }
+    if (result.moved) { _reloadInPlace(); return; }
     cur.className = 'pri-current pri-' + val;
     cur.textContent = val;
     card.setAttribute('data-priority', val);
@@ -1606,6 +1624,74 @@ async function pickPriority(file, val, wrap) {
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.pri-wrap')) closePriMenus();
 });
+
+/* In-place refresh: refetch /, parse the fresh HTML, swap #dash-main
+   into place, and re-apply tab/subtab state + counters. Used instead of
+   location.reload() by mutations that only change dashboard content
+   (toggling a step, reordering, tidy, …). Keeps:
+   - the terminal pane (sibling of #dash-main, with its own pty session
+     state preserved server-side by Fix B anyway),
+   - open modals (also siblings of #dash-main),
+   - window and document-level event listeners,
+   - scroll position and focus/selection inside dash-main, restored
+     after swap.
+   Falls back to location.reload() on any error so the user never ends
+   up looking at a half-swapped DOM. */
+async function _reloadInPlace() {
+    try {
+        var res = await fetch('/', {cache: 'no-store'});
+        if (!res.ok) { location.reload(); return; }
+        var html = await res.text();
+        var fresh = new DOMParser()
+            .parseFromString(html, 'text/html')
+            .getElementById('dash-main');
+        var current = document.getElementById('dash-main');
+        if (!fresh || !current) { location.reload(); return; }
+
+        var winY = window.scrollY;
+        var mainScroll = document.getElementById('main-scroll');
+        var mainY = mainScroll ? mainScroll.scrollTop : 0;
+        // Best-effort focus/selection restore for text inputs by id.
+        var focusId = null, focusSel = null;
+        var active = document.activeElement;
+        if (active && current.contains(active) && active.id) {
+            focusId = active.id;
+            try { focusSel = {start: active.selectionStart, end: active.selectionEnd}; }
+            catch (e) {}
+        }
+
+        current.replaceWith(fresh);
+        _rebindDashHandlers();
+
+        window.scrollTo(0, winY);
+        var newMainScroll = document.getElementById('main-scroll');
+        if (newMainScroll) newMainScroll.scrollTop = mainY;
+        if (focusId) {
+            var el = document.getElementById(focusId);
+            if (el) {
+                el.focus();
+                if (focusSel && el.setSelectionRange) {
+                    try { el.setSelectionRange(focusSel.start, focusSel.end); }
+                    catch (e) {}
+                }
+            }
+        }
+    } catch (e) {
+        location.reload();
+    }
+}
+
+/* Re-apply state to the freshly-swapped #dash-main. Inline onclick
+   attributes inside the new HTML are already wired by the browser;
+   document/window-level listeners never went away. What's left is to
+   restore the active primary/sub tab selection and refresh counters
+   + the "stale" reload-indicator baseline. */
+function _rebindDashHandlers() {
+    switchTab(_activeTab);
+    if (_activeTab === 'projects') switchSubtab(_activeSubtab);
+    updateTabCounts();
+    updateBaseline();
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     var params = new URLSearchParams(location.search);
@@ -2292,7 +2378,7 @@ async function reloadAndTidy() {
             body: '{}'
         });
     } catch (e) {}
-    location.reload();
+    _reloadInPlace();
 }
 
 /* --- Embedded terminal (multi-tab) ---
@@ -2397,6 +2483,11 @@ var _termLastFocused = 'left';
 function _termSendResize(tab) {
     if (!tab) tab = _termActiveTab();
     if (!tab || !tab.fit || !tab.ws || tab.ws.readyState !== WebSocket.OPEN) return;
+    // Never fit a mount that isn't laid out — inactive tabs (display:none)
+    // and tabs on a hidden side have clientHeight 0. FitAddon on a zero
+    // box returns bogus dims and leaves xterm's viewport wedged, so the
+    // scrollbar thumb/height stops matching the real scrollback.
+    if (!tab.mount.clientHeight || !tab.mount.clientWidth) return;
     try {
         tab.fit.fit();
         tab.ws.send(JSON.stringify({type: 'resize', cols: tab.term.cols, rows: tab.term.rows}));
@@ -2405,6 +2496,32 @@ function _termSendResize(tab) {
 
 function _termSendResizeAll() {
     _termTabs.forEach(function(t) { _termSendResize(t); });
+}
+
+/* Persist the open-tab list so a page refresh can reattach to the same
+   backend ptys. Only tabs that have received their server-assigned
+   session_id are persisted — an unacknowledged tab has no ID to reattach
+   to and would just spawn a fresh (different) shell on reload. */
+function _termPersistTabs() {
+    var entries = _termTabs
+        .filter(function(t) { return !!t.session_id; })
+        .map(function(t) {
+            return {session_id: t.session_id, side: t.side, customName: t.customName || ''};
+        });
+    try { localStorage.setItem('term-tabs', JSON.stringify(entries)); } catch (e) {}
+    var leftActive = null, rightActive = null;
+    _termTabs.forEach(function(t) {
+        if (!t.session_id) return;
+        if (_termActive[t.side] !== t.id) return;
+        if (t.side === 'left') leftActive = t.session_id;
+        else rightActive = t.session_id;
+    });
+    try {
+        if (leftActive) localStorage.setItem('term-active-left', leftActive);
+        else localStorage.removeItem('term-active-left');
+        if (rightActive) localStorage.setItem('term-active-right', rightActive);
+        else localStorage.removeItem('term-active-right');
+    } catch (e) {}
 }
 
 function _termShellLabel(tab) {
@@ -2425,8 +2542,16 @@ function _termSetActive(id) {
         t.button.classList.toggle('active', active);
     });
     _termShellLabel(tab);
-    _termSendResize(tab);
-    tab.term.focus();
+    // Defer the fit: the just-activated mount flipped from display:none to
+    // display:block one line above, but the browser hasn't reflowed yet in
+    // this synchronous tick. rAF lets the layout settle so FitAddon sees
+    // real dimensions (otherwise clientHeight === 0 → bogus cols/rows,
+    // stale scrollbar thumb until the next window resize).
+    requestAnimationFrame(function() {
+        _termSendResize(tab);
+        tab.term.focus();
+    });
+    _termPersistTabs();
 }
 
 function _termRenderTabChip(tab) {
@@ -2471,7 +2596,10 @@ function _termStartRename(tab) {
     input.value = tab.customName || _termDefaultLabel(tab);
     input.style.width = Math.max(60, tab.labelEl.offsetWidth + 20) + 'px';
     var commit = function(save) {
-        if (save) tab.customName = input.value.trim();
+        if (save) {
+            tab.customName = input.value.trim();
+            _termPersistTabs();
+        }
         if (input.parentNode) {
             tab.button.insertBefore(tab.labelEl, input);
             input.parentNode.removeChild(input);
@@ -2503,9 +2631,10 @@ function _termShowSide(side, show) {
     else splitter.setAttribute('hidden', '');
 }
 
-function _termCreateTab(side) {
+function _termCreateTab(side, opts) {
     if (!_termAssetsReady()) { _termWarnAssets(); return; }
     side = side === 'right' ? 'right' : 'left';
+    opts = opts || {};
     var id = _termNextId++;
     var mount = document.createElement('div');
     mount.className = 'term-mount-session';
@@ -2569,20 +2698,37 @@ function _termCreateTab(side) {
     });
 
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var ws = new WebSocket(proto + '//' + location.host + '/ws/term');
+    var wsUrl = proto + '//' + location.host + '/ws/term';
+    // Reattach path: pass the persisted session_id so the server binds this
+    // ws to the existing pty + replays its ring buffer instead of forking a
+    // fresh shell.
+    if (opts.session_id) wsUrl += '?session_id=' + encodeURIComponent(opts.session_id);
+    var ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
-    var tab = {id: id, side: side, term: term, fit: fit, ws: ws, mount: mount, shell: '', customName: ''};
+    var tab = {
+        id: id, side: side, term: term, fit: fit, ws: ws, mount: mount,
+        shell: '', customName: opts.customName || '',
+        session_id: opts.session_id || null,
+    };
 
     ws.onopen = function() { _termSendResize(tab); };
     ws.onmessage = function(ev) {
         if (typeof ev.data === 'string') {
             try {
                 var obj = JSON.parse(ev.data);
-                if (obj.type === 'error' && obj.message) {
+                if (obj.type === 'session-expired') {
+                    // Server doesn't know this session (usually: condash
+                    // restarted). Drop the stale tab so the user doesn't
+                    // sit in front of an unusable pane. localStorage is
+                    // rewritten by _termCloseTab → _termPersistTabs.
+                    _termCloseTab(tab.id);
+                } else if (obj.type === 'error' && obj.message) {
                     term.write('\r\n\x1b[31m' + obj.message + '\x1b[0m\r\n');
                 } else if (obj.type === 'info') {
-                    tab.shell = obj.shell || '';
+                    tab.session_id = obj.session_id || tab.session_id;
+                    tab.shell = obj.shell || tab.shell;
                     _termRefreshLabel(tab);
+                    _termPersistTabs();
                     if (_termActive[tab.side] === tab.id) _termShellLabel(tab);
                 } else if (obj.type === 'exit') {
                     _termCloseTab(tab.id);
@@ -2603,8 +2749,17 @@ function _termCreateTab(side) {
 
     _termRenderTabChip(tab);
     _termTabs.push(tab);
+    // _termShowSide at the top of this function ran before the push, so
+    // _termTabsOn(side).length was 0 for the in-flight tab on the first
+    // right-side create → the splitter stayed hidden. Re-run it now that
+    // the tab is counted.
+    _termShowSide(side, true);
     fit.fit();
     _termSetActive(id);
+    // Revealing the other side (flex 100% → flex share) shrinks any
+    // existing tabs on this side too; mirror the close path's refit-all
+    // so their xterm cols match the new layout.
+    setTimeout(_termSendResizeAll, 0);
 }
 
 function _termCloseTab(id) {
@@ -2641,6 +2796,7 @@ function _termCloseTab(id) {
     }
     // Re-fit the surviving side so its xterm fills the reclaimed space.
     setTimeout(_termSendResizeAll, 0);
+    _termPersistTabs();
 }
 
 function termNewTab(side) {
@@ -2805,18 +2961,51 @@ document.addEventListener('keydown', function(ev) {
 
 _loadTermShortcut();
 
-// Restore persisted height + open state on load.
+// Restore persisted height + open state + any live pty sessions on load.
 (function restoreTerm() {
     var saved = localStorage.getItem('term-height');
     if (saved) document.documentElement.style.setProperty('--term-height', saved);
-    if (localStorage.getItem('term-open') === '1') {
-        document.addEventListener('DOMContentLoaded', function() {
-            // Defer until xterm scripts have loaded (they use `defer`).
-            window.addEventListener('load', function() {
-                if (typeof Terminal !== 'undefined') toggleTerminal();
-            }, {once: true});
-        });
-    }
+    if (localStorage.getItem('term-open') !== '1') return;
+
+    var persisted = [];
+    try {
+        var raw = localStorage.getItem('term-tabs');
+        if (raw) persisted = JSON.parse(raw);
+        if (!Array.isArray(persisted)) persisted = [];
+    } catch (e) { persisted = []; }
+    var leftActive = localStorage.getItem('term-active-left') || null;
+    var rightActive = localStorage.getItem('term-active-right') || null;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Defer until xterm scripts have loaded (they use `defer`).
+        window.addEventListener('load', function() {
+            if (typeof Terminal === 'undefined') return;
+            var pane = document.getElementById('term-pane');
+            pane.removeAttribute('hidden');
+            if (persisted.length === 0) {
+                // No sessions recorded (fresh open, or first run after
+                // this feature shipped) — preserve the old behaviour of
+                // spawning one fresh left tab.
+                _termCreateTab('left');
+                return;
+            }
+            persisted.forEach(function(entry) {
+                if (!entry || typeof entry !== 'object') return;
+                if (!entry.session_id) return;
+                _termCreateTab(entry.side === 'right' ? 'right' : 'left', {
+                    session_id: entry.session_id,
+                    customName: entry.customName || '',
+                });
+            });
+            // Restore which tab is active per side. Match by session_id
+            // because the in-memory `id` is assigned fresh each page load.
+            _termTabs.forEach(function(t) {
+                if (!t.session_id) return;
+                if (t.side === 'left' && t.session_id === leftActive) _termSetActive(t.id);
+                else if (t.side === 'right' && t.session_id === rightActive) _termSetActive(t.id);
+            });
+        }, {once: true});
+    });
 })();
 
 checkUpdates();

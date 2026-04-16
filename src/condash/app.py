@@ -9,10 +9,15 @@ FastAPI instance.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import os
+import secrets
 import signal
+import struct
 import sys
+import termios
+from dataclasses import dataclass, field
 from importlib.resources import files as _package_files
 from pathlib import Path
 
@@ -33,6 +38,41 @@ from .config import (
 # successful POST /config without forcing a process restart. Initialized by
 # `run` before NiceGUI starts.
 _RUNTIME_CFG: CondashConfig | None = None
+
+# --- Pty session registry --------------------------------------------------
+#
+# The old code bound a pty's lifetime 1:1 to its WebSocket: the `finally`
+# block in the WS handler SIGTERM'd the child whenever the socket
+# disconnected, so any page refresh killed every open shell. We now keep
+# ptys in a process-wide registry keyed by an opaque session_id; the
+# WebSocket attaches/detaches without touching the child. A ring buffer per
+# session preserves the last _PTY_BUFFER_CAP bytes of output so a reattach
+# can replay recent scrollback immediately.
+
+# Ring-buffer cap. 256 KiB fits a few screens of scrollback per tab; beyond
+# that we trim from the head. Bound so a detached tab that produces fast
+# output can't grow memory unboundedly.
+_PTY_BUFFER_CAP = 256 * 1024
+
+
+@dataclass
+class PtySession:
+    """Server-side pty + its ring buffer. Decoupled from any WebSocket."""
+
+    session_id: str
+    pid: int
+    fd: int
+    shell: str
+    cwd: str
+    cols: int = 80
+    rows: int = 24
+    buffer: bytearray = field(default_factory=bytearray)
+    out_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    attached_ws: WebSocket | None = None
+    pump_task: asyncio.Task | None = None
+
+
+_PTY_SESSIONS: dict[str, PtySession] = {}
 
 
 def icon_path() -> str:
@@ -71,6 +111,8 @@ def _error(status: int, message: str) -> JSONResponse:
 
 def _register_routes() -> None:
     """Attach all API routes to NiceGUI's FastAPI instance."""
+
+    _ng_app.on_shutdown(_reap_all_pty_sessions)
 
     @_ng_app.get("/", response_class=HTMLResponse)
     def index():
@@ -383,11 +425,15 @@ def _register_routes() -> None:
 
     @_ng_app.websocket("/ws/term")
     async def terminal_ws(ws: WebSocket):
-        """Back the bottom-pane terminal with a real pty.
+        """View a pty session over a WebSocket.
 
-        Spawns the user's shell inside a pty, bridges raw bytes both ways
-        over the WebSocket, and relays TIOCSWINSZ on resize control
-        frames. Linux + macOS only (Windows would need ConPTY).
+        If the URL carries ``?session_id=<id>`` and that session exists, the
+        client is attaching to an existing pty (typical after a page
+        refresh). Otherwise we spawn a fresh pty and tell the client its
+        new session id in the first ``info`` frame. Disconnection only
+        detaches the view — the pty keeps running and buffering output.
+
+        Linux + macOS only (Windows would need ConPTY).
         """
         await ws.accept()
         if sys.platform not in ("linux", "darwin"):
@@ -396,25 +442,87 @@ def _register_routes() -> None:
             )
             await ws.close()
             return
-        await _run_pty_session(ws)
+
+        requested_id = ws.query_params.get("session_id") or None
+        session = _PTY_SESSIONS.get(requested_id) if requested_id else None
+
+        if requested_id and session is None:
+            # Reattach to an unknown session — almost always "condash was
+            # restarted, the pty is long gone". Tell the client so it can
+            # drop the stale id from its localStorage instead of silently
+            # starting a new shell under the same tab.
+            try:
+                await ws.send_text(
+                    json.dumps({"type": "session-expired", "session_id": requested_id})
+                )
+            except Exception:
+                pass
+            try:
+                await ws.close()
+            except Exception:
+                pass
+            return
+
+        # If another tab is already viewing this session (e.g. two copies
+        # of the dashboard pointing at the same pty), boot the old viewer.
+        # The pty itself keeps running — only the displaced viewer's ws is
+        # closed.
+        if session is not None and session.attached_ws is not None:
+            old = session.attached_ws
+            session.attached_ws = None
+            try:
+                await old.close()
+            except Exception:
+                pass
+
+        if session is None:
+            session = await _spawn_pty_session()
+            if session is None:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+                return
+
+        session.attached_ws = ws
+        try:
+            await ws.send_text(
+                json.dumps(
+                    {
+                        "type": "info",
+                        "session_id": session.session_id,
+                        "shell": session.shell,
+                        "cwd": session.cwd,
+                    }
+                )
+            )
+        except Exception:
+            session.attached_ws = None
+            return
+
+        # Replay whatever the shell has emitted since the last viewer
+        # detached. One binary frame so xterm sees it as one chunk (cheap
+        # and fine for 256 KiB).
+        if session.buffer:
+            try:
+                await ws.send_bytes(bytes(session.buffer))
+            except Exception:
+                session.attached_ws = None
+                return
+
+        await _attach_ws(session, ws)
 
 
-async def _run_pty_session(ws: WebSocket) -> None:
-    """Fork a shell inside a pty and bridge it to ``ws`` until disconnect.
+async def _spawn_pty_session() -> PtySession | None:
+    """Fork a new shell in a pty, register it, and start its reader pump.
 
-    Binary frames carry raw bytes in both directions. Text frames are JSON
-    control messages; only ``{"type": "resize", "cols": N, "rows": M}`` is
-    handled today.
-
-    The child process starts cwd'd at ``conception_path`` (else ``$HOME``),
-    inherits the environment, and is launched with ``-l`` so the login
-    rc-files (`~/.bash_profile`, `~/.zprofile`, …) run as the user would
-    expect. On disconnect the child is terminated and reaped.
+    The child starts cwd'd at ``conception_path`` (else ``$HOME``) with
+    ``TERM=xterm-256color`` and is launched with ``-l`` so login rc-files
+    run. The pty's lifetime is independent of any WebSocket; the reader
+    pump keeps draining ``fd`` into ``session.buffer`` (and to
+    ``session.attached_ws`` if one is bound) until the shell exits.
     """
-    import fcntl
     import pty
-    import struct
-    import termios
 
     shell = (
         _resolve_terminal_shell(_RUNTIME_CFG)
@@ -422,11 +530,6 @@ async def _run_pty_session(ws: WebSocket) -> None:
         else os.environ.get("SHELL") or "/bin/bash"
     )
     cwd = str(legacy.BASE_DIR) if legacy.BASE_DIR.is_dir() else os.path.expanduser("~")
-    # Announce the resolved shell + cwd so the term header can surface them.
-    try:
-        await ws.send_text(json.dumps({"type": "info", "shell": shell, "cwd": cwd}))
-    except Exception:
-        return
 
     pid, fd = pty.fork()
     if pid == 0:
@@ -446,8 +549,15 @@ async def _run_pty_session(ws: WebSocket) -> None:
     fl = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
+    session = PtySession(
+        session_id=secrets.token_urlsafe(8),
+        pid=pid,
+        fd=fd,
+        shell=shell,
+        cwd=cwd,
+    )
+
     loop = asyncio.get_running_loop()
-    out_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
 
     def _on_readable() -> None:
         try:
@@ -457,51 +567,83 @@ async def _run_pty_session(ws: WebSocket) -> None:
         except OSError:
             data = b""
         if not data:
-            out_queue.put_nowait(None)
+            session.out_queue.put_nowait(None)
             try:
                 loop.remove_reader(fd)
             except Exception:
                 pass
             return
-        out_queue.put_nowait(data)
+        session.out_queue.put_nowait(data)
 
     loop.add_reader(fd, _on_readable)
+    session.pump_task = asyncio.create_task(_pump_session(session))
+    _PTY_SESSIONS[session.session_id] = session
+    return session
 
-    async def pump_to_ws() -> None:
-        while True:
-            data = await out_queue.get()
-            if data is None:
-                break
-            try:
-                await ws.send_bytes(data)
-            except Exception:
-                break
 
-    pump = asyncio.create_task(pump_to_ws())
+async def _pump_session(session: PtySession) -> None:
+    """Drain the pty's read queue into the ring buffer + any attached ws.
 
-    try:
-        while True:
-            # Race ws.receive against the pump task: if pump finishes,
-            # the pty has EOF'd (shell exited) and we push an exit frame
-            # so the client can close its tab instead of waiting.
-            receive_task = asyncio.ensure_future(ws.receive())
-            done, _ = await asyncio.wait(
-                {receive_task, pump},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if pump in done:
-                receive_task.cancel()
-                try:
-                    await receive_task
-                except (asyncio.CancelledError, WebSocketDisconnect, Exception):
-                    pass
+    Runs for the pty's entire lifetime. On EOF (shell exited) unregisters
+    the session, sends an ``exit`` frame to whoever was viewing, and
+    reaps the child.
+    """
+    while True:
+        data = await session.out_queue.get()
+        if data is None:
+            # EOF — shell exited. Tear the session down.
+            _PTY_SESSIONS.pop(session.session_id, None)
+            ws = session.attached_ws
+            session.attached_ws = None
+            if ws is not None:
                 try:
                     await ws.send_text(json.dumps({"type": "exit"}))
                 except Exception:
                     pass
-                break
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
             try:
-                msg = receive_task.result()
+                os.close(session.fd)
+            except OSError:
+                pass
+            try:
+                os.waitpid(session.pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            return
+
+        # Append to ring buffer, trimming the head once we overshoot the
+        # cap. `del buffer[:n]` on a bytearray is O(n) but cheap at these
+        # sizes (256 KiB) and only runs when the buffer is actually full.
+        session.buffer.extend(data)
+        overflow = len(session.buffer) - _PTY_BUFFER_CAP
+        if overflow > 0:
+            del session.buffer[:overflow]
+
+        ws = session.attached_ws
+        if ws is not None:
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                # Viewer went away (e.g. F5). Detach so the next attach
+                # replays from the buffer; keep pty running.
+                if session.attached_ws is ws:
+                    session.attached_ws = None
+
+
+async def _attach_ws(session: PtySession, ws: WebSocket) -> None:
+    """Run the receive loop for a ws that is viewing ``session``.
+
+    Input bytes are written to the pty; resize frames relay TIOCSWINSZ.
+    On disconnect we only clear ``attached_ws`` — the pty keeps running,
+    output keeps going into the ring buffer, ready for the next attach.
+    """
+    try:
+        while True:
+            try:
+                msg = await ws.receive()
             except WebSocketDisconnect:
                 break
             mtype = msg.get("type")
@@ -509,7 +651,7 @@ async def _run_pty_session(ws: WebSocket) -> None:
                 break
             if msg.get("bytes"):
                 try:
-                    os.write(fd, msg["bytes"])
+                    os.write(session.fd, msg["bytes"])
                 except OSError:
                     break
                 continue
@@ -523,32 +665,33 @@ async def _run_pty_session(ws: WebSocket) -> None:
             if obj.get("type") == "resize":
                 cols = max(2, int(obj.get("cols") or 80))
                 rows = max(2, int(obj.get("rows") or 24))
+                session.cols, session.rows = cols, rows
                 try:
-                    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                    fcntl.ioctl(
+                        session.fd,
+                        termios.TIOCSWINSZ,
+                        struct.pack("HHHH", rows, cols, 0, 0),
+                    )
                 except OSError:
                     pass
+    except Exception:
+        pass
     finally:
+        # Detach only — pty stays alive for the next reconnect.
+        if session.attached_ws is ws:
+            session.attached_ws = None
+
+
+def _reap_all_pty_sessions() -> None:
+    """SIGTERM every live pty. Called on server shutdown."""
+    for session in list(_PTY_SESSIONS.values()):
         try:
-            loop.remove_reader(fd)
-        except Exception:
-            pass
-        pump.cancel()
-        try:
-            os.kill(pid, signal.SIGTERM)
+            os.kill(session.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
-        try:
-            os.close(fd)
         except OSError:
             pass
-        try:
-            os.waitpid(pid, os.WNOHANG)
-        except ChildProcessError:
-            pass
-        try:
-            await ws.close()
-        except Exception:
-            pass
+    _PTY_SESSIONS.clear()
 
 
 def _repo_entries(names: list[str], submodules: dict[str, list[str]]) -> list[dict]:
