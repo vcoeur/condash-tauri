@@ -310,13 +310,44 @@ h1 { font-size: 1.4rem; }
     padding: 4px 10px; font-size: 0.78rem; color: #bdbdbd;
     background: #17181c; border-bottom: 1px solid #2a2b30;
 }
-.term-title { font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
 .term-shell {
     font-family: ui-monospace, "SF Mono", "Menlo", monospace;
     font-size: 0.72rem; color: #8a8a92;
 }
 .term-spacer { flex: 1; }
-.term-header { gap: 0.7rem; }
+.term-header { gap: 0.45rem; }
+
+/* Tab strip — one chip per open pty. The active chip matches the pane
+   background so it visually flows into the mount area below. */
+.term-tabs { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.term-tab {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 3px 10px; border-radius: 4px 4px 0 0;
+    background: #1f2026; color: #b8b8c0;
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.73rem; cursor: pointer; user-select: none;
+    border: 1px solid transparent; border-bottom: 0;
+}
+.term-tab:hover { background: #262731; color: #e6e6ec; }
+.term-tab.active { background: #0b0b0e; color: #f0f0f5; }
+.term-tab-close {
+    background: transparent; border: none; color: inherit;
+    font-size: 0.9rem; line-height: 1; padding: 0 2px; cursor: pointer;
+    opacity: 0.6;
+}
+.term-tab-close:hover { opacity: 1; color: #ff8080; }
+.term-new-tab {
+    background: transparent; color: #8a8a92;
+    border: 1px dashed #3a3a44; border-radius: 4px;
+    font-size: 0.9rem; line-height: 1; padding: 0 8px; cursor: pointer;
+}
+.term-new-tab:hover { color: #e6e6ec; border-color: #6a6a74; }
+
+/* Each session has its own full-sized mount inside .term-mount. Hidden
+   sessions stop layout-contributing so the visible one gets the full
+   height. */
+.term-mount-session { height: 100%; display: none; }
+.term-mount-session.active { display: block; }
 .term-close {
     background: transparent; color: #bdbdbd; border: none;
     font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 4px;
@@ -956,10 +987,11 @@ h1 { font-size: 1.4rem; }
 <div id="term-pane" class="term-pane" hidden>
     <div class="term-handle" onmousedown="termDragStart(event)" title="Drag to resize"></div>
     <div class="term-header">
-        <span class="term-title">Terminal</span>
+        <div class="term-tabs" id="term-tabs"></div>
+        <button class="term-new-tab" onclick="termNewTab()" title="New terminal tab" aria-label="New terminal tab">+</button>
         <span class="term-shell" id="term-shell"></span>
         <span class="term-spacer"></span>
-        <button class="term-close" onclick="toggleTerminal()" aria-label="Close terminal">&times;</button>
+        <button class="term-close" onclick="toggleTerminal()" aria-label="Hide terminal">&times;</button>
     </div>
     <div id="term-mount" class="term-mount"></div>
 </div>
@@ -2083,57 +2115,103 @@ async function runTidy() {
     }
 }
 
-/* --- Embedded terminal ---
-   Lazy-initialised on first toggle: opens a WebSocket to /ws/term, wires
-   xterm.js bidirectionally, tracks size changes via FitAddon, and keeps
-   the pane height / open state in localStorage. */
-var _term = null;
-var _termFit = null;
-var _termWs = null;
+/* --- Embedded terminal (multi-tab) ---
+   Each tab owns its own xterm instance + pty WebSocket. Server sends an
+   `exit` info frame when the shell dies; client closes the tab. Closing
+   the last tab hides the pane. The pane's × and the toggle shortcut
+   hide/show the pane while leaving the tabs intact. */
+var _termTabs = [];           // [{id, term, fit, ws, mount, button, shell}]
+var _termActiveId = null;
+var _termNextId = 1;
+var _termAssetsWarned = false;
 
-function _termSendResize() {
-    if (!_termFit || !_termWs || _termWs.readyState !== WebSocket.OPEN) return;
+function _termAssetsReady() {
+    return typeof Terminal !== 'undefined' && typeof FitAddon !== 'undefined';
+}
+
+function _termWarnAssets() {
+    if (_termAssetsWarned) return;
+    _termAssetsWarned = true;
+    var mount = document.getElementById('term-mount');
+    mount.innerHTML = '<p style="color:#faa; padding: 1rem;">' +
+        'Terminal assets failed to load — xterm.js CDN unreachable?</p>';
+}
+
+function _termActive() {
+    return _termTabs.find(function(t) { return t.id === _termActiveId; }) || null;
+}
+
+function _termSendResize(tab) {
+    tab = tab || _termActive();
+    if (!tab || !tab.fit || !tab.ws || tab.ws.readyState !== WebSocket.OPEN) return;
     try {
-        _termFit.fit();
-        _termWs.send(JSON.stringify({
-            type: 'resize',
-            cols: _term.cols,
-            rows: _term.rows,
-        }));
+        tab.fit.fit();
+        tab.ws.send(JSON.stringify({type: 'resize', cols: tab.term.cols, rows: tab.term.rows}));
     } catch (e) {}
 }
 
-function _termInit() {
-    if (_term) return;
-    var mount = document.getElementById('term-mount');
-    if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
-        mount.innerHTML = '<p style="color:#faa; padding: 1rem;">' +
-            'Terminal assets failed to load — xterm.js CDN unreachable?</p>';
-        return;
+function _termShellLabel(tab) {
+    var label = document.getElementById('term-shell');
+    if (!label) return;
+    label.textContent = tab && tab.shell ? tab.shell : '';
+}
+
+function _termSetActive(id) {
+    _termActiveId = id;
+    _termTabs.forEach(function(t) {
+        var active = t.id === id;
+        t.mount.classList.toggle('active', active);
+        t.button.classList.toggle('active', active);
+    });
+    var tab = _termActive();
+    _termShellLabel(tab);
+    if (tab) {
+        _termSendResize(tab);
+        tab.term.focus();
     }
-    _term = new Terminal({
+}
+
+function _termRenderTabChip(tab) {
+    var btn = document.createElement('div');
+    btn.className = 'term-tab';
+    btn.onclick = function() { _termSetActive(tab.id); };
+    var label = document.createElement('span');
+    label.textContent = 'sh ' + tab.id;
+    btn.appendChild(label);
+    var close = document.createElement('button');
+    close.className = 'term-tab-close';
+    close.textContent = '\u00d7';
+    close.title = 'Close tab';
+    close.onclick = function(ev) { ev.stopPropagation(); _termCloseTab(tab.id); };
+    btn.appendChild(close);
+    tab.button = btn;
+    tab.labelEl = label;
+    document.getElementById('term-tabs').appendChild(btn);
+}
+
+function _termCreateTab() {
+    if (!_termAssetsReady()) { _termWarnAssets(); return; }
+    var id = _termNextId++;
+    var mount = document.createElement('div');
+    mount.className = 'term-mount-session';
+    document.getElementById('term-mount').appendChild(mount);
+    var term = new Terminal({
         convertEol: false,
         cursorBlink: true,
         fontFamily: 'ui-monospace, "SF Mono", "Menlo", monospace',
         fontSize: 13,
         theme: {background: '#0b0b0e', foreground: '#e6e6e6'},
     });
-    _termFit = new FitAddon.FitAddon();
-    _term.loadAddon(_termFit);
-    _term.open(mount);
-    _termFit.fit();
-    // xterm captures keys on its hidden <textarea> before they reach the
-    // document-level listener, so our toggle shortcut gets swallowed once
-    // focus is inside the terminal. Returning false from the custom key
-    // handler tells xterm to pass the event through. We also handle the
-    // toggle here directly — the document handler runs too, but both
-    // paths converge on toggleTerminal() and the `hidden` attribute
-    // check makes it idempotent.
-    _term.attachCustomKeyEventHandler(function(ev) {
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(mount);
+    // xterm swallows keys before they bubble. attachCustomKeyEventHandler
+    // runs inside xterm's keydown listener — return false + stopPropagation
+    // so our shortcut closes the pane from inside the active tab without
+    // the document handler firing a second toggle.
+    term.attachCustomKeyEventHandler(function(ev) {
         if (ev.type === 'keydown' && _termShortcut && _matchShortcut(ev, _termShortcut)) {
             ev.preventDefault();
-            // stopPropagation so the document-level listener doesn't fire
-            // a second toggle (re-opening the pane we just closed).
             ev.stopPropagation();
             toggleTerminal();
             return false;
@@ -2142,35 +2220,77 @@ function _termInit() {
     });
 
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    _termWs = new WebSocket(proto + '//' + location.host + '/ws/term');
-    _termWs.binaryType = 'arraybuffer';
-    _termWs.onopen = function() {
-        _termSendResize();
-    };
-    _termWs.onmessage = function(ev) {
+    var ws = new WebSocket(proto + '//' + location.host + '/ws/term');
+    ws.binaryType = 'arraybuffer';
+    var tab = {id: id, term: term, fit: fit, ws: ws, mount: mount, shell: ''};
+
+    ws.onopen = function() { _termSendResize(tab); };
+    ws.onmessage = function(ev) {
         if (typeof ev.data === 'string') {
             try {
                 var obj = JSON.parse(ev.data);
                 if (obj.type === 'error' && obj.message) {
-                    _term.write('\r\n\x1b[31m' + obj.message + '\x1b[0m\r\n');
+                    term.write('\r\n\x1b[31m' + obj.message + '\x1b[0m\r\n');
                 } else if (obj.type === 'info') {
-                    var label = document.getElementById('term-shell');
-                    if (label) label.textContent = obj.shell || '';
+                    tab.shell = obj.shell || '';
+                    if (tab.labelEl) {
+                        var base = (tab.shell.split('/').pop() || 'sh');
+                        tab.labelEl.textContent = base + ' ' + tab.id;
+                    }
+                    if (_termActiveId === tab.id) _termShellLabel(tab);
+                } else if (obj.type === 'exit') {
+                    _termCloseTab(tab.id);
                 }
             } catch (e) {}
             return;
         }
-        _term.write(new Uint8Array(ev.data));
+        term.write(new Uint8Array(ev.data));
     };
-    _termWs.onclose = function() {
-        if (_term) _term.write('\r\n\x1b[2m[terminal session ended]\x1b[0m\r\n');
+    ws.onclose = function() {
+        // Covers both explicit exits and abnormal drops. _termCloseTab is
+        // idempotent (no-op if the tab is already gone).
+        _termCloseTab(tab.id);
     };
-    _term.onData(function(data) {
-        if (_termWs && _termWs.readyState === WebSocket.OPEN) {
-            _termWs.send(new TextEncoder().encode(data));
-        }
+    term.onData(function(data) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
     });
-    window.addEventListener('resize', _termSendResize);
+
+    _termRenderTabChip(tab);
+    _termTabs.push(tab);
+    fit.fit();
+    _termSetActive(id);
+}
+
+function _termCloseTab(id) {
+    var idx = _termTabs.findIndex(function(t) { return t.id === id; });
+    if (idx < 0) return;
+    var tab = _termTabs[idx];
+    try { tab.ws.close(); } catch (e) {}
+    try { tab.term.dispose(); } catch (e) {}
+    if (tab.mount && tab.mount.parentNode) tab.mount.parentNode.removeChild(tab.mount);
+    if (tab.button && tab.button.parentNode) tab.button.parentNode.removeChild(tab.button);
+    _termTabs.splice(idx, 1);
+    if (_termTabs.length === 0) {
+        // Last tab gone — hide the pane. Next reopen spawns a fresh tab.
+        var pane = document.getElementById('term-pane');
+        pane.setAttribute('hidden', '');
+        localStorage.removeItem('term-open');
+        _termActiveId = null;
+        _termShellLabel(null);
+        return;
+    }
+    if (_termActiveId === id) {
+        _termSetActive(_termTabs[_termTabs.length - 1].id);
+    }
+}
+
+function termNewTab() {
+    var pane = document.getElementById('term-pane');
+    if (pane.hasAttribute('hidden')) {
+        pane.removeAttribute('hidden');
+        localStorage.setItem('term-open', '1');
+    }
+    _termCreateTab();
 }
 
 function toggleTerminal() {
@@ -2179,14 +2299,18 @@ function toggleTerminal() {
     if (opening) {
         pane.removeAttribute('hidden');
         localStorage.setItem('term-open', '1');
-        _termInit();
-        setTimeout(_termSendResize, 0);
-        if (_term) _term.focus();
+        if (_termTabs.length === 0) _termCreateTab();
+        setTimeout(function() {
+            var tab = _termActive();
+            if (tab) { _termSendResize(tab); tab.term.focus(); }
+        }, 0);
     } else {
         pane.setAttribute('hidden', '');
         localStorage.removeItem('term-open');
     }
 }
+
+window.addEventListener('resize', function() { _termSendResize(); });
 
 /* Drag-resize: adjust the --term-height CSS variable while dragging, then
    persist the final value. */

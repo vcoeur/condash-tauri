@@ -444,8 +444,27 @@ async def _run_pty_session(ws: WebSocket) -> None:
 
     try:
         while True:
+            # Race ws.receive against the pump task: if pump finishes,
+            # the pty has EOF'd (shell exited) and we push an exit frame
+            # so the client can close its tab instead of waiting.
+            receive_task = asyncio.ensure_future(ws.receive())
+            done, _ = await asyncio.wait(
+                {receive_task, pump},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if pump in done:
+                receive_task.cancel()
+                try:
+                    await receive_task
+                except (asyncio.CancelledError, WebSocketDisconnect, Exception):
+                    pass
+                try:
+                    await ws.send_text(json.dumps({"type": "exit"}))
+                except Exception:
+                    pass
+                break
             try:
-                msg = await ws.receive()
+                msg = receive_task.result()
             except WebSocketDisconnect:
                 break
             mtype = msg.get("type")
@@ -488,6 +507,10 @@ async def _run_pty_session(ws: WebSocket) -> None:
         try:
             os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
+            pass
+        try:
+            await ws.close()
+        except Exception:
             pass
 
 
