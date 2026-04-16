@@ -210,6 +210,34 @@ def _register_routes() -> None:
             return {"ok": True}
         return _error(500, f"could not launch {tool}")
 
+    @_ng_app.post("/open-doc")
+    async def open_doc(req: Request):
+        """Hand a conception-tree file to the OS default viewer.
+
+        Accepts a path relative to ``conception_path``; rejects anything that
+        resolves outside of it. Used by note-body links so that PDFs, images,
+        and other non-markdown files open in the user's native viewer instead
+        of the dashboard's webview.
+        """
+        data = await req.json()
+        resolved = legacy._validate_doc_path(data.get("path", ""))
+        if not resolved:
+            return _error(400, "invalid path")
+        if legacy._os_open(resolved):
+            return {"ok": True}
+        return _error(500, "could not launch system opener")
+
+    @_ng_app.post("/open-external")
+    async def open_external(req: Request):
+        """Open an http(s) URL in the user's default browser."""
+        data = await req.json()
+        url = str(data.get("url") or "").strip()
+        if not legacy._is_external_url(url):
+            return _error(400, "invalid url")
+        if legacy._open_external(url):
+            return {"ok": True}
+        return _error(500, "could not launch browser")
+
     @_ng_app.post("/tidy")
     async def tidy(_req: Request):
         moves = legacy._tidy()

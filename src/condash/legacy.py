@@ -877,6 +877,11 @@ _VALID_NOTE_RE = re.compile(
     r"(?:notes/[\w.-]+|README)\.md$"
 )
 
+# Knowledge pages live outside the date-prefixed item structure. Match
+# `knowledge/<file>.md` at the root (apps.md, conventions.md) and
+# `knowledge/<subdir>/<file>.md` (topics/, external/, internal/, …).
+_VALID_KNOWLEDGE_NOTE_RE = re.compile(r"^knowledge/(?:[\w.-]+/)?[\w.-]+\.md$")
+
 _VALID_ASSET_RE = re.compile(
     r"^(?:incidents|projects|documents)/"
     r"(?:\d{4}-\d{2}/)?"
@@ -913,12 +918,126 @@ def _rewrite_img_src(html, note_dir_rel):
     return _IMG_SRC_RE.sub(sub, html)
 
 
+_WIKILINK_RE = re.compile(r"\[\[([^\]\|\n]+?)(?:\|([^\]\n]+?))?\]\]")
+
+# Match short item slugs ("my-project") vs directory-name slugs
+# ("2026-04-16-my-project"). Used by the wikilink resolver.
+_DATE_SLUG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+_ITEM_TYPE_NORMAL = {
+    "project": "projects",
+    "projects": "projects",
+    "incident": "incidents",
+    "incidents": "incidents",
+    "document": "documents",
+    "documents": "documents",
+}
+
+
+def _find_item_dir(type_plural: str, target: str) -> str | None:
+    """Look up a single item directory by exact name or short-name match.
+
+    Scans both the type's top-level and any `YYYY-MM/` archive folders.
+    Prefers the most recent directory when several short-names collide.
+    """
+    root = BASE_DIR / type_plural
+    if not root.is_dir():
+        return None
+    candidates: list[str] = []
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name == target or (_DATE_SLUG_RE.match(child.name) and child.name[11:] == target):
+            candidates.append(child.name)
+        if re.match(r"^\d{4}-\d{2}$", child.name):
+            for grand in child.iterdir():
+                if not grand.is_dir():
+                    continue
+                if grand.name == target or (
+                    _DATE_SLUG_RE.match(grand.name) and grand.name[11:] == target
+                ):
+                    candidates.append(f"{child.name}/{grand.name}")
+    if not candidates:
+        return None
+    return max(candidates)  # sorts by date thanks to the YYYY-MM[-DD] prefix
+
+
+def _resolve_wikilink(target: str) -> str | None:
+    """Resolve a `[[target]]` to a conception-relative path, if it exists.
+
+    Resolution order:
+    1. Prefixed item reference: `project/<slug>`, `incidents/<slug>`, etc.
+    2. Knowledge path: `knowledge/topics/foo` or `knowledge/foo`.
+    3. Short slug across all three item kinds — most recent wins.
+    4. Short knowledge page across `topics/`, `external/`, `internal/` and
+       the root `apps.md` / `conventions.md`.
+    """
+    target = target.strip()
+    if not target:
+        return None
+
+    if "/" in target:
+        head, _, tail = target.partition("/")
+        type_pl = _ITEM_TYPE_NORMAL.get(head)
+        if type_pl:
+            found = _find_item_dir(type_pl, tail)
+            if found:
+                return f"{type_pl}/{found}/README.md"
+        if head == "knowledge":
+            path = target if target.endswith(".md") else f"{target}.md"
+            if (BASE_DIR / path).is_file():
+                return path
+
+    for type_pl in ("projects", "incidents", "documents"):
+        found = _find_item_dir(type_pl, target)
+        if found:
+            return f"{type_pl}/{found}/README.md"
+
+    for sub in ("topics", "external", "internal"):
+        candidate = BASE_DIR / "knowledge" / sub / f"{target}.md"
+        if candidate.is_file():
+            return f"knowledge/{sub}/{target}.md"
+    for root_file in ("apps.md", "conventions.md"):
+        if target == root_file.removesuffix(".md"):
+            candidate = BASE_DIR / "knowledge" / root_file
+            if candidate.is_file():
+                return f"knowledge/{root_file}"
+
+    return None
+
+
+def _preprocess_wikilinks(text: str) -> str:
+    """Rewrite `[[target]]` / `[[target|label]]` into raw-HTML anchors.
+
+    Pandoc GFM passes raw HTML through unchanged, so emitting the final
+    `<a>` here keeps the rendering pipeline single-pass. Resolved links
+    get class `wikilink`; misses get `wikilink-missing` and no href so the
+    webview doesn't try to navigate.
+    """
+
+    def repl(match: re.Match) -> str:
+        target = match.group(1).strip()
+        label = (match.group(2) or target).strip()
+        resolved = _resolve_wikilink(target)
+        if resolved:
+            return (
+                f'<a class="wikilink" href="{h(resolved)}" '
+                f'data-wikilink-target="{h(target)}">{h(label)}</a>'
+            )
+        return (
+            f'<a class="wikilink-missing" '
+            f'title="Wikilink target not found: {h(target)}">{h(label)}</a>'
+        )
+
+    return _WIKILINK_RE.sub(repl, text)
+
+
 def _render_note(full_path):
     try:
         text = full_path.read_text(encoding="utf-8")
     except Exception:
         return '<p class="note-error">Unable to read note.</p>'
     note_dir_rel = str(full_path.parent.relative_to(BASE_DIR))
+    text = _preprocess_wikilinks(text)
     try:
         out = subprocess.run(
             ["pandoc", "--from=gfm", "--to=html", "--no-highlight"],
@@ -948,8 +1067,10 @@ def _validate_path(rel_path):
 
 
 def validate_note_path(rel_path: str) -> Path | None:
-    """Public: validate a note/README path for the /note endpoint."""
-    if ".." in rel_path or not _VALID_NOTE_RE.match(rel_path):
+    """Public: validate a note/README/knowledge path for the /note endpoint."""
+    if ".." in rel_path:
+        return None
+    if not (_VALID_NOTE_RE.match(rel_path) or _VALID_KNOWLEDGE_NOTE_RE.match(rel_path)):
         return None
     full = (BASE_DIR / rel_path).resolve()
     try:
@@ -1321,6 +1442,68 @@ def _open_path(slot_key, path):
         file=sys.stderr,
     )
     return False
+
+
+def _validate_doc_path(rel_path: str) -> Path | None:
+    """Resolve a note-body link target against the conception tree.
+
+    Rejects anything outside ``BASE_DIR`` (symlink-safe) or any non-existent
+    file. Returns the resolved absolute path on success, ``None`` otherwise.
+    """
+    if not rel_path or "\x00" in rel_path or ".." in rel_path.split("/"):
+        return None
+    try:
+        full = (BASE_DIR / rel_path).resolve(strict=True)
+        full.relative_to(BASE_DIR.resolve())
+    except (OSError, ValueError):
+        return None
+    return full if full.is_file() else None
+
+
+def _os_open(path: Path) -> bool:
+    """Hand ``path`` to the OS-native default-application launcher.
+
+    Linux uses ``xdg-open``; macOS ``open``; Windows uses ``os.startfile``.
+    """
+    path_str = str(path)
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", path_str], start_new_session=True)
+        elif os.name == "nt":
+            os.startfile(path_str)  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(
+                ["xdg-open", path_str],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        return True
+    except Exception as exc:
+        print(f"[open-doc] failed: {exc}", file=sys.stderr)
+        return False
+
+
+_EXTERNAL_URL_RE = re.compile(r"^https?://[^\s]+$", re.IGNORECASE)
+
+
+def _is_external_url(url: str) -> bool:
+    return bool(url) and bool(_EXTERNAL_URL_RE.match(url))
+
+
+def _open_external(url: str) -> bool:
+    """Open ``url`` in the user's default browser via ``webbrowser``.
+
+    pywebview intercepts in-page navigation, so we always route external
+    URLs through the host browser — otherwise they'd replace the dashboard.
+    """
+    import webbrowser
+
+    try:
+        return bool(webbrowser.open(url, new=2))
+    except Exception as exc:
+        print(f"[open-external] failed: {exc}", file=sys.stderr)
+        return False
 
 
 def _reorder_all(full_path, order):

@@ -132,7 +132,9 @@ body {
 }
 
 /* --- Header --- */
-.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+/* Scoped to direct children of <body> so pandoc's `<tr class="header">`
+   in note-body tables does not inherit the flex layout. */
+body > .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
 h1 { font-size: 1.4rem; }
 .meta { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem; }
 
@@ -487,6 +489,12 @@ h1 { font-size: 1.4rem; }
 }
 .note-modal-body a { color: var(--accent); text-decoration: none; }
 .note-modal-body a:hover { text-decoration: underline; }
+.note-modal-body a.wikilink { color: var(--accent); border-bottom: 1px dotted var(--accent); }
+.note-modal-body a.wikilink:hover { text-decoration: none; background: var(--accent-bg); }
+.note-modal-body a.wikilink-missing {
+    color: var(--git-changes); border-bottom: 1px dashed var(--git-changes);
+    cursor: help;
+}
 .note-modal-body blockquote {
     border-left: 3px solid var(--border); padding-left: 0.9rem;
     color: var(--text-secondary);
@@ -1239,6 +1247,7 @@ async function openNotePreview(path, name) {
     var title = document.getElementById('note-modal-title');
     var body = document.getElementById('note-modal-body');
     title.textContent = name;
+    body.dataset.notePath = path;
     body.innerHTML = '<p class="note-loading">Loading\u2026</p>';
     modal.classList.add('open');
     try {
@@ -1249,9 +1258,77 @@ async function openNotePreview(path, name) {
         }
         body.innerHTML = await res.text();
         _renderMermaidIn(body);
+        _wireNoteLinks(body, path);
     } catch (e) {
         body.innerHTML = '<p class="note-error">Network error.</p>';
     }
+}
+
+/* Resolve a path relative to `baseDir` — `baseDir/../foo` collapses to
+   `foo`, absolute paths drop the leading slash so they are treated as
+   conception-tree relative. */
+function _resolveNotePath(baseDir, rel) {
+    if (rel.startsWith('/')) rel = rel.replace(/^\/+/, '');
+    var parts = ((baseDir ? baseDir + '/' : '') + rel).split('/');
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i];
+        if (!p || p === '.') continue;
+        if (p === '..') out.pop();
+        else out.push(p);
+    }
+    return out.join('/');
+}
+
+/* Route note-body link clicks:
+   - http(s) → POST /open-external → host browser (bypasses pywebview).
+   - in-page anchors (#foo) → leave default behaviour.
+   - anything else → resolve against the note's directory and POST /open-doc
+     so the OS default viewer handles PDFs, images, markdown, etc. */
+function _wireNoteLinks(body, notePath) {
+    var noteDir = notePath.lastIndexOf('/') >= 0
+        ? notePath.substring(0, notePath.lastIndexOf('/'))
+        : '';
+    // Wikilinks resolved server-side carry an absolute (conception-tree
+    // relative) href. They open inside the modal, not via xdg-open.
+    body.querySelectorAll('a.wikilink[href]').forEach(function(a) {
+        a.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            var href = a.getAttribute('href');
+            var label = a.textContent || href;
+            openNotePreview(href, label);
+        });
+    });
+    // Unresolved wikilinks: click does nothing but flash the hover title.
+    body.querySelectorAll('a.wikilink-missing').forEach(function(a) {
+        a.addEventListener('click', function(ev) { ev.preventDefault(); });
+    });
+    body.querySelectorAll('a[href]:not(.wikilink):not(.wikilink-missing)').forEach(function(a) {
+        var href = a.getAttribute('href');
+        if (!href) return;
+        if (/^https?:\/\//i.test(href)) {
+            a.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                fetch('/open-external', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url: href}),
+                });
+            });
+        } else if (href.startsWith('#') || href.startsWith('mailto:')) {
+            return;
+        } else {
+            var resolved = _resolveNotePath(noteDir, href);
+            a.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                fetch('/open-doc', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: resolved}),
+                });
+            });
+        }
+    });
 }
 
 function closeNotePreview() {
