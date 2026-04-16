@@ -235,6 +235,11 @@ def _register_routes() -> None:
             new_cfg = _payload_to_config(data)
         except (ValueError, KeyError, TypeError) as exc:
             return _error(400, f"invalid config: {exc}")
+        # The config form only exposes repo names (one per line). Carry
+        # over any submodule declarations from the live config so saving
+        # from the form doesn't wipe structured entries authored via
+        # `condash config edit`.
+        new_cfg.repo_submodules = dict(_RUNTIME_CFG.repo_submodules)
         config_mod.save(new_cfg)
         # Re-init module-level state so paths / repos / open-with changes
         # take effect on the next request without needing a process restart.

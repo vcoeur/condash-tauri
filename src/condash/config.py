@@ -13,6 +13,13 @@ if set). Schema:
     primary = ["repo-a", "repo-b"]
     secondary = ["repo-c", "repo-d"]
 
+Each entry under ``primary`` / ``secondary`` is either a bare directory name
+or an inline table ``{name = "...", submodules = ["sub/one", "sub/two"]}``.
+Submodule entries are plain subdirectories of the repo (not real git
+submodules) and render as expandable sub-rows in the repo strip with their
+own dirty counts and "open in IDE" buttons — useful for monorepos where
+different subtrees are edited independently.
+
     [open_with.main_ide]
     label    = "Open in main IDE"
     commands = ["idea {path}", "idea.sh {path}"]
@@ -93,7 +100,13 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # secondary: same as primary, shown in the second card.
 # Anything else found under `workspace_path` lands in an "Others" card.
 # Both lists are ignored when `workspace_path` is unset.
-# primary = ["repo-a", "repo-b"]
+#
+# Each entry is either a bare string or an inline table
+# `{name = "...", submodules = ["sub/one", "sub/two"]}`. Submodule entries
+# are plain subdirectories of the repo (not real git submodules) that render
+# as expandable sub-rows with their own dirty counts and action buttons —
+# handy for monorepos.
+# primary = ["repo-a", { name = "repo-b", submodules = ["apps/web", "apps/api"] }]
 # secondary = ["repo-c", "repo-d"]
 
 # [open_with.<slot>]
@@ -197,6 +210,7 @@ class CondashConfig:
     worktrees_path: Path | None = None
     repositories_primary: list[str] = field(default_factory=list)
     repositories_secondary: list[str] = field(default_factory=list)
+    repo_submodules: dict[str, list[str]] = field(default_factory=dict)
     port: int = 0
     native: bool = True
     open_with: dict[str, OpenWithSlot] = field(default_factory=dict)
@@ -207,6 +221,25 @@ def config_path() -> Path:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
     return base / "condash" / "config.toml"
+
+
+def _render_repo_list(names: list[str], repo_submodules: dict[str, list[str]]) -> list:
+    """Serialise a repo-name list back to TOML, emitting inline tables for repos that
+    carry submodule paths and bare strings otherwise. Ordering of ``names`` is preserved.
+    """
+    import tomlkit
+
+    out: list = []
+    for name in names:
+        subs = repo_submodules.get(name) or []
+        if subs:
+            entry = tomlkit.inline_table()
+            entry["name"] = name
+            entry["submodules"] = list(subs)
+            out.append(entry)
+        else:
+            out.append(name)
+    return out
 
 
 def save(cfg: CondashConfig, path: Path | None = None) -> Path:
@@ -253,8 +286,8 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
     if not hasattr(repos, "value"):
         repos = table()
         doc["repositories"] = repos
-    repos["primary"] = list(cfg.repositories_primary)
-    repos["secondary"] = list(cfg.repositories_secondary)
+    repos["primary"] = _render_repo_list(cfg.repositories_primary, cfg.repo_submodules)
+    repos["secondary"] = _render_repo_list(cfg.repositories_secondary, cfg.repo_submodules)
 
     # [open_with.<slot>]
     open_with_table = doc.get("open_with")
@@ -295,6 +328,49 @@ def write_default_template(target: Path) -> None:
     tmp.replace(target)
 
 
+def _parse_repo_list(raw: object, source: Path, key: str) -> tuple[list[str], dict[str, list[str]]]:
+    """Split a ``primary`` / ``secondary`` list into (names, submodules map).
+
+    Each entry is either a bare string (name only) or an inline table
+    ``{name = "...", submodules = [...]}``. Submodule paths are plain
+    subdirectories relative to the repo root, not real git submodules.
+    """
+    if raw is None:
+        return [], {}
+    if not isinstance(raw, list):
+        raise ConfigIncompleteError(f"{source}: 'repositories.{key}' must be a list")
+    names: list[str] = []
+    subs: dict[str, list[str]] = {}
+    for i, entry in enumerate(raw):
+        if isinstance(entry, str):
+            name = entry.strip()
+            if not name:
+                continue
+            names.append(name)
+        elif isinstance(entry, dict):
+            name_raw = entry.get("name")
+            if not isinstance(name_raw, str) or not name_raw.strip():
+                raise ConfigIncompleteError(
+                    f"{source}: 'repositories.{key}[{i}].name' must be a non-empty string"
+                )
+            name = name_raw.strip()
+            sub_raw = entry.get("submodules") or []
+            if not isinstance(sub_raw, list) or not all(isinstance(s, str) for s in sub_raw):
+                raise ConfigIncompleteError(
+                    f"{source}: 'repositories.{key}[{i}].submodules' must be a list of strings"
+                )
+            names.append(name)
+            cleaned = [s.strip() for s in sub_raw if s.strip()]
+            if cleaned:
+                subs[name] = cleaned
+        else:
+            raise ConfigIncompleteError(
+                f"{source}: 'repositories.{key}[{i}]' must be a string or a "
+                f"table with 'name' and optional 'submodules'"
+            )
+    return names, subs
+
+
 def _parse(data: dict, source: Path) -> CondashConfig:
     conception_raw = data.get("conception_path")
     if not conception_raw:
@@ -319,8 +395,9 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         worktrees_path = None
 
     repos = data.get("repositories") or {}
-    primary = list(repos.get("primary") or [])
-    secondary = list(repos.get("secondary") or [])
+    primary, primary_subs = _parse_repo_list(repos.get("primary"), source, "primary")
+    secondary, secondary_subs = _parse_repo_list(repos.get("secondary"), source, "secondary")
+    repo_submodules: dict[str, list[str]] = {**primary_subs, **secondary_subs}
 
     port_raw = data.get("port", 0)
     if not isinstance(port_raw, int) or not 0 <= port_raw <= 65535:
@@ -353,8 +430,9 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         conception_path=conception_path,
         workspace_path=workspace_path,
         worktrees_path=worktrees_path,
-        repositories_primary=[str(r) for r in primary],
-        repositories_secondary=[str(r) for r in secondary],
+        repositories_primary=primary,
+        repositories_secondary=secondary,
+        repo_submodules=repo_submodules,
         port=port_raw,
         native=native_raw,
         open_with=open_with,

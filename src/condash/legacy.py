@@ -71,9 +71,16 @@ def init(cfg) -> None:
     _WORKTREES = (
         Path(cfg.worktrees_path).expanduser().resolve() if cfg.worktrees_path is not None else None
     )
+    submodules = getattr(cfg, "repo_submodules", None) or {}
     _REPO_STRUCTURE = [
-        ("Primary", [(name, []) for name in cfg.repositories_primary]),
-        ("Secondary", [(name, []) for name in cfg.repositories_secondary]),
+        (
+            "Primary",
+            [(name, list(submodules.get(name) or [])) for name in cfg.repositories_primary],
+        ),
+        (
+            "Secondary",
+            [(name, list(submodules.get(name) or [])) for name in cfg.repositories_secondary],
+        ),
     ]
     _OPEN_WITH = dict(cfg.open_with or {})
 
