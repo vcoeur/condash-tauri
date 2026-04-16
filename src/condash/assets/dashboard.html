@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Conception Dashboard (condash)</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script>
+/* Apply the saved theme synchronously, before <body> paints — otherwise
+   the default :root (light) vars resolve first and dark-mode users see
+   a bright flash on every reload. This runs blocking (no defer/async)
+   so the `data-theme` attribute exists when CSS variables resolve. */
+(function() {
+    try {
+        var saved = localStorage.getItem('dashboard-theme');
+        var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" defer></script>
@@ -170,17 +185,40 @@ body {
 }
 
 /* --- Top bar ---
-   First row of the app: primary tabs on the left, header-action icons
-   on the right. Flex-fixed so it sits at the top and the scroll region
-   underneath handles the content scroll — stays visible no matter how
-   far you've scrolled. */
+   First row of the app: primary tabs (styled as buttons) on the left,
+   header-action icons on the right. Flex-fixed so it sits at the top
+   and the scroll region underneath handles the content scroll. */
 .topbar {
-    display: flex; align-items: flex-end; gap: 0.5rem;
-    border-bottom: 2px solid var(--tab-border);
-    margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 1.5rem;
 }
 .topbar .tabs { margin-bottom: 0; border-bottom: none; flex: 1 1 auto; min-width: 0; }
-.topbar .header-actions { flex-shrink: 0; padding-bottom: 0.35rem; }
+.topbar .header-actions { flex-shrink: 0; }
+
+/* Primary tabs — button-style pills. Active carries the accent color. */
+.tabs-primary { gap: 0.4rem; }
+.tabs-primary .tab {
+    font-size: 0.98rem; font-weight: 600;
+    padding: 0.55rem 1.25rem;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    margin-bottom: 0;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.tabs-primary .tab:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.tabs-primary .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.tabs-primary .tab.active .tab-count { color: rgba(255,255,255,0.78); }
+.tabs-primary .tab .tab-count { font-size: 0.82rem; }
 
 /* --- Theme toggle / header actions --- */
 .header-actions { display: flex; align-items: center; gap: 0.5rem; }
@@ -278,19 +316,16 @@ body {
 }
 .knowledge-empty { color: var(--text-muted); font-size: 0.88rem; padding: 0.6rem 0.2rem; }
 
-/* --- Header action buttons (reload, tidy) ---
-   Always clickable; a small dot indicator lights up when the action is
-   recommended — /check-updates signals "items or git changed since page
-   load" (reload) or "done items need archiving" (tidy). Tooltip carries
-   the human-readable reason. */
-.reload-btn, .tidy-btn { position: relative; }
-.reload-btn.stale::after,
-.tidy-btn.stale::after {
+/* --- Reload action button ---
+   Always clickable; a small dot indicator lights up when a reload is
+   recommended (items, git, or tidy_needed). The click runs /tidy first
+   so done items move into their YYYY-MM bucket, then location.reload. */
+.reload-btn { position: relative; }
+.reload-btn.stale::after {
     content: ''; position: absolute; top: 2px; right: 2px;
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--accent); border: 1.5px solid var(--bg-card);
 }
-.tidy-btn[data-busy="1"] { opacity: 0.55; pointer-events: none; }
 
 /* --- Embedded terminal (bottom pane) ---
    A flex sibling of .app — opening it shrinks the main scroll region
@@ -972,7 +1007,7 @@ body {
             <span class="icon" id="theme-icon">&#9790;</span>
             <span id="theme-label">Dark</span>
         </div>
-        <button id="reload-btn" class="theme-toggle reload-btn" onclick="location.reload()" title="Reload" aria-label="Reload">
+        <button id="reload-btn" class="theme-toggle reload-btn" onclick="reloadAndTidy()" title="Reload (tidies done items first)" aria-label="Reload">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
@@ -982,13 +1017,6 @@ body {
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="4 17 10 11 4 5"/>
                 <line x1="12" y1="19" x2="20" y2="19"/>
-            </svg>
-        </button>
-        <button id="tidy-btn" class="theme-toggle tidy-btn" onclick="runTidy()" title="Tidy" aria-label="Tidy">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="2" y="3" width="20" height="5" rx="1"/>
-                <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>
-                <line x1="10" y1="12" x2="14" y2="12"/>
             </svg>
         </button>
         <button class="theme-toggle config-toggle" onclick="openConfigModal()" title="Edit configuration" aria-label="Edit configuration">
@@ -2170,14 +2198,6 @@ function _renderStale() {
     btn.setAttribute('aria-label', tip);
 }
 
-function _renderTidy(needed) {
-    var btn = document.getElementById('tidy-btn');
-    btn.classList.toggle('stale', !!needed);
-    var tip = needed ? 'Tidy — done items need archiving' : 'Tidy';
-    btn.title = tip;
-    btn.setAttribute('aria-label', tip);
-}
-
 async function checkUpdates() {
     try {
         var res = await fetch('/check-updates');
@@ -2193,7 +2213,7 @@ async function checkUpdates() {
         } else if (data.git_fingerprint !== _lastGitFingerprint) {
             _gitStale = true;
         }
-        _renderTidy(data.tidy_needed);
+        if (data.tidy_needed) _itemsStale = true;
         _renderStale();
     } catch (e) {}
 }
@@ -2205,32 +2225,22 @@ async function updateBaseline() {
         var data = await res.json();
         _lastFingerprint = data.fingerprint;
         _itemsStale = false;
-        _renderTidy(data.tidy_needed);
         _renderStale();
     } catch (e) {}
 }
 
-async function runTidy() {
-    var btn = document.getElementById('tidy-btn');
-    btn.setAttribute('data-busy', '1');
+/* Reload button runs tidy first so archived-done items move into their
+   YYYY-MM/ bucket before the page re-renders. No separate tidy button —
+   this is the only surface. */
+async function reloadAndTidy() {
     try {
-        var res = await fetch('/tidy', {
+        await fetch('/tidy', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: '{}'
         });
-        if (!res.ok) return;
-        var data = await res.json();
-        if (data.moves && data.moves.length > 0) {
-            location.reload();
-            return;
-        }
-        // No-op tidy: clear the recommendation dot and wait for the next poll.
-        _renderTidy(false);
-    } catch (e) {
-    } finally {
-        btn.removeAttribute('data-busy');
-    }
+    } catch (e) {}
+    location.reload();
 }
 
 /* --- Embedded terminal (multi-tab) ---
