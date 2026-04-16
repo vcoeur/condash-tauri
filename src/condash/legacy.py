@@ -1390,6 +1390,39 @@ def write_note(full_path: Path, content: str, expected_mtime: float | None) -> d
     return {"ok": True, "mtime": full_path.stat().st_mtime}
 
 
+def rename_note(rel_path: str, new_stem: str) -> dict[str, Any]:
+    """Rename a file under ``<item>/notes/`` while preserving its extension.
+
+    ``new_stem`` is the user-typed basename without the extension. The
+    original suffix is re-attached and the resulting filename is
+    validated against the same whitelist as ``create_note``. README and
+    knowledge/* files are deliberately out of scope — those have
+    structural meaning elsewhere in the dashboard.
+    """
+    full = validate_note_path(rel_path)
+    if full is None:
+        return {"ok": False, "reason": "invalid path"}
+    if not _VALID_ITEM_FILE_RE.match(rel_path):
+        return {"ok": False, "reason": "only files under <item>/notes/ can be renamed"}
+    new_stem = (new_stem or "").strip()
+    if not new_stem or not re.match(r"^[\w.-]+$", new_stem) or new_stem in (".", ".."):
+        return {"ok": False, "reason": "invalid filename"}
+    new_filename = new_stem + full.suffix
+    if not _VALID_NOTE_FILENAME_RE.match(new_filename):
+        return {"ok": False, "reason": "invalid filename"}
+    new_path = full.parent / new_filename
+    if new_path.exists() and new_path.resolve() != full.resolve():
+        return {"ok": False, "reason": "target already exists"}
+    if new_path == full:
+        return {"ok": True, "path": rel_path, "mtime": full.stat().st_mtime}
+    full.rename(new_path)
+    return {
+        "ok": True,
+        "path": str(new_path.relative_to(BASE_DIR)),
+        "mtime": new_path.stat().st_mtime,
+    }
+
+
 def create_note(item_readme_rel: str, filename: str) -> dict[str, Any]:
     """Create an empty note file under the item's ``notes/`` directory.
 

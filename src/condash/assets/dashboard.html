@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Dashboard Conception</title>
+<title>Conception Dashboard (condash)</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
@@ -150,16 +150,15 @@ body {
     display: flex; flex-direction: column;
     width: 100%; max-width: none; margin: 0; padding: 0;
 }
-.app > .header,
+.app > .topbar,
 .app > .setup-banner,
-.app > .meta,
 .app > .tabs {
     width: 100%; max-width: 1100px;
     margin-left: auto; margin-right: auto;
     padding-left: 2rem; padding-right: 2rem;
     flex: 0 0 auto;
 }
-.app > .header { margin-top: 1rem; }
+.app > .topbar { margin-top: 0.5rem; }
 #main-scroll {
     flex: 1 1 auto; min-height: 0; width: 100%;
     overflow-y: auto; overflow-x: hidden;
@@ -170,12 +169,18 @@ body {
     padding: 0 2rem 1.5rem;
 }
 
-/* --- Header ---
-   Scoped to direct children of .app so pandoc's `<tr class="header">`
-   in note-body tables does not inherit the flex layout. */
-.app > .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
-h1 { font-size: 1.4rem; }
-.meta { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem; }
+/* --- Top bar ---
+   First row of the app: primary tabs on the left, header-action icons
+   on the right. Flex-fixed so it sits at the top and the scroll region
+   underneath handles the content scroll — stays visible no matter how
+   far you've scrolled. */
+.topbar {
+    display: flex; align-items: flex-end; gap: 0.5rem;
+    border-bottom: 2px solid var(--tab-border);
+    margin-bottom: 1rem;
+}
+.topbar .tabs { margin-bottom: 0; border-bottom: none; flex: 1 1 auto; min-width: 0; }
+.topbar .header-actions { flex-shrink: 0; padding-bottom: 0.35rem; }
 
 /* --- Theme toggle / header actions --- */
 .header-actions { display: flex; align-items: center; gap: 0.5rem; }
@@ -645,7 +650,15 @@ h1 { font-size: 1.4rem; }
     font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
     color: var(--text); white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; min-width: 0; flex: 1;
+    cursor: text;
 }
+.note-rename-input {
+    font: inherit; color: var(--text);
+    background: var(--bg-card-hover); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 1px 6px; outline: none;
+    min-width: 8ch;
+}
+.note-rename-ext { color: var(--text-muted); margin-left: 1px; }
 .note-modal-close {
     background: none; border: none; color: var(--text-muted);
     font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 6px;
@@ -655,6 +668,11 @@ h1 { font-size: 1.4rem; }
 .note-modal-body {
     padding: 1.2rem 1.6rem; overflow: auto; line-height: 1.55;
     font-size: 0.9rem;
+    /* Explicitly re-enable text selection for the preview. Some parent
+       containers set user-select: none for UI chrome; content inside
+       the body should always be selectable so the user can copy a
+       passage out of a note. */
+    user-select: text; -webkit-user-select: text;
 }
 .note-modal-body h1, .note-modal-body h2, .note-modal-body h3,
 .note-modal-body h4, .note-modal-body h5, .note-modal-body h6 {
@@ -943,8 +961,12 @@ h1 { font-size: 1.4rem; }
 </head>
 <body>
 <div class="app">
-<div class="header">
-    <h1>Incidents, Projects &amp; Documents</h1>
+<div class="topbar">
+    <div class="tabs tabs-primary">
+        <div class="tab active" data-tab="projects" onclick="switchTab('projects')">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
+        <div class="tab" data-tab="code" onclick="switchTab('code')">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
+        <div class="tab" data-tab="knowledge" onclick="switchTab('knowledge')">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
+    </div>
     <div class="header-actions">
         <div class="theme-toggle" onclick="toggleTheme()" title="Switch theme">
             <span class="icon" id="theme-icon">&#9790;</span>
@@ -980,12 +1002,6 @@ h1 { font-size: 1.4rem; }
 <div id="setup-banner" class="setup-banner" style="display:none">
     <span><strong>Welcome to condash.</strong> Set <code>conception_path</code> to point at your projects/incidents/documents tree to get started.</span>
     <button type="button" onclick="openConfigModal()">Configure</button>
-</div>
-<div class="meta">{{TIMESTAMP}}</div>
-<div class="tabs tabs-primary">
-    <div class="tab active" data-tab="projects" onclick="switchTab('projects')">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
-    <div class="tab" data-tab="code" onclick="switchTab('code')">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
-    <div class="tab" data-tab="knowledge" onclick="switchTab('knowledge')">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
 </div>
 <div id="projects-subtabs" class="tabs tabs-secondary">
     <div class="tab active" data-subtab="current" onclick="switchSubtab('current')">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
@@ -1030,7 +1046,7 @@ h1 { font-size: 1.4rem; }
 <div id="note-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNotePreview()">
     <div class="note-modal">
         <div class="note-modal-header">
-            <span class="note-modal-title" id="note-modal-title">Note</span>
+            <span class="note-modal-title" id="note-modal-title" ondblclick="startRenameNote()" title="Double-click to rename (notes/ files only)">Note</span>
             <div class="note-modal-actions">
                 <button id="note-edit-btn" class="note-action-btn" onclick="enterEditMode()" title="Edit">Edit</button>
                 <button id="note-save-btn" class="note-action-btn note-action-primary" onclick="saveEdit()" style="display:none">Save</button>
@@ -1835,6 +1851,76 @@ async function createNoteFor(readmePath) {
     } catch (e) {
         alert('Network error: ' + e);
     }
+}
+
+/* Double-click the modal title to rename the current note. Only files
+   under <item>/notes/** are renamable; READMEs and knowledge/* are
+   left alone (server returns 400 for those so the UI fails loud). The
+   extension stays fixed — users type a stem, server re-appends the
+   suffix. */
+var _NOTES_RENAMEABLE_RE = /^(?:incidents|projects|documents)\/(?:\d{4}-\d{2}\/)?\d{4}-\d{2}-\d{2}-[\w.\-]+\/notes\//;
+
+function startRenameNote() {
+    var titleEl = document.getElementById('note-modal-title');
+    var body = document.getElementById('note-modal-body');
+    var path = body.dataset.notePath || '';
+    if (!_NOTES_RENAMEABLE_RE.test(path)) return;
+    if (titleEl.querySelector('.note-rename-input')) return;  // already editing
+    var filename = path.substring(path.lastIndexOf('/') + 1);
+    var dotIdx = filename.lastIndexOf('.');
+    var stem = dotIdx > 0 ? filename.substring(0, dotIdx) : filename;
+    var ext = dotIdx > 0 ? filename.substring(dotIdx) : '';
+    var originalText = titleEl.textContent;
+    var restored = false;
+    var restore = function() {
+        if (restored) return;
+        restored = true;
+        titleEl.textContent = originalText;
+    };
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'note-rename-input';
+    input.value = stem;
+    var extEl = document.createElement('span');
+    extEl.className = 'note-rename-ext';
+    extEl.textContent = ext;
+    titleEl.textContent = '';
+    titleEl.appendChild(input);
+    titleEl.appendChild(extEl);
+    input.focus();
+    input.select();
+    var commit = function() {
+        var newStem = input.value.trim();
+        if (!newStem || newStem === stem) { restore(); return; }
+        fetch('/note/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: path, new_stem: newStem}),
+        }).then(function(r) {
+            return r.json().then(function(data) { return {ok: r.ok, data: data}; });
+        }).then(function(result) {
+            if (!result.ok || !result.data.ok) {
+                alert('Rename failed: ' + (result.data.error || result.data.reason || 'unknown'));
+                restore();
+                return;
+            }
+            body.dataset.notePath = result.data.path;
+            if (body.dataset.editMtime) body.dataset.editMtime = String(result.data.mtime);
+            var newName = newStem + ext;
+            titleEl.textContent = newName;
+            restored = true;  // keep the new value
+        }).catch(function(err) {
+            alert('Rename failed: ' + err);
+            restore();
+        });
+    };
+    input.onkeydown = function(ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); restore(); }
+        ev.stopPropagation();
+    };
+    input.onblur = commit;
+    input.onclick = function(ev) { ev.stopPropagation(); };
 }
 
 async function _reloadNotePreview(path, name) {

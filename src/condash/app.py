@@ -139,6 +139,18 @@ def _register_routes() -> None:
             return JSONResponse(status_code=409, content=result)
         return result
 
+    @_ng_app.post("/note/rename")
+    async def post_note_rename(req: Request):
+        """Rename a file under ``<item>/notes/`` preserving the extension."""
+        data = await req.json()
+        result = legacy.rename_note(
+            str(data.get("path") or ""),
+            str(data.get("new_stem") or ""),
+        )
+        if not result.get("ok"):
+            return _error(400, result.get("reason", "rename failed"))
+        return result
+
     @_ng_app.post("/note/create")
     async def post_note_create(req: Request):
         """Create an empty note under an item's ``notes/`` directory."""
@@ -795,7 +807,7 @@ def run(cfg: CondashConfig) -> None:
     _register_routes()
     kwargs: dict = {
         "native": cfg.native,
-        "title": "condash",
+        "title": "Conception Dashboard (condash)",
         "reload": False,
         "show": not cfg.native,
         "port": cfg.port,
