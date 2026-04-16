@@ -211,16 +211,19 @@ h1 { font-size: 1.4rem; }
 .tab-count { font-weight: 400; color: var(--text-muted); margin-left: 0.3rem; }
 .tab.active .tab-count { color: var(--text-secondary); }
 
-/* --- Reload button (header) ---
-   Always clickable; a small dot indicator lights up when /check-updates
-   detects conception items or git state have changed since the last page
-   load. Tooltip carries the human-readable reason. */
-.reload-btn { position: relative; }
-.reload-btn.stale::after {
+/* --- Header action buttons (reload, tidy) ---
+   Always clickable; a small dot indicator lights up when the action is
+   recommended — /check-updates signals "items or git changed since page
+   load" (reload) or "done items need archiving" (tidy). Tooltip carries
+   the human-readable reason. */
+.reload-btn, .tidy-btn { position: relative; }
+.reload-btn.stale::after,
+.tidy-btn.stale::after {
     content: ''; position: absolute; top: 2px; right: 2px;
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--accent); border: 1.5px solid var(--bg-card);
 }
+.tidy-btn[data-busy="1"] { opacity: 0.55; pointer-events: none; }
 
 /* --- Cards --- */
 .card {
@@ -682,27 +685,6 @@ h1 { font-size: 1.4rem; }
 }
 .git-action-btn.is-err { color: var(--git-changes); }
 
-/* --- Status bar --- */
-.status-bar {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    display: flex; align-items: center;
-    padding: 0.4rem 2rem; gap: 0.75rem;
-    background: var(--bg-card);
-    border-top: 1px solid var(--border);
-    box-shadow: 0 -1px 4px rgba(0,0,0,0.06);
-    font-size: 0.82rem; z-index: 100;
-}
-[data-theme="dark"] .status-bar { box-shadow: 0 -1px 4px rgba(0,0,0,0.3); }
-.status-spacer { flex: 1; }
-.status-btn {
-    font-size: 0.78rem; font-weight: 600;
-    padding: 4px 14px; border-radius: 6px;
-    cursor: pointer; border: 1px solid var(--btn-border);
-    background: var(--btn-bg); color: var(--btn-text);
-    transition: filter 0.1s;
-}
-.status-btn:hover:not(:disabled) { filter: brightness(0.92); }
-.status-btn:disabled { opacity: 0.4; cursor: default; }
 </style>
 </head>
 <body>
@@ -717,6 +699,13 @@ h1 { font-size: 1.4rem; }
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+        </button>
+        <button id="tidy-btn" class="theme-toggle tidy-btn" onclick="runTidy()" title="Tidy" aria-label="Tidy">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="5" rx="1"/>
+                <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>
+                <line x1="10" y1="12" x2="14" y2="12"/>
             </svg>
         </button>
         <button class="theme-toggle config-toggle" onclick="openConfigModal()" title="Edit configuration" aria-label="Edit configuration">
@@ -737,10 +726,6 @@ h1 { font-size: 1.4rem; }
 <div id="cards">{{CARDS}}</div>
 <div class="git-section-heading">Git</div>
 <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
-<div class="status-bar" id="status-bar">
-    <span class="status-spacer"></span>
-    <button class="status-btn" id="tidy-btn" onclick="runTidy()" disabled>Tidy</button>
-</div>
 <div id="note-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNotePreview()">
     <div class="note-modal">
         <div class="note-modal-header">
@@ -1462,6 +1447,14 @@ function _renderStale() {
     btn.setAttribute('aria-label', tip);
 }
 
+function _renderTidy(needed) {
+    var btn = document.getElementById('tidy-btn');
+    btn.classList.toggle('stale', !!needed);
+    var tip = needed ? 'Tidy — done items need archiving' : 'Tidy';
+    btn.title = tip;
+    btn.setAttribute('aria-label', tip);
+}
+
 async function checkUpdates() {
     try {
         var res = await fetch('/check-updates');
@@ -1477,7 +1470,7 @@ async function checkUpdates() {
         } else if (data.git_fingerprint !== _lastGitFingerprint) {
             _gitStale = true;
         }
-        document.getElementById('tidy-btn').disabled = !data.tidy_needed;
+        _renderTidy(data.tidy_needed);
         _renderStale();
     } catch (e) {}
 }
@@ -1489,28 +1482,32 @@ async function updateBaseline() {
         var data = await res.json();
         _lastFingerprint = data.fingerprint;
         _itemsStale = false;
-        document.getElementById('tidy-btn').disabled = !data.tidy_needed;
+        _renderTidy(data.tidy_needed);
         _renderStale();
     } catch (e) {}
 }
 
 async function runTidy() {
     var btn = document.getElementById('tidy-btn');
-    btn.disabled = true;
+    btn.setAttribute('data-busy', '1');
     try {
         var res = await fetch('/tidy', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: '{}'
         });
-        if (!res.ok) { btn.disabled = false; return; }
+        if (!res.ok) return;
         var data = await res.json();
         if (data.moves && data.moves.length > 0) {
             location.reload();
-        } else {
-            btn.disabled = true;
+            return;
         }
-    } catch (e) { btn.disabled = false; }
+        // No-op tidy: clear the recommendation dot and wait for the next poll.
+        _renderTidy(false);
+    } catch (e) {
+    } finally {
+        btn.removeAttribute('data-busy');
+    }
 }
 
 checkUpdates();
