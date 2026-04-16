@@ -140,16 +140,34 @@ body {
    A flex-column wrapper that owns the fixed rows (header, banner, meta,
    tab strips) plus a single scrolling <main>. The terminal pane lives as
    a sibling of .app directly under <body>, so opening it shrinks .app
-   rather than stacking a second scroll region on top of a taller body. */
+   rather than stacking a second scroll region on top of a taller body.
+
+   The pinned rows and the scroll region are both full width — the
+   1100px column lives on their children, so the scrollbar sits at the
+   viewport's right edge rather than inset inside a centered column. */
 .app {
     flex: 1 1 auto; min-height: 0;
     display: flex; flex-direction: column;
-    max-width: 1100px; width: 100%; margin: 0 auto;
-    padding: 1rem 2rem 0;
+    width: 100%; max-width: none; margin: 0; padding: 0;
 }
+.app > .header,
+.app > .setup-banner,
+.app > .meta,
+.app > .tabs {
+    width: 100%; max-width: 1100px;
+    margin-left: auto; margin-right: auto;
+    padding-left: 2rem; padding-right: 2rem;
+    flex: 0 0 auto;
+}
+.app > .header { margin-top: 1rem; }
 #main-scroll {
-    flex: 1 1 auto; min-height: 0; overflow: auto;
-    padding-bottom: 1.5rem;
+    flex: 1 1 auto; min-height: 0; width: 100%;
+    overflow-y: auto; overflow-x: hidden;
+}
+#main-scroll > * {
+    width: 100%; max-width: 1100px;
+    margin-left: auto; margin-right: auto;
+    padding: 0 2rem 1.5rem;
 }
 
 /* --- Header ---
@@ -2104,6 +2122,24 @@ function _termInit() {
     _term.loadAddon(_termFit);
     _term.open(mount);
     _termFit.fit();
+    // xterm captures keys on its hidden <textarea> before they reach the
+    // document-level listener, so our toggle shortcut gets swallowed once
+    // focus is inside the terminal. Returning false from the custom key
+    // handler tells xterm to pass the event through. We also handle the
+    // toggle here directly — the document handler runs too, but both
+    // paths converge on toggleTerminal() and the `hidden` attribute
+    // check makes it idempotent.
+    _term.attachCustomKeyEventHandler(function(ev) {
+        if (ev.type === 'keydown' && _termShortcut && _matchShortcut(ev, _termShortcut)) {
+            ev.preventDefault();
+            // stopPropagation so the document-level listener doesn't fire
+            // a second toggle (re-opening the pane we just closed).
+            ev.stopPropagation();
+            toggleTerminal();
+            return false;
+        }
+        return true;
+    });
 
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     _termWs = new WebSocket(proto + '//' + location.host + '/ws/term');
