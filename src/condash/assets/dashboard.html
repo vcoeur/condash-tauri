@@ -700,22 +700,25 @@ body {
     background: var(--bg-card); padding: 0.8rem 1rem; box-shadow: var(--shadow-sm);
 }
 .knowledge-group-heading {
-    display: flex; align-items: center; gap: 0.4rem;
-    font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--text-muted);
+    display: flex; align-items: center; gap: 0.5rem;
     cursor: pointer; user-select: none;
+    padding: 0.1rem 0;
     list-style: none; /* hide Firefox default marker */
 }
 .knowledge-group-heading::-webkit-details-marker { display: none; }
 .knowledge-group[open] > .knowledge-group-heading { margin-bottom: 0.55rem; }
 .knowledge-chevron {
-    display: inline-block; font-size: 0.7rem; line-height: 1;
-    color: var(--text-muted); transition: transform 0.15s ease;
+    display: inline-block; font-size: 0.75rem; line-height: 1;
+    color: var(--text-secondary); transition: transform 0.15s ease;
 }
 .knowledge-group[open] > .knowledge-group-heading > .knowledge-chevron {
     transform: rotate(90deg);
 }
-.knowledge-count { font-weight: 400; color: var(--text-muted); }
+.knowledge-group-name {
+    font-size: 0.95rem; font-weight: 600; color: var(--text);
+    letter-spacing: 0; text-transform: none;
+}
+.knowledge-count { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
 /* Subdirectory groups render inside their parent — drop the card chrome
    so they read as a section rather than a peer, and add a left rule so
    the depth is still legible. The wrapper-level gap handles spacing. */
@@ -731,20 +734,19 @@ body {
    variant sits above the first group on its own row. */
 .knowledge-index-badge {
     display: inline-block;
-    padding: 0.05rem 0.5rem;
-    border: 1px solid var(--border); border-radius: 999px;
-    font-size: 0.68rem; font-weight: 500;
-    color: var(--text-muted); background: var(--bg-card-hover);
-    text-transform: none; letter-spacing: 0;
+    padding: 0.1rem 0.55rem;
+    border: 1px solid var(--accent); border-radius: 999px;
+    font-size: 0.7rem; font-weight: 600;
+    color: var(--accent); background: var(--accent-bg);
+    text-transform: uppercase; letter-spacing: 0.05em;
     cursor: pointer;
-    transition: border-color 0.1s, color 0.1s, background 0.1s;
+    transition: filter 0.1s, transform 0.1s;
 }
-.knowledge-index-badge:hover {
-    border-color: var(--accent); color: var(--accent); background: var(--accent-bg);
-}
+.knowledge-index-badge:hover { filter: brightness(1.1); }
+.knowledge-index-badge:active { transform: translateY(1px); }
 .knowledge-index-top {
-    align-self: flex-start; margin-bottom: 0.4rem;
-    font-size: 0.72rem; padding: 0.1rem 0.55rem;
+    align-self: flex-start; margin-bottom: 0.5rem;
+    font-size: 0.72rem; padding: 0.15rem 0.65rem;
 }
 .knowledge-list {
     display: grid; gap: 0.55rem;
