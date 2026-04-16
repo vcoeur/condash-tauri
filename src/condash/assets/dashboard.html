@@ -211,19 +211,16 @@ h1 { font-size: 1.4rem; }
 .tab-count { font-weight: 400; color: var(--text-muted); margin-left: 0.3rem; }
 .tab.active .tab-count { color: var(--text-secondary); }
 
-/* --- Stale banner (conception items + git) --- */
-.stale-banner {
-    display: flex; align-items: center; gap: 0.75rem;
-    padding: 0.55rem 1.1rem; margin-bottom: 1rem;
-    background: var(--accent-bg); border: 1px solid var(--accent);
-    border-radius: 8px; font-size: 0.85rem; color: var(--accent);
+/* --- Reload button (header) ---
+   Always clickable; a small dot indicator lights up when /check-updates
+   detects conception items or git state have changed since the last page
+   load. Tooltip carries the human-readable reason. */
+.reload-btn { position: relative; }
+.reload-btn.stale::after {
+    content: ''; position: absolute; top: 2px; right: 2px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); border: 1.5px solid var(--bg-card);
 }
-.stale-banner button {
-    font-size: 0.78rem; font-weight: 600; padding: 3px 12px; border-radius: 6px;
-    cursor: pointer; border: 1px solid var(--accent);
-    background: var(--accent); color: #fff; transition: filter 0.1s;
-}
-.stale-banner button:hover { filter: brightness(0.9); }
 
 /* --- Cards --- */
 .card {
@@ -716,6 +713,12 @@ h1 { font-size: 1.4rem; }
             <span class="icon" id="theme-icon">&#9790;</span>
             <span id="theme-label">Dark</span>
         </div>
+        <button id="reload-btn" class="theme-toggle reload-btn" onclick="location.reload()" title="Reload" aria-label="Reload">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+        </button>
         <button class="theme-toggle config-toggle" onclick="openConfigModal()" title="Edit configuration" aria-label="Edit configuration">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="3"/>
@@ -725,10 +728,6 @@ h1 { font-size: 1.4rem; }
     </div>
 </div>
 <div class="meta">{{TIMESTAMP}}</div>
-<div id="stale-banner" class="stale-banner" style="display:none">
-    <span id="stale-banner-msg">Data has changed</span>
-    <button onclick="location.reload()">Reload</button>
-</div>
 <div class="tabs">
     <div class="tab active" data-tab="current" onclick="switchTab('current')">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
     <div class="tab" data-tab="next" onclick="switchTab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
@@ -1450,18 +1449,17 @@ var _lastGitFingerprint = null;
 var _itemsStale = false;
 var _gitStale = false;
 
-function _renderBanner() {
-    var banner = document.getElementById('stale-banner');
-    if (!_itemsStale && !_gitStale) {
-        banner.style.display = 'none';
-        return;
-    }
-    var msg;
-    if (_itemsStale && _gitStale) msg = 'Conception data and git status have changed';
-    else if (_itemsStale) msg = 'Conception data has changed';
-    else msg = 'Git status has changed';
-    document.getElementById('stale-banner-msg').textContent = msg;
-    banner.style.display = '';
+function _renderStale() {
+    var btn = document.getElementById('reload-btn');
+    var stale = _itemsStale || _gitStale;
+    btn.classList.toggle('stale', stale);
+    var tip;
+    if (_itemsStale && _gitStale) tip = 'Reload — conception data and git status have changed';
+    else if (_itemsStale) tip = 'Reload — conception data has changed';
+    else if (_gitStale) tip = 'Reload — git status has changed';
+    else tip = 'Reload';
+    btn.title = tip;
+    btn.setAttribute('aria-label', tip);
 }
 
 async function checkUpdates() {
@@ -1480,7 +1478,7 @@ async function checkUpdates() {
             _gitStale = true;
         }
         document.getElementById('tidy-btn').disabled = !data.tidy_needed;
-        _renderBanner();
+        _renderStale();
     } catch (e) {}
 }
 
@@ -1492,7 +1490,7 @@ async function updateBaseline() {
         _lastFingerprint = data.fingerprint;
         _itemsStale = false;
         document.getElementById('tidy-btn').disabled = !data.tidy_needed;
-        _renderBanner();
+        _renderStale();
     } catch (e) {}
 }
 
