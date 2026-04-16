@@ -8,11 +8,15 @@ FastAPI instance.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import signal
+import sys
 from importlib.resources import files as _package_files
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from nicegui import app as _ng_app
 from nicegui import ui
@@ -339,6 +343,143 @@ def _register_routes() -> None:
             "restart_required": restart_required,
             "config": _config_to_payload(new_cfg),
         }
+
+    @_ng_app.websocket("/ws/term")
+    async def terminal_ws(ws: WebSocket):
+        """Back the bottom-pane terminal with a real pty.
+
+        Spawns the user's shell inside a pty, bridges raw bytes both ways
+        over the WebSocket, and relays TIOCSWINSZ on resize control
+        frames. Linux + macOS only (Windows would need ConPTY).
+        """
+        await ws.accept()
+        if sys.platform not in ("linux", "darwin"):
+            await ws.send_text(
+                json.dumps({"type": "error", "message": "Terminal only supported on Linux/macOS."})
+            )
+            await ws.close()
+            return
+        await _run_pty_session(ws)
+
+
+async def _run_pty_session(ws: WebSocket) -> None:
+    """Fork a shell inside a pty and bridge it to ``ws`` until disconnect.
+
+    Binary frames carry raw bytes in both directions. Text frames are JSON
+    control messages; only ``{"type": "resize", "cols": N, "rows": M}`` is
+    handled today.
+
+    The child process starts cwd'd at ``conception_path`` (else ``$HOME``),
+    inherits the environment, and is launched with ``-l`` so the login
+    rc-files (`~/.bash_profile`, `~/.zprofile`, …) run as the user would
+    expect. On disconnect the child is terminated and reaped.
+    """
+    import fcntl
+    import pty
+    import struct
+    import termios
+
+    shell = os.environ.get("SHELL", "/bin/bash")
+    cwd = str(legacy.BASE_DIR) if legacy.BASE_DIR.is_dir() else os.path.expanduser("~")
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        # Child: cwd, env, then exec. os._exit on failure so we don't run
+        # parent-only asyncio finally clauses.
+        try:
+            os.chdir(cwd)
+        except OSError:
+            pass
+        os.environ["TERM"] = "xterm-256color"
+        try:
+            os.execvp(shell, [shell, "-l"])
+        except OSError:
+            os._exit(127)
+
+    # Parent: wire the pty fd into the asyncio event loop.
+    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+    loop = asyncio.get_running_loop()
+    out_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    def _on_readable() -> None:
+        try:
+            data = os.read(fd, 4096)
+        except BlockingIOError:
+            return
+        except OSError:
+            data = b""
+        if not data:
+            out_queue.put_nowait(None)
+            try:
+                loop.remove_reader(fd)
+            except Exception:
+                pass
+            return
+        out_queue.put_nowait(data)
+
+    loop.add_reader(fd, _on_readable)
+
+    async def pump_to_ws() -> None:
+        while True:
+            data = await out_queue.get()
+            if data is None:
+                break
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                break
+
+    pump = asyncio.create_task(pump_to_ws())
+
+    try:
+        while True:
+            try:
+                msg = await ws.receive()
+            except WebSocketDisconnect:
+                break
+            mtype = msg.get("type")
+            if mtype == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                try:
+                    os.write(fd, msg["bytes"])
+                except OSError:
+                    break
+                continue
+            text = msg.get("text")
+            if not text:
+                continue
+            try:
+                obj = json.loads(text)
+            except ValueError:
+                continue
+            if obj.get("type") == "resize":
+                cols = max(2, int(obj.get("cols") or 80))
+                rows = max(2, int(obj.get("rows") or 24))
+                try:
+                    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                except OSError:
+                    pass
+    finally:
+        try:
+            loop.remove_reader(fd)
+        except Exception:
+            pass
+        pump.cancel()
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
 
 
 def _repo_entries(names: list[str], submodules: dict[str, list[str]]) -> list[dict]:

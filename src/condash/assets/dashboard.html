@@ -6,6 +6,9 @@
 <title>Dashboard Conception</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js" defer></script>
 <style>
 :root, [data-theme="light"] {
     --bg: #f4f4f5;
@@ -226,6 +229,40 @@ h1 { font-size: 1.4rem; }
     background: var(--accent); border: 1.5px solid var(--bg-card);
 }
 .tidy-btn[data-busy="1"] { opacity: 0.55; pointer-events: none; }
+
+/* --- Embedded terminal (bottom pane) ---
+   Fixed to the viewport bottom, toggleable via the terminal button in the
+   header. xterm.js renders inside .term-mount and is wired to /ws/term
+   which drives a real shell in a pty. Height is drag-resizable via the
+   top handle; persisted in localStorage so it survives reloads. */
+.term-pane {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: var(--term-height, 38vh); min-height: 140px;
+    z-index: 900;
+    display: flex; flex-direction: column;
+    background: #0b0b0e; color: #ddd;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.25);
+}
+.term-pane[hidden] { display: none; }
+body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
+.term-handle {
+    height: 4px; cursor: ns-resize; background: var(--border);
+    flex-shrink: 0;
+}
+.term-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 10px; font-size: 0.78rem; color: #bdbdbd;
+    background: #17181c; border-bottom: 1px solid #2a2b30;
+}
+.term-title { font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.term-close {
+    background: transparent; color: #bdbdbd; border: none;
+    font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.term-close:hover { color: #fff; }
+.term-mount { flex: 1; min-height: 0; padding: 4px 6px; }
+.term-mount .xterm { height: 100%; }
 
 /* --- Setup banner (shown when conception_path is unset) --- */
 .setup-banner {
@@ -806,6 +843,12 @@ h1 { font-size: 1.4rem; }
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
             </svg>
         </button>
+        <button id="term-btn" class="theme-toggle" onclick="toggleTerminal()" title="Toggle terminal" aria-label="Toggle terminal">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="4 17 10 11 4 5"/>
+                <line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+        </button>
         <button id="tidy-btn" class="theme-toggle tidy-btn" onclick="runTidy()" title="Tidy" aria-label="Tidy">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="2" y="3" width="20" height="5" rx="1"/>
@@ -837,6 +880,14 @@ h1 { font-size: 1.4rem; }
 <div id="knowledge" style="display:none">{{KNOWLEDGE}}</div>
 <div class="git-section-heading">Git</div>
 <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
+<div id="term-pane" class="term-pane" hidden>
+    <div class="term-handle" onmousedown="termDragStart(event)" title="Drag to resize"></div>
+    <div class="term-header">
+        <span class="term-title">Terminal</span>
+        <button class="term-close" onclick="toggleTerminal()" aria-label="Close terminal">&times;</button>
+    </div>
+    <div id="term-mount" class="term-mount"></div>
+</div>
 <div id="note-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNotePreview()">
     <div class="note-modal">
         <div class="note-modal-header">
@@ -1861,6 +1912,131 @@ async function runTidy() {
         btn.removeAttribute('data-busy');
     }
 }
+
+/* --- Embedded terminal ---
+   Lazy-initialised on first toggle: opens a WebSocket to /ws/term, wires
+   xterm.js bidirectionally, tracks size changes via FitAddon, and keeps
+   the pane height / open state in localStorage. */
+var _term = null;
+var _termFit = null;
+var _termWs = null;
+
+function _termSendResize() {
+    if (!_termFit || !_termWs || _termWs.readyState !== WebSocket.OPEN) return;
+    try {
+        _termFit.fit();
+        _termWs.send(JSON.stringify({
+            type: 'resize',
+            cols: _term.cols,
+            rows: _term.rows,
+        }));
+    } catch (e) {}
+}
+
+function _termInit() {
+    if (_term) return;
+    var mount = document.getElementById('term-mount');
+    if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+        mount.innerHTML = '<p style="color:#faa; padding: 1rem;">' +
+            'Terminal assets failed to load — xterm.js CDN unreachable?</p>';
+        return;
+    }
+    _term = new Terminal({
+        convertEol: false,
+        cursorBlink: true,
+        fontFamily: 'ui-monospace, "SF Mono", "Menlo", monospace',
+        fontSize: 13,
+        theme: {background: '#0b0b0e', foreground: '#e6e6e6'},
+    });
+    _termFit = new FitAddon.FitAddon();
+    _term.loadAddon(_termFit);
+    _term.open(mount);
+    _termFit.fit();
+
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    _termWs = new WebSocket(proto + '//' + location.host + '/ws/term');
+    _termWs.binaryType = 'arraybuffer';
+    _termWs.onopen = function() {
+        _termSendResize();
+    };
+    _termWs.onmessage = function(ev) {
+        if (typeof ev.data === 'string') {
+            try {
+                var obj = JSON.parse(ev.data);
+                if (obj.type === 'error' && obj.message) {
+                    _term.write('\r\n\x1b[31m' + obj.message + '\x1b[0m\r\n');
+                }
+            } catch (e) {}
+            return;
+        }
+        _term.write(new Uint8Array(ev.data));
+    };
+    _termWs.onclose = function() {
+        if (_term) _term.write('\r\n\x1b[2m[terminal session ended]\x1b[0m\r\n');
+    };
+    _term.onData(function(data) {
+        if (_termWs && _termWs.readyState === WebSocket.OPEN) {
+            _termWs.send(new TextEncoder().encode(data));
+        }
+    });
+    window.addEventListener('resize', _termSendResize);
+}
+
+function toggleTerminal() {
+    var pane = document.getElementById('term-pane');
+    var opening = pane.hasAttribute('hidden');
+    if (opening) {
+        pane.removeAttribute('hidden');
+        document.body.classList.add('term-open');
+        localStorage.setItem('term-open', '1');
+        _termInit();
+        setTimeout(_termSendResize, 0);
+        if (_term) _term.focus();
+    } else {
+        pane.setAttribute('hidden', '');
+        document.body.classList.remove('term-open');
+        localStorage.removeItem('term-open');
+    }
+}
+
+/* Drag-resize: adjust the --term-height CSS variable while dragging, then
+   persist the final value. */
+var _termDrag = null;
+function termDragStart(ev) {
+    _termDrag = {startY: ev.clientY, startH: document.getElementById('term-pane').offsetHeight};
+    document.addEventListener('mousemove', _termDragMove);
+    document.addEventListener('mouseup', _termDragEnd);
+    ev.preventDefault();
+}
+function _termDragMove(ev) {
+    if (!_termDrag) return;
+    var dy = _termDrag.startY - ev.clientY;
+    var h = Math.max(140, Math.min(window.innerHeight - 80, _termDrag.startH + dy));
+    document.documentElement.style.setProperty('--term-height', h + 'px');
+}
+function _termDragEnd() {
+    document.removeEventListener('mousemove', _termDragMove);
+    document.removeEventListener('mouseup', _termDragEnd);
+    if (!_termDrag) return;
+    _termDrag = null;
+    var h = document.getElementById('term-pane').offsetHeight;
+    localStorage.setItem('term-height', h + 'px');
+    _termSendResize();
+}
+
+// Restore persisted height + open state on load.
+(function restoreTerm() {
+    var saved = localStorage.getItem('term-height');
+    if (saved) document.documentElement.style.setProperty('--term-height', saved);
+    if (localStorage.getItem('term-open') === '1') {
+        document.addEventListener('DOMContentLoaded', function() {
+            // Defer until xterm scripts have loaded (they use `defer`).
+            window.addEventListener('load', function() {
+                if (typeof Terminal !== 'undefined') toggleTerminal();
+            }, {once: true});
+        });
+    }
+})();
 
 checkUpdates();
 setInterval(checkUpdates, 5000);
