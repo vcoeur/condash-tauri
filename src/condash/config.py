@@ -109,6 +109,18 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # primary = ["repo-a", { name = "repo-b", submodules = ["apps/web", "apps/api"] }]
 # secondary = ["repo-c", "repo-d"]
 
+# [terminal]
+# Settings for the embedded bottom-pane terminal.
+#   - shell:    absolute path to an interactive shell. Unset → use $SHELL,
+#               falling back to /bin/bash. Example: "/usr/bin/zsh"
+#   - shortcut: single keyboard combo to toggle the pane. Defaults to
+#               Ctrl+`. Supported modifiers: Ctrl, Shift, Alt, Meta.
+#               Key names follow the HTML KeyboardEvent.key convention
+#               (single chars like "T", "`", or names like "Enter",
+#               "Escape"). Examples: "Ctrl+`", "Ctrl+Shift+T", "Alt+T".
+# shell    = "/bin/zsh"
+# shortcut = "Ctrl+`"
+
 # [open_with.<slot>]
 # Three vendor-neutral launcher slots: `main_ide`, `secondary_ide`, `terminal`.
 # Each slot defines:
@@ -201,6 +213,23 @@ class OpenWithSlot:
         return out
 
 
+DEFAULT_TERMINAL_SHORTCUT = "Ctrl+`"
+
+
+@dataclass
+class TerminalConfig:
+    """Settings for the embedded bottom-pane terminal.
+
+    ``shell`` is an absolute path to an interactive shell; empty / unset
+    means "use ``$SHELL``, falling back to /bin/bash". ``shortcut`` is a
+    single keyboard combo parsed by the frontend (see the README for the
+    accepted format — `Ctrl+<key>`, `Ctrl+Shift+T`, etc.).
+    """
+
+    shell: str | None = None
+    shortcut: str = DEFAULT_TERMINAL_SHORTCUT
+
+
 @dataclass
 class CondashConfig:
     """Runtime configuration for a condash session."""
@@ -211,6 +240,7 @@ class CondashConfig:
     repositories_primary: list[str] = field(default_factory=list)
     repositories_secondary: list[str] = field(default_factory=list)
     repo_submodules: dict[str, list[str]] = field(default_factory=dict)
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)
     port: int = 0
     native: bool = True
     open_with: dict[str, OpenWithSlot] = field(default_factory=dict)
@@ -291,6 +321,17 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
         doc["repositories"] = repos
     repos["primary"] = _render_repo_list(cfg.repositories_primary, cfg.repo_submodules)
     repos["secondary"] = _render_repo_list(cfg.repositories_secondary, cfg.repo_submodules)
+
+    # [terminal]
+    term_table = doc.get("terminal")
+    if not hasattr(term_table, "value"):
+        term_table = table()
+        doc["terminal"] = term_table
+    if cfg.terminal.shell:
+        term_table["shell"] = cfg.terminal.shell
+    elif "shell" in term_table:
+        del term_table["shell"]
+    term_table["shortcut"] = cfg.terminal.shortcut or DEFAULT_TERMINAL_SHORTCUT
 
     # [open_with.<slot>]
     open_with_table = doc.get("open_with")
@@ -431,6 +472,20 @@ def _parse(data: dict, source: Path) -> CondashConfig:
             )
         open_with[slot_key] = OpenWithSlot(label=label, commands=list(commands_raw))
 
+    terminal_raw = data.get("terminal") or {}
+    if not isinstance(terminal_raw, dict):
+        raise ConfigIncompleteError(f"{source}: 'terminal' must be a table")
+    term_shell = terminal_raw.get("shell")
+    if term_shell is not None and not isinstance(term_shell, str):
+        raise ConfigIncompleteError(f"{source}: 'terminal.shell' must be a string")
+    term_shortcut = terminal_raw.get("shortcut", DEFAULT_TERMINAL_SHORTCUT)
+    if not isinstance(term_shortcut, str) or not term_shortcut.strip():
+        raise ConfigIncompleteError(f"{source}: 'terminal.shortcut' must be a non-empty string")
+    terminal = TerminalConfig(
+        shell=(term_shell.strip() or None) if term_shell else None,
+        shortcut=term_shortcut.strip(),
+    )
+
     return CondashConfig(
         conception_path=conception_path,
         workspace_path=workspace_path,
@@ -438,6 +493,7 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         repositories_primary=primary,
         repositories_secondary=secondary,
         repo_submodules=repo_submodules,
+        terminal=terminal,
         port=port_raw,
         native=native_raw,
         open_with=open_with,

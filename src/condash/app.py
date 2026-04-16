@@ -379,8 +379,17 @@ async def _run_pty_session(ws: WebSocket) -> None:
     import struct
     import termios
 
-    shell = os.environ.get("SHELL", "/bin/bash")
+    shell = (
+        _resolve_terminal_shell(_RUNTIME_CFG)
+        if _RUNTIME_CFG is not None
+        else os.environ.get("SHELL") or "/bin/bash"
+    )
     cwd = str(legacy.BASE_DIR) if legacy.BASE_DIR.is_dir() else os.path.expanduser("~")
+    # Announce the resolved shell + cwd so the term header can surface them.
+    try:
+        await ws.send_text(json.dumps({"type": "info", "shell": shell, "cwd": cwd}))
+    except Exception:
+        return
 
     pid, fd = pty.fork()
     if pid == 0:
@@ -499,6 +508,11 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
         "native": bool(cfg.native),
         "repositories_primary": _repo_entries(cfg.repositories_primary, cfg.repo_submodules),
         "repositories_secondary": _repo_entries(cfg.repositories_secondary, cfg.repo_submodules),
+        "terminal": {
+            "shell": cfg.terminal.shell or "",
+            "shortcut": cfg.terminal.shortcut,
+            "resolved_shell": _resolve_terminal_shell(cfg),
+        },
         "open_with": {
             slot_key: {
                 "label": cfg.open_with[slot_key].label,
@@ -508,6 +522,16 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
             if slot_key in cfg.open_with
         },
     }
+
+
+def _resolve_terminal_shell(cfg: CondashConfig) -> str:
+    """Single source of truth for which shell the pty actually launches.
+
+    Priority: explicit ``terminal.shell`` config → ``$SHELL`` env → /bin/bash.
+    """
+    if cfg.terminal.shell:
+        return cfg.terminal.shell
+    return os.environ.get("SHELL") or "/bin/bash"
 
 
 def _parse_repo_entries(raw: object, key: str) -> tuple[list[str], dict[str, list[str]]]:
@@ -593,6 +617,15 @@ def _payload_to_config(data: dict) -> CondashConfig:
             raise ValueError(f"open_with.{slot_key}.commands must be a list")
         open_with[slot_key] = OpenWithSlot(label=label, commands=commands)
 
+    term_raw = data.get("terminal") or {}
+    if not isinstance(term_raw, dict):
+        raise ValueError("terminal must be an object")
+    shell_in = str(term_raw.get("shell") or "").strip() or None
+    shortcut_in = (
+        str(term_raw.get("shortcut") or "").strip() or config_mod.DEFAULT_TERMINAL_SHORTCUT
+    )
+    terminal = config_mod.TerminalConfig(shell=shell_in, shortcut=shortcut_in)
+
     return CondashConfig(
         conception_path=conception,
         workspace_path=workspace,
@@ -600,6 +633,7 @@ def _payload_to_config(data: dict) -> CondashConfig:
         repositories_primary=primary,
         repositories_secondary=secondary,
         repo_submodules=repo_submodules,
+        terminal=terminal,
         port=port_raw,
         native=native_raw,
         open_with=open_with,

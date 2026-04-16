@@ -128,16 +128,34 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html, body { height: 100%; }
 body {
+    display: flex; flex-direction: column;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.5;
-    padding: 1.5rem 2rem 3.5rem; max-width: 1100px; margin: 0 auto;
+    overflow: hidden;
 }
 
-/* --- Header --- */
-/* Scoped to direct children of <body> so pandoc's `<tr class="header">`
+/* --- App shell ---
+   A flex-column wrapper that owns the fixed rows (header, banner, meta,
+   tab strips) plus a single scrolling <main>. The terminal pane lives as
+   a sibling of .app directly under <body>, so opening it shrinks .app
+   rather than stacking a second scroll region on top of a taller body. */
+.app {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column;
+    max-width: 1100px; width: 100%; margin: 0 auto;
+    padding: 1rem 2rem 0;
+}
+#main-scroll {
+    flex: 1 1 auto; min-height: 0; overflow: auto;
+    padding-bottom: 1.5rem;
+}
+
+/* --- Header ---
+   Scoped to direct children of .app so pandoc's `<tr class="header">`
    in note-body tables does not inherit the flex layout. */
-body > .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+.app > .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
 h1 { font-size: 1.4rem; }
 .meta { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem; }
 
@@ -216,6 +234,27 @@ h1 { font-size: 1.4rem; }
 .tab-count { font-weight: 400; color: var(--text-muted); margin-left: 0.3rem; }
 .tab.active .tab-count { color: var(--text-secondary); }
 
+/* Secondary tab strip nested under Projects — smaller, lower-contrast
+   border so the visual hierarchy matches "top-level vs filter". */
+.tabs-secondary {
+    margin-top: -0.6rem; margin-bottom: 1rem;
+    border-bottom-style: dashed; border-bottom-color: var(--border);
+}
+.tabs-secondary .tab { font-size: 0.78rem; padding: 0.35rem 1rem; }
+
+/* --- Knowledge toolbar --- */
+.knowledge-toolbar { margin-bottom: 0.8rem; }
+.knowledge-toolbar input[type="search"] {
+    width: 100%; padding: 0.5rem 0.8rem;
+    border: 1px solid var(--input-border); border-radius: 8px;
+    background: var(--input-bg); color: var(--text);
+    font-size: 0.92rem;
+}
+.knowledge-toolbar input[type="search"]:focus {
+    outline: none; border-color: var(--input-focus);
+}
+.knowledge-empty { color: var(--text-muted); font-size: 0.88rem; padding: 0.6rem 0.2rem; }
+
 /* --- Header action buttons (reload, tidy) ---
    Always clickable; a small dot indicator lights up when the action is
    recommended — /check-updates signals "items or git changed since page
@@ -231,21 +270,19 @@ h1 { font-size: 1.4rem; }
 .tidy-btn[data-busy="1"] { opacity: 0.55; pointer-events: none; }
 
 /* --- Embedded terminal (bottom pane) ---
-   Fixed to the viewport bottom, toggleable via the terminal button in the
-   header. xterm.js renders inside .term-mount and is wired to /ws/term
-   which drives a real shell in a pty. Height is drag-resizable via the
-   top handle; persisted in localStorage so it survives reloads. */
+   A flex sibling of .app — opening it shrinks the main scroll region
+   rather than overlaying. Height is drag-resizable via the top handle;
+   value persists in localStorage. Content inside .term-mount scrolls
+   independently (its own xterm scrollback). */
 .term-pane {
-    position: fixed; left: 0; right: 0; bottom: 0;
+    flex: 0 0 auto;
     height: var(--term-height, 38vh); min-height: 140px;
-    z-index: 900;
     display: flex; flex-direction: column;
     background: #0b0b0e; color: #ddd;
     border-top: 1px solid var(--border);
     box-shadow: 0 -4px 12px rgba(0,0,0,0.25);
 }
 .term-pane[hidden] { display: none; }
-body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
 .term-handle {
     height: 4px; cursor: ns-resize; background: var(--border);
     flex-shrink: 0;
@@ -256,6 +293,12 @@ body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
     background: #17181c; border-bottom: 1px solid #2a2b30;
 }
 .term-title { font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.term-shell {
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.72rem; color: #8a8a92;
+}
+.term-spacer { flex: 1; }
+.term-header { gap: 0.7rem; }
 .term-close {
     background: transparent; color: #bdbdbd; border: none;
     font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 4px;
@@ -781,24 +824,20 @@ body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
 .git-row-collapsible.is-expanded .git-chevron {
     transform: rotate(90deg);
 }
-/* The submodule group container sits immediately after its parent row
-   and is collapsed by default. */
-.git-submodules.collapsed { display: none; }
-
-/* Submodule row: plain subdirectory of a repo (e.g. assembly-line/backend).
-   Inherits branch/status from its parent so the row only shows the name
-   column and the open buttons. Indented deeper than a worktree row. */
-.git-row.git-submodule {
-    padding: 0.22rem 1rem;
-    opacity: 0.8;
+/* Subrepo group container — sits immediately after its parent row and
+   is collapsed by default. Rows inside match the parent repo's size so
+   a subrepo looks first-class; the accent left border + small label are
+   the only visual cues that they belong to the row above. */
+.git-subgroup.collapsed { display: none; }
+.git-subgroup {
+    margin: 0.15rem 0 0.3rem;
+    border-left: 2px solid var(--accent);
+    padding: 0.2rem 0 0.2rem 0.6rem;
 }
-.git-row.git-submodule .git-name {
-    font-weight: 500; font-size: 0.78rem;
-    color: var(--text-secondary);
-    padding-left: 2.6rem;
-}
-.git-row.git-submodule.git-submodule-of-worktree .git-name {
-    padding-left: 4rem;
+.git-subgroup-label {
+    font-size: 0.66rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text-muted);
+    padding: 2px 0 4px;
 }
 
 /* Action buttons — IDEA / VS Code / Terminal, icon-only, left-aligned.
@@ -830,6 +869,7 @@ body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
 </style>
 </head>
 <body>
+<div class="app">
 <div class="header">
     <h1>Incidents, Projects &amp; Documents</h1>
     <div class="header-actions">
@@ -869,21 +909,38 @@ body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
     <button type="button" onclick="openConfigModal()">Configure</button>
 </div>
 <div class="meta">{{TIMESTAMP}}</div>
-<div class="tabs">
-    <div class="tab active" data-tab="current" onclick="switchTab('current')">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
-    <div class="tab" data-tab="next" onclick="switchTab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
-    <div class="tab" data-tab="backlog" onclick="switchTab('backlog')">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
-    <div class="tab" data-tab="done" onclick="switchTab('done')">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
+<div class="tabs tabs-primary">
+    <div class="tab active" data-tab="projects" onclick="switchTab('projects')">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
+    <div class="tab" data-tab="code" onclick="switchTab('code')">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
     <div class="tab" data-tab="knowledge" onclick="switchTab('knowledge')">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
 </div>
-<div id="cards">{{CARDS}}</div>
-<div id="knowledge" style="display:none">{{KNOWLEDGE}}</div>
-<div class="git-section-heading">Git</div>
-<div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
+<div id="projects-subtabs" class="tabs tabs-secondary">
+    <div class="tab active" data-subtab="current" onclick="switchSubtab('current')">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
+    <div class="tab" data-subtab="next" onclick="switchSubtab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
+    <div class="tab" data-subtab="backlog" onclick="switchSubtab('backlog')">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
+    <div class="tab" data-subtab="done" onclick="switchSubtab('done')">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
+</div>
+<main id="main-scroll">
+    <div id="projects-pane">
+        <div id="cards">{{CARDS}}</div>
+    </div>
+    <div id="code-pane" style="display:none">
+        <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
+    </div>
+    <div id="knowledge-pane" style="display:none">
+        <div class="knowledge-toolbar">
+            <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off">
+        </div>
+        <div id="knowledge">{{KNOWLEDGE}}</div>
+    </div>
+</main>
+</div>
 <div id="term-pane" class="term-pane" hidden>
     <div class="term-handle" onmousedown="termDragStart(event)" title="Drag to resize"></div>
     <div class="term-header">
         <span class="term-title">Terminal</span>
+        <span class="term-shell" id="term-shell"></span>
+        <span class="term-spacer"></span>
         <button class="term-close" onclick="toggleTerminal()" aria-label="Close terminal">&times;</button>
     </div>
     <div id="term-mount" class="term-mount"></div>
@@ -944,6 +1001,17 @@ body.term-open { padding-bottom: calc(var(--term-height, 38vh) + 0.5rem); }
                     </label>
                     <label>secondary
                         <textarea name="repositories_secondary" rows="3" placeholder="conception"></textarea>
+                    </label>
+                </fieldset>
+                <fieldset class="config-fieldset">
+                    <legend>Embedded terminal</legend>
+                    <label>shell
+                        <input type="text" name="terminal_shell" placeholder="(defaults to $SHELL, then /bin/bash)">
+                        <small id="term-shell-resolved"></small>
+                    </label>
+                    <label>toggle shortcut
+                        <input type="text" name="terminal_shortcut" placeholder="Ctrl+`">
+                        <small>Modifiers: Ctrl, Shift, Alt, Meta. Key names: single chars or KeyboardEvent.key names (Enter, Escape, …).</small>
                     </label>
                 </fieldset>
                 <fieldset class="config-fieldset">
@@ -1100,6 +1168,15 @@ async function openConfigModal() {
         _setSlotFields(form, 'main_ide', ow.main_ide);
         _setSlotFields(form, 'secondary_ide', ow.secondary_ide);
         _setSlotFields(form, 'terminal', ow.terminal);
+        var term = cfg.terminal || {};
+        _setField(form, 'terminal_shell', term.shell);
+        _setField(form, 'terminal_shortcut', term.shortcut);
+        var resolvedNote = document.getElementById('term-shell-resolved');
+        if (resolvedNote) {
+            resolvedNote.textContent = term.resolved_shell
+                ? 'Currently resolved: ' + term.resolved_shell
+                : '';
+        }
         // Stash the loaded port/native so we can detect changes on save.
         form.dataset.loadedPort = String(cfg.port);
         form.dataset.loadedNative = String(cfg.native);
@@ -1128,6 +1205,10 @@ async function saveConfig(ev) {
         native: _getField(form, 'native'),
         repositories_primary: _linesToRepos(form.elements['repositories_primary'].value),
         repositories_secondary: _linesToRepos(form.elements['repositories_secondary'].value),
+        terminal: {
+            shell: _getField(form, 'terminal_shell'),
+            shortcut: _getField(form, 'terminal_shortcut'),
+        },
         open_with: {
             main_ide: _readSlotFields(form, 'main_ide'),
             secondary_ide: _readSlotFields(form, 'secondary_ide'),
@@ -1198,7 +1279,7 @@ async function openPath(ev, path, tool) {
    via openPath, so they don't trigger a toggle. */
 function toggleSubmodules(row) {
     var next = row.nextElementSibling;
-    if (!next || !next.classList.contains('git-submodules')) return;
+    if (!next || !next.classList.contains('git-subgroup')) return;
     var nowCollapsed = next.classList.toggle('collapsed');
     row.classList.toggle('is-expanded', !nowCollapsed);
 }
@@ -1255,49 +1336,71 @@ var TAB_MAP = {
 };
 // Tabs where the priority groups should be labelled with a subheader.
 var TAB_SHOWS_HEADINGS = {current: true, next: true};
-var VALID_TABS = ['current', 'next', 'backlog', 'done', 'knowledge'];
-var _activeTab = 'current';
+var PRIMARY_TABS = ['projects', 'code', 'knowledge'];
+var SUBTABS = ['current', 'next', 'backlog', 'done'];
+var _activeTab = 'projects';
+var _activeSubtab = 'current';
+// Map legacy `?tab=current` style URLs onto the new (primary, sub) pair.
+var LEGACY_TAB_ALIAS = {
+    current: ['projects', 'current'],
+    next: ['projects', 'next'],
+    backlog: ['projects', 'backlog'],
+    done: ['projects', 'done'],
+    knowledge: ['knowledge', null],
+};
+
+function _persistTabState() {
+    var url = new URL(location.href);
+    url.searchParams.set('tab', _activeTab);
+    if (_activeTab === 'projects') url.searchParams.set('sub', _activeSubtab);
+    else url.searchParams.delete('sub');
+    history.replaceState(null, '', url);
+}
 
 function switchTab(tab) {
+    if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
     if ((_itemsStale || _gitStale) && tab !== _activeTab) {
         location.reload();
         return;
     }
     _activeTab = tab;
-    document.querySelectorAll('.tab').forEach(function(t) {
+    document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-tab') === tab);
     });
-    // Knowledge is a separate panel, not a card filter — swap the main
-    // content region wholesale when switching in or out of it.
-    var knowledgeTab = tab === 'knowledge';
-    document.getElementById('cards').style.display = knowledgeTab ? 'none' : '';
-    var knowledgePanel = document.getElementById('knowledge');
-    if (knowledgePanel) knowledgePanel.style.display = knowledgeTab ? '' : 'none';
-    if (knowledgeTab) {
-        var url = new URL(location.href);
-        url.searchParams.set('tab', tab);
-        history.replaceState(null, '', url);
-        return;
-    }
-    var allowed = TAB_MAP[tab] || [];
+    // Reveal the pane matching the active primary tab.
+    document.getElementById('projects-pane').style.display = tab === 'projects' ? '' : 'none';
+    document.getElementById('code-pane').style.display = tab === 'code' ? '' : 'none';
+    document.getElementById('knowledge-pane').style.display = tab === 'knowledge' ? '' : 'none';
+    // The Current/Next/Backlog/Done filter only applies under Projects.
+    document.getElementById('projects-subtabs').style.display = tab === 'projects' ? '' : 'none';
+    if (tab === 'projects') _applySubtab(_activeSubtab);
+    _persistTabState();
+}
+
+function switchSubtab(sub) {
+    if (!SUBTABS.includes(sub)) sub = 'current';
+    _activeSubtab = sub;
+    _applySubtab(sub);
+    _persistTabState();
+}
+
+function _applySubtab(sub) {
+    document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
+        t.classList.toggle('active', t.getAttribute('data-subtab') === sub);
+    });
+    var allowed = TAB_MAP[sub] || [];
     document.querySelectorAll('.card').forEach(function(card) {
         card.classList.toggle('hidden', allowed.indexOf(card.getAttribute('data-priority')) === -1);
     });
-    // Group headings: visible only when the tab shows headings AND the group
-    // is in the allowed list AND at least one matching card exists.
     document.querySelectorAll('.group-heading').forEach(function(h) {
         var pri = h.getAttribute('data-group');
-        var show = TAB_SHOWS_HEADINGS[tab] && allowed.indexOf(pri) !== -1;
+        var show = TAB_SHOWS_HEADINGS[sub] && allowed.indexOf(pri) !== -1;
         if (show) {
             var any = document.querySelector('.card[data-priority="' + pri + '"]');
             if (!any) show = false;
         }
         h.classList.toggle('hidden', !show);
     });
-    // Persist active tab in URL so a page refresh stays on the same tab.
-    var url = new URL(location.href);
-    url.searchParams.set('tab', tab);
-    history.replaceState(null, '', url);
 }
 
 async function pickPriority(file, val, wrap) {
@@ -1317,6 +1420,7 @@ async function pickPriority(file, val, wrap) {
     card.setAttribute('data-priority', val);
     sortCards();
     switchTab(_activeTab);
+    if (_activeTab === 'projects') switchSubtab(_activeSubtab);
     updateTabCounts();
     updateBaseline();
 }
@@ -1327,13 +1431,26 @@ document.addEventListener('click', function(e) {
 
 document.addEventListener('DOMContentLoaded', function() {
     var params = new URLSearchParams(location.search);
-    var tab = params.get('tab');
-    switchTab(VALID_TABS.indexOf(tab) !== -1 ? tab : 'current');
+    var tab = params.get('tab') || '';
+    var sub = params.get('sub') || '';
+    // Legacy URL support: old ?tab=current links land on Projects/Current.
+    var alias = LEGACY_TAB_ALIAS[tab];
+    if (alias) { tab = alias[0]; sub = alias[1] || sub; }
+    if (PRIMARY_TABS.indexOf(tab) === -1) tab = 'projects';
+    if (tab === 'projects' && SUBTABS.indexOf(sub) !== -1) _activeSubtab = sub;
+    switchTab(tab);
 });
 
 function updateTabCounts() {
-    document.querySelectorAll('.tab').forEach(function(t) {
-        var tab = t.getAttribute('data-tab');
+    // Primary tabs — Projects counts active items under Projects-tab
+    // priorities; Code + Knowledge are rendered with a static count from
+    // the server and don't need a client-side refresh on priority changes.
+    var projectsCount = document.querySelectorAll('#cards .card').length;
+    var projectsTab = document.querySelector('.tabs-primary .tab[data-tab="projects"] .tab-count');
+    if (projectsTab) projectsTab.textContent = '(' + projectsCount + ')';
+    // Subtabs
+    document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
+        var tab = t.getAttribute('data-subtab');
         var allowed = TAB_MAP[tab] || [];
         var count = [].slice.call(document.querySelectorAll('.card')).filter(function(c) {
             return allowed.indexOf(c.getAttribute('data-priority')) !== -1;
@@ -1341,6 +1458,41 @@ function updateTabCounts() {
         var span = t.querySelector('.tab-count');
         if (span) span.textContent = '(' + count + ')';
     });
+}
+
+/* --- Knowledge search ---
+   Substring-match against each card's title, description, and path. Hide
+   groups that end up with zero matches; surface an empty-state line when
+   the whole panel is empty. */
+function filterKnowledge(q) {
+    q = (q || '').trim().toLowerCase();
+    var panel = document.getElementById('knowledge');
+    if (!panel) return;
+    var totalVisible = 0;
+    panel.querySelectorAll('.knowledge-group').forEach(function(group) {
+        var groupVisible = 0;
+        group.querySelectorAll('.knowledge-card').forEach(function(card) {
+            var hay = (card.textContent || '').toLowerCase();
+            var match = !q || hay.indexOf(q) !== -1;
+            card.style.display = match ? '' : 'none';
+            if (match) groupVisible += 1;
+        });
+        group.style.display = groupVisible ? '' : 'none';
+        totalVisible += groupVisible;
+    });
+    var existingEmpty = panel.querySelector('.knowledge-empty');
+    if (q && totalVisible === 0) {
+        if (!existingEmpty) {
+            var empty = document.createElement('p');
+            empty.className = 'knowledge-empty';
+            empty.textContent = 'No knowledge pages match "' + q + '".';
+            panel.appendChild(empty);
+        } else {
+            existingEmpty.textContent = 'No knowledge pages match "' + q + '".';
+        }
+    } else if (existingEmpty) {
+        existingEmpty.remove();
+    }
 }
 
 function toggleSection(el) {
@@ -1965,6 +2117,9 @@ function _termInit() {
                 var obj = JSON.parse(ev.data);
                 if (obj.type === 'error' && obj.message) {
                     _term.write('\r\n\x1b[31m' + obj.message + '\x1b[0m\r\n');
+                } else if (obj.type === 'info') {
+                    var label = document.getElementById('term-shell');
+                    if (label) label.textContent = obj.shell || '';
                 }
             } catch (e) {}
             return;
@@ -1987,14 +2142,12 @@ function toggleTerminal() {
     var opening = pane.hasAttribute('hidden');
     if (opening) {
         pane.removeAttribute('hidden');
-        document.body.classList.add('term-open');
         localStorage.setItem('term-open', '1');
         _termInit();
         setTimeout(_termSendResize, 0);
         if (_term) _term.focus();
     } else {
         pane.setAttribute('hidden', '');
-        document.body.classList.remove('term-open');
         localStorage.removeItem('term-open');
     }
 }
@@ -2023,6 +2176,70 @@ function _termDragEnd() {
     localStorage.setItem('term-height', h + 'px');
     _termSendResize();
 }
+
+/* Parse a shortcut spec like "Ctrl+`" / "Ctrl+Shift+T" / "Alt+K" into a
+   comparison object. Returns null on malformed input so we can bail
+   instead of binding a bogus handler. */
+function _parseShortcut(spec) {
+    if (!spec || typeof spec !== 'string') return null;
+    var parts = spec.split('+').map(function(s){return s.trim();}).filter(Boolean);
+    if (!parts.length) return null;
+    var mods = {ctrl: false, shift: false, alt: false, meta: false};
+    var key = null;
+    parts.forEach(function(p) {
+        var low = p.toLowerCase();
+        if (low === 'ctrl' || low === 'control') mods.ctrl = true;
+        else if (low === 'shift') mods.shift = true;
+        else if (low === 'alt' || low === 'option') mods.alt = true;
+        else if (low === 'meta' || low === 'cmd' || low === 'command' || low === 'super') mods.meta = true;
+        else key = p;
+    });
+    if (!key) return null;
+    return {
+        ctrl: mods.ctrl, shift: mods.shift, alt: mods.alt, meta: mods.meta,
+        // Normalise single chars to lower-case; leave named keys as-is.
+        key: key.length === 1 ? key.toLowerCase() : key,
+    };
+}
+
+function _matchShortcut(ev, spec) {
+    if (!spec) return false;
+    if (ev.ctrlKey !== spec.ctrl) return false;
+    if (ev.shiftKey !== spec.shift) return false;
+    if (ev.altKey !== spec.alt) return false;
+    if (ev.metaKey !== spec.meta) return false;
+    var k = ev.key;
+    return (k && k.length === 1 ? k.toLowerCase() : k) === spec.key;
+}
+
+var _termShortcut = null;
+
+async function _loadTermShortcut() {
+    try {
+        var res = await fetch('/config');
+        if (!res.ok) return;
+        var cfg = await res.json();
+        var spec = _parseShortcut((cfg.terminal && cfg.terminal.shortcut) || 'Ctrl+`');
+        _termShortcut = spec;
+    } catch (e) {}
+}
+
+document.addEventListener('keydown', function(ev) {
+    if (!_termShortcut) return;
+    // Ignore keys typed inside inputs/textareas unless the shortcut
+    // includes a modifier (otherwise plain keys would swallow user input).
+    var inEditable = ev.target && (ev.target.tagName === 'INPUT' ||
+                                   ev.target.tagName === 'TEXTAREA' ||
+                                   ev.target.isContentEditable);
+    var hasModifier = _termShortcut.ctrl || _termShortcut.alt || _termShortcut.meta;
+    if (inEditable && !hasModifier) return;
+    if (_matchShortcut(ev, _termShortcut)) {
+        ev.preventDefault();
+        toggleTerminal();
+    }
+});
+
+_loadTermShortcut();
 
 // Restore persisted height + open state on load.
 (function restoreTerm() {

@@ -909,9 +909,16 @@ def _render_git_actions(path):
 
 
 def _render_submodule_rows(submodules, worktree=False):
+    """Render subrepo rows at the same visual size as parent repos.
+
+    The subrepos live inside a small grouping container (`.git-subgroup`)
+    under their parent repo / worktree so the relationship is still clear
+    — collapsible via the same toggle — but each row is a full-size
+    `.git-row` with its own action buttons, not an indented half-height
+    sub-row.
+    """
     if not submodules:
         return ""
-    extra = " git-submodule-of-worktree" if worktree else ""
     rows = []
     for sub in submodules:
         sub_actions = _render_git_actions(sub["path"])
@@ -923,15 +930,21 @@ def _render_submodule_rows(submodules, worktree=False):
             else '<span class="git-clean">\u2713</span>'
         )
         rows.append(
-            f'<div class="git-row git-submodule{extra}{dirty_cls}" title="{h(sub["path"])}">'
+            f'<div class="git-row{dirty_cls}" title="{h(sub["path"])}">'
             f"{sub_actions}"
-            f'<span class="git-name">\u2514 {h(sub["name"])}</span>'
+            f'<span class="git-name">{h(sub["name"])}</span>'
             f'<span class="git-branch"></span>'
             f'<span class="git-status">{badge}</span>'
             f'<span class="git-spacer"></span></div>'
         )
     inner = "\n".join(rows)
-    return f'<div class="git-submodules collapsed">\n{inner}\n</div>'
+    scope = "worktree" if worktree else "repo"
+    return (
+        f'<div class="git-subgroup git-subgroup-{scope} collapsed">'
+        f'<div class="git-subgroup-label">Subrepos</div>'
+        f"{inner}"
+        f"</div>"
+    )
 
 
 def _render_git_repos(groups):
@@ -1029,10 +1042,12 @@ def render_page(items):
 
     git_groups = _collect_git_repos()
     git_html = _render_git_repos(git_groups)
+    count_repos = sum(len(repos) for _, repos in git_groups)
 
     knowledge_groups = collect_knowledge()
     knowledge_html = _render_knowledge(knowledge_groups)
     count_knowledge = sum(len(entries) for _, entries in knowledge_groups)
+    count_projects = len(all_items)
 
     template = _template_path().read_text(encoding="utf-8")
     template = template.replace("{{CARDS}}", cards)
@@ -1044,6 +1059,8 @@ def render_page(items):
         .replace("{{COUNT_NEXT}}", str(count_next))
         .replace("{{COUNT_BACKLOG}}", str(count_backlog))
         .replace("{{COUNT_DONE}}", str(count_done))
+        .replace("{{COUNT_PROJECTS}}", str(count_projects))
+        .replace("{{COUNT_REPOS}}", str(count_repos))
         .replace("{{COUNT_KNOWLEDGE}}", str(count_knowledge))
     )
 
