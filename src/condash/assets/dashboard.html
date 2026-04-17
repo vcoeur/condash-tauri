@@ -776,6 +776,17 @@ body {
     font-size: 0.72rem; color: var(--text-muted); margin-top: 0.3rem;
 }
 
+/* History pane — reuses .knowledge-* scaffolding (groups, badges, card
+   grid) but each item row carries a small row of status + kind pills. */
+.history-meta {
+    display: flex; flex-wrap: wrap; gap: 0.3rem;
+    margin-top: 0.35rem;
+}
+.history-meta .pill {
+    font-size: 0.7rem; padding: 0.05rem 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+
 /* --- Note preview modal --- */
 .note-modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,0.55);
@@ -1163,10 +1174,12 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     <div class="tab" data-subtab="next" onclick="switchSubtab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
     <div class="tab" data-subtab="backlog" onclick="switchSubtab('backlog')">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
     <div class="tab" data-subtab="done" onclick="switchSubtab('done')">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
+    <div class="tab" data-subtab="history" onclick="switchSubtab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
 </div>
 <main id="main-scroll">
     <div id="projects-pane">
         <div id="cards">{{CARDS}}</div>
+        <div id="history" style="display:none">{{HISTORY}}</div>
     </div>
     <div id="code-pane" style="display:none">
         <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
@@ -1624,12 +1637,15 @@ var TAB_MAP = {
     current: ['now', 'review'],
     next: ['soon', 'later'],
     backlog: ['backlog'],
-    done: ['done']
+    done: ['done'],
+    // History doesn't filter the cards grid — it swaps the pane body to
+    // the on-disk projects tree. Keyed here so lookups don't hit undefined.
+    history: []
 };
 // Tabs where the priority groups should be labelled with a subheader.
 var TAB_SHOWS_HEADINGS = {current: true, next: true};
 var PRIMARY_TABS = ['projects', 'code', 'knowledge'];
-var SUBTABS = ['current', 'next', 'backlog', 'done'];
+var SUBTABS = ['current', 'next', 'backlog', 'done', 'history'];
 var _activeTab = 'projects';
 var _activeSubtab = 'current';
 // Map legacy `?tab=current` style URLs onto the new (primary, sub) pair.
@@ -1684,6 +1700,17 @@ function _applySubtab(sub) {
     document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-subtab') === sub);
     });
+    // History swaps the pane body: hide the card grid, show the on-disk
+    // tree. All other subtabs are card-grid filters.
+    var cards = document.getElementById('cards');
+    var history = document.getElementById('history');
+    if (sub === 'history') {
+        if (cards) cards.style.display = 'none';
+        if (history) history.style.display = '';
+        return;
+    }
+    if (cards) cards.style.display = '';
+    if (history) history.style.display = 'none';
     var allowed = TAB_MAP[sub] || [];
     document.querySelectorAll('.card').forEach(function(card) {
         card.classList.toggle('hidden', allowed.indexOf(card.getAttribute('data-priority')) === -1);

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .context import RenderCtx
 from .git_scan import _collect_git_repos
-from .parser import PRI_ORDER, _note_kind, collect_knowledge
+from .parser import PRI_ORDER, _knowledge_title_and_desc, _note_kind, collect_knowledge
 from .wikilinks import _preprocess_wikilinks
 
 log = logging.getLogger(__name__)
@@ -370,6 +370,91 @@ def _render_index_badge(idx: dict, top_level: bool) -> str:
     )
 
 
+def _index_entry(ctx: RenderCtx, idx_path: Path) -> dict | None:
+    """Shape ``idx_path`` into the dict the index-badge renderer wants."""
+    if not idx_path.is_file():
+        return None
+    title, desc = _knowledge_title_and_desc(idx_path)
+    return {
+        "path": str(idx_path.relative_to(ctx.base_dir)),
+        "title": title,
+        "desc": desc,
+    }
+
+
+def _render_history_item(item: dict) -> str:
+    """Compact row for one project in the on-disk History view."""
+    js_path = json.dumps(item["path"]).replace("'", "\\'").replace('"', "'")
+    js_title = json.dumps(item["title"]).replace("'", "\\'").replace('"', "'")
+    pri = item["priority"]
+    kind = item["kind"]
+    slug = item["slug"]
+    return (
+        f'<div class="knowledge-card history-card" '
+        f'data-priority="{h(pri)}" data-kind="{h(kind)}" '
+        f'onclick="openNotePreview({js_path},{js_title})">'
+        f'<div class="knowledge-title">{h(item["title"])}</div>'
+        f'<div class="history-meta">'
+        f'<span class="pill pri-{h(pri)}">{h(pri)}</span>'
+        f'<span class="pill">{h(kind)}</span>'
+        f"</div>"
+        f'<div class="knowledge-path">{h(slug)}</div>'
+        f"</div>"
+    )
+
+
+def _render_history(ctx: RenderCtx, items: list[dict]) -> str:
+    """Render ``projects/`` as the on-disk tree: month buckets + items.
+
+    Mirrors the knowledge-tree affordances — ``projects/index.md`` and each
+    ``projects/YYYY-MM/index.md`` become clickable badges next to their
+    heading, and items inside each month appear in creation order (newest
+    first). The whole list is a direct reflection of disk state; no
+    filtering by priority or status. A project with no items renders an
+    explanatory empty state instead.
+    """
+    root_dir = ctx.base_dir / "projects"
+    if not root_dir.is_dir():
+        return '<p class="note-empty">No <code>projects/</code> tree under the configured conception path.</p>'
+
+    by_month: dict[str, list[dict]] = {}
+    for item in items:
+        parts = item["path"].split("/")
+        if len(parts) >= 2 and parts[0] == "projects":
+            by_month.setdefault(parts[1], []).append(item)
+
+    parts_out = ['<div class="knowledge-panel history-panel">']
+    root_index = _index_entry(ctx, root_dir / "index.md")
+    if root_index:
+        parts_out.append(_render_index_badge(root_index, top_level=True))
+
+    if not by_month:
+        parts_out.append('<p class="note-empty">No projects on disk yet.</p>')
+        parts_out.append("</div>")
+        return "".join(parts_out)
+
+    # Newest month first — month dirs are YYYY-MM so a string sort works.
+    for month in sorted(by_month.keys(), reverse=True):
+        month_items = sorted(by_month[month], key=lambda x: x["slug"], reverse=True)
+        parts_out.append('<details class="knowledge-group history-group" open>')
+        parts_out.append('<summary class="knowledge-group-heading">')
+        parts_out.append('<span class="knowledge-chevron" aria-hidden="true">&#9656;</span>')
+        parts_out.append(f'<span class="knowledge-group-name">{h(month)}</span>')
+        parts_out.append(f'<span class="knowledge-count">({len(month_items)})</span>')
+        month_index = _index_entry(ctx, root_dir / month / "index.md")
+        if month_index:
+            parts_out.append(_render_index_badge(month_index, top_level=False))
+        parts_out.append("</summary>")
+        parts_out.append('<div class="knowledge-list">')
+        for item in month_items:
+            parts_out.append(_render_history_item(item))
+        parts_out.append("</div>")
+        parts_out.append("</details>")
+
+    parts_out.append("</div>")
+    return "".join(parts_out)
+
+
 _ICON_SVGS = {
     # Generic "code editor window" — title bar with two horizontal code lines.
     "main_ide": (
@@ -567,16 +652,20 @@ def render_page(ctx: RenderCtx, items):
     count_knowledge = knowledge_root["count"] if knowledge_root else 0
     count_projects = len(all_items)
 
+    history_html = _render_history(ctx, all_items)
+
     template = ctx.template
     template = template.replace("{{CARDS}}", cards)
     template = template.replace("{{GIT_REPOS}}", git_html)
     template = template.replace("{{KNOWLEDGE}}", knowledge_html)
+    template = template.replace("{{HISTORY}}", history_html)
     return (
         template.replace("{{TIMESTAMP}}", now)
         .replace("{{COUNT_CURRENT}}", str(count_current))
         .replace("{{COUNT_NEXT}}", str(count_next))
         .replace("{{COUNT_BACKLOG}}", str(count_backlog))
         .replace("{{COUNT_DONE}}", str(count_done))
+        .replace("{{COUNT_HISTORY}}", str(count_projects))
         .replace("{{COUNT_PROJECTS}}", str(count_projects))
         .replace("{{COUNT_REPOS}}", str(count_repos))
         .replace("{{COUNT_KNOWLEDGE}}", str(count_knowledge))
