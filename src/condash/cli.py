@@ -85,10 +85,6 @@ def _root(
             err=True,
         )
 
-    from . import core as legacy
-
-    legacy.init(cfg)
-
     from . import app as app_module
 
     app_module.run(cfg)
@@ -113,10 +109,11 @@ def cmd_tidy(ctx: typer.Context) -> None:
         )
         raise typer.Exit(2)
 
-    from . import core as legacy
+    from .context import build_ctx
+    from .mutations import run_tidy
 
-    legacy.init(cfg)
-    moves = legacy.run_tidy()
+    ctx = build_ctx(cfg)
+    moves = run_tidy(ctx)
     if moves:
         for old, new in moves:
             typer.echo(f"  {old} \u2192 {new}")

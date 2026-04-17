@@ -5,10 +5,6 @@ and stamps it with the card list, git repo strip, knowledge tree, and
 summary counts. Smaller helpers render individual cards, notes,
 deliverables, steps, wikilinks-rewritten markdown, and the git repo
 action buttons.
-
-Reads ``BASE_DIR``, ``_OPEN_WITH`` and the ``_template_path`` loader from
-:mod:`condash.core`; Phase 2 replaces all three with an explicit
-``RenderCtx`` parameter.
 """
 
 from __future__ import annotations
@@ -22,6 +18,7 @@ from datetime import datetime
 from itertools import groupby
 from pathlib import Path
 
+from .context import RenderCtx
 from .git_scan import _collect_git_repos
 from .parser import PRI_ORDER, _note_kind, collect_knowledge
 from .wikilinks import _preprocess_wikilinks
@@ -53,13 +50,13 @@ def _rewrite_img_src(html, note_dir_rel):
     return _IMG_SRC_RE.sub(sub, html)
 
 
-def _render_markdown(full_path, note_dir_rel):
+def _render_markdown(ctx: RenderCtx, full_path, note_dir_rel):
     try:
         text = full_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         log.warning("render_markdown: could not read %s: %s", full_path, exc)
         return '<p class="note-error">Unable to read note.</p>'
-    text = _preprocess_wikilinks(text)
+    text = _preprocess_wikilinks(ctx, text)
     try:
         out = subprocess.run(
             ["pandoc", "--from=gfm", "--to=html", "--no-highlight"],
@@ -75,25 +72,17 @@ def _render_markdown(full_path, note_dir_rel):
     return f'<pre class="note-raw">{h(text)}</pre>'
 
 
-def _render_note(full_path: Path) -> str:
-    """Dispatch preview rendering by file kind — see ``_note_kind``.
-
-    Non-markdown kinds emit HTML that reuses the existing plumbing:
-    images/PDFs reference ``/file/<rel>``; text files are inlined in a
-    ``<pre>``; anything else falls back to an "Open externally" button
-    that the existing link-wiring routes through ``/open-doc``.
-    """
-    from . import core as legacy
-
+def _render_note(ctx: RenderCtx, full_path: Path) -> str:
+    """Dispatch preview rendering by file kind — see ``_note_kind``."""
     kind = _note_kind(full_path)
     try:
-        note_dir_rel = str(full_path.parent.relative_to(legacy.BASE_DIR))
+        note_dir_rel = str(full_path.parent.relative_to(ctx.base_dir))
     except ValueError:
         return '<p class="note-error">Path outside conception tree.</p>'
-    file_rel = str(full_path.relative_to(legacy.BASE_DIR))
+    file_rel = str(full_path.relative_to(ctx.base_dir))
 
     if kind == "md":
-        return _render_markdown(full_path, note_dir_rel)
+        return _render_markdown(ctx, full_path, note_dir_rel)
 
     if kind == "pdf":
         return (
@@ -415,13 +404,11 @@ _ICON_SVGS = {
 }
 
 
-def _render_git_actions(path):
-    from . import core as legacy
-
+def _render_git_actions(ctx: RenderCtx, path):
     js_path = json.dumps(path).replace("'", "\\'").replace('"', "'")
     items_html: list[str] = []
     for slot_key in ("main_ide", "secondary_ide", "terminal"):
-        slot = legacy._OPEN_WITH.get(slot_key)
+        slot = ctx.open_with.get(slot_key)
         title = slot.label if slot is not None else slot_key
         items_html.append(
             f'<button class="git-action-btn git-action-{slot_key}" '
@@ -439,13 +426,13 @@ def _render_git_actions(path):
     return f'<div class="git-actions">{"".join(items_html)}</div>'
 
 
-def _render_submodule_rows(submodules, worktree=False):
+def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False):
     """Render subrepo rows at the same visual size as parent repos."""
     if not submodules:
         return ""
     rows = []
     for sub in submodules:
-        sub_actions = _render_git_actions(sub["path"])
+        sub_actions = _render_git_actions(ctx, sub["path"])
         count = sub.get("changed", 0)
         dirty_cls = " git-dirty" if count else ""
         badge = (
@@ -471,7 +458,7 @@ def _render_submodule_rows(submodules, worktree=False):
     )
 
 
-def _render_git_repos(groups):
+def _render_git_repos(ctx: RenderCtx, groups):
     if not groups:
         return ""
     out = []
@@ -488,7 +475,7 @@ def _render_git_repos(groups):
                 if r["dirty"]
                 else '<span class="git-clean">\u2713</span>'
             )
-            actions = _render_git_actions(r["path"])
+            actions = _render_git_actions(ctx, r["path"])
             has_subs = bool(r.get("submodules"))
             toggle_cls = " git-row-collapsible" if has_subs else ""
             toggle_attr = ' onclick="toggleSubmodules(this)"' if has_subs else ""
@@ -501,7 +488,7 @@ def _render_git_repos(groups):
                 f'<span class="git-status">{badge}</span>'
                 f'<span class="git-spacer"></span></div>'
             )
-            sub_html = _render_submodule_rows(r.get("submodules") or [])
+            sub_html = _render_submodule_rows(ctx, r.get("submodules") or [])
             if sub_html:
                 out.append(sub_html)
             for wt in r.get("worktrees", []):
@@ -511,7 +498,7 @@ def _render_git_repos(groups):
                     if wt["dirty"]
                     else '<span class="git-clean">\u2713</span>'
                 )
-                wt_actions = _render_git_actions(wt["path"])
+                wt_actions = _render_git_actions(ctx, wt["path"])
                 wt_has_subs = bool(wt.get("submodules"))
                 wt_toggle_cls = " git-row-collapsible" if wt_has_subs else ""
                 wt_toggle_attr = ' onclick="toggleSubmodules(this)"' if wt_has_subs else ""
@@ -525,7 +512,7 @@ def _render_git_repos(groups):
                     f'<span class="git-status">{wt_badge}</span>'
                     f'<span class="git-spacer"></span></div>'
                 )
-                wt_sub_html = _render_submodule_rows(wt.get("submodules") or [], worktree=True)
+                wt_sub_html = _render_submodule_rows(ctx, wt.get("submodules") or [], worktree=True)
                 if wt_sub_html:
                     out.append(wt_sub_html)
             out.append("</div>")  # /git-repo
@@ -534,10 +521,8 @@ def _render_git_repos(groups):
     return "\n".join(out)
 
 
-def render_page(items):
+def render_page(ctx: RenderCtx, items):
     """Load the HTML template and inject rendered cards."""
-    from . import core as legacy
-
     all_items = sorted(
         items,
         key=lambda x: (PRI_ORDER.get(x["priority"], 9), x["slug"][:10]),
@@ -566,16 +551,16 @@ def render_page(items):
     count_backlog = sum(1 for i in all_items if i["priority"] == "backlog")
     count_done = sum(1 for i in all_items if i["priority"] == "done")
 
-    git_groups = _collect_git_repos()
-    git_html = _render_git_repos(git_groups)
+    git_groups = _collect_git_repos(ctx)
+    git_html = _render_git_repos(ctx, git_groups)
     count_repos = sum(len(repos) for _, repos in git_groups)
 
-    knowledge_root = collect_knowledge()
+    knowledge_root = collect_knowledge(ctx)
     knowledge_html = _render_knowledge(knowledge_root)
     count_knowledge = knowledge_root["count"] if knowledge_root else 0
     count_projects = len(all_items)
 
-    template = legacy._template_path().read_text(encoding="utf-8")
+    template = ctx.template
     template = template.replace("{{CARDS}}", cards)
     template = template.replace("{{GIT_REPOS}}", git_html)
     template = template.replace("{{KNOWLEDGE}}", knowledge_html)

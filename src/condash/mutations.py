@@ -1,13 +1,10 @@
 """File-mutation helpers — the write side of the dashboard.
 
-Every handler here mutates a Markdown file in place under ``BASE_DIR``:
+Every handler here mutates a Markdown file in place under ``ctx.base_dir``:
 flipping checkboxes, inserting new steps, renaming notes, moving done
 items into ``YYYY-MM/`` archives. Paths must already be validated (via
 :mod:`condash.paths`) before these functions see them — they do not
 re-check the sandbox.
-
-Reads ``BASE_DIR`` from :mod:`condash.core`; Phase 2 replaces that with
-an explicit ``RenderCtx`` parameter.
 """
 
 from __future__ import annotations
@@ -16,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .context import RenderCtx
 from .parser import (
     _ITEM_DIR_RE,
     _MONTH_DIR_RE,
@@ -32,14 +30,12 @@ from .paths import _VALID_ITEM_FILE_RE, _VALID_NOTE_FILENAME_RE, _validate_path,
 _KIND_MAP = {"incidents": "incident", "projects": "project", "documents": "document"}
 
 
-def read_note_raw(full_path: Path) -> dict[str, Any]:
+def read_note_raw(ctx: RenderCtx, full_path: Path) -> dict[str, Any]:
     """Return the plain bytes + mtime for the edit surface."""
-    from . import core as legacy
-
     stat_res = full_path.stat()
     content = full_path.read_text(encoding="utf-8", errors="replace")
     return {
-        "path": str(full_path.relative_to(legacy.BASE_DIR)),
+        "path": str(full_path.relative_to(ctx.base_dir)),
         "content": content,
         "mtime": stat_res.st_mtime,
     }
@@ -64,11 +60,9 @@ def write_note(full_path: Path, content: str, expected_mtime: float | None) -> d
     return {"ok": True, "mtime": full_path.stat().st_mtime}
 
 
-def rename_note(rel_path: str, new_stem: str) -> dict[str, Any]:
+def rename_note(ctx: RenderCtx, rel_path: str, new_stem: str) -> dict[str, Any]:
     """Rename a file under ``<item>/notes/`` while preserving its extension."""
-    from . import core as legacy
-
-    full = validate_note_path(rel_path)
+    full = validate_note_path(ctx, rel_path)
     if full is None:
         return {"ok": False, "reason": "invalid path"}
     if not _VALID_ITEM_FILE_RE.match(rel_path):
@@ -87,16 +81,14 @@ def rename_note(rel_path: str, new_stem: str) -> dict[str, Any]:
     full.rename(new_path)
     return {
         "ok": True,
-        "path": str(new_path.relative_to(legacy.BASE_DIR)),
+        "path": str(new_path.relative_to(ctx.base_dir)),
         "mtime": new_path.stat().st_mtime,
     }
 
 
-def create_note(item_readme_rel: str, filename: str) -> dict[str, Any]:
+def create_note(ctx: RenderCtx, item_readme_rel: str, filename: str) -> dict[str, Any]:
     """Create an empty note file under the item's ``notes/`` directory."""
-    from . import core as legacy
-
-    item = _validate_path(item_readme_rel)
+    item = _validate_path(ctx, item_readme_rel)
     if item is None or item.name != "README.md":
         return {"ok": False, "reason": "invalid item"}
     if not _VALID_NOTE_FILENAME_RE.match(filename):
@@ -109,7 +101,7 @@ def create_note(item_readme_rel: str, filename: str) -> dict[str, Any]:
     target.write_text("", encoding="utf-8")
     return {
         "ok": True,
-        "path": str(target.relative_to(legacy.BASE_DIR)),
+        "path": str(target.relative_to(ctx.base_dir)),
         "mtime": target.stat().st_mtime,
     }
 
@@ -140,12 +132,10 @@ def _set_priority(full_path, priority):
     return True
 
 
-def _tidy():
-    from . import core as legacy
-
+def _tidy(ctx: RenderCtx):
     moves = []
     for folder in ("incidents", "projects", "documents"):
-        base = legacy.BASE_DIR / folder
+        base = ctx.base_dir / folder
         if not base.is_dir():
             continue
         kind = _KIND_MAP[folder]
@@ -158,7 +148,7 @@ def _tidy():
                 readme = child / "README.md"
                 if not readme.exists():
                     continue
-                item = parse_readme(readme, kind)
+                item = parse_readme(ctx, readme, kind)
                 if item and item["priority"] == "done":
                     month = child.name[:7]
                     month_dir = base / month
@@ -175,7 +165,7 @@ def _tidy():
                     readme = sub / "README.md"
                     if not readme.exists():
                         continue
-                    item = parse_readme(readme, kind)
+                    item = parse_readme(ctx, readme, kind)
                     if item and item["priority"] != "done":
                         new_path = base / sub.name
                         if not new_path.exists():
@@ -190,9 +180,9 @@ def _tidy():
     return moves
 
 
-def run_tidy():
+def run_tidy(ctx: RenderCtx):
     """Public alias used by the CLI entry point."""
-    return _tidy()
+    return _tidy(ctx)
 
 
 def _toggle_checkbox(full_path, line_num):

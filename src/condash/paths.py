@@ -1,14 +1,10 @@
 """Path validation for the conception directory tree.
 
 Every HTTP-facing route that accepts a user-supplied path uses one of the
-validators here to resolve it safely under ``BASE_DIR``. The shared
+validators here to resolve it safely under ``ctx.base_dir``. The shared
 ``_safe_resolve`` helper consolidates the "reject traversal + regex-gate +
 resolve + relative_to + existence check" dance that every validator used
 to duplicate inline.
-
-``BASE_DIR`` lives in :mod:`condash.core` during the Phase 1 split; the
-validators read it via ``from . import core as legacy`` as a transition. Phase 2
-replaces that with an explicit ``RenderCtx`` parameter.
 """
 
 from __future__ import annotations
@@ -16,6 +12,8 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from pathlib import Path
+
+from .context import RenderCtx
 
 _VALID_ITEM_PREFIX = (
     r"^(?:incidents|projects|documents)/(?:\d{4}-\d{2}/)?\d{4}-\d{2}-\d{2}-[\w.-]+/"
@@ -37,9 +35,7 @@ _VALID_ASSET_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Any file directly under an item's `notes/` tree. Separate from the
-# narrower image-only asset regex above so /file can serve PDFs, text,
-# and misc binaries for in-modal preview.
+# Any file directly under an item's `notes/` tree.
 _VALID_ITEM_FILE_RE = re.compile(_VALID_ITEM_PREFIX + r"notes/[\w./-]+$")
 
 _VALID_NOTE_FILENAME_RE = re.compile(r"^[\w.-]+\.[A-Za-z0-9]+$")
@@ -55,27 +51,19 @@ _ASSET_CONTENT_TYPES = {
 
 
 def _safe_resolve(
+    ctx: RenderCtx,
     rel_path: str,
     regexes: Sequence[re.Pattern] = (),
     *,
     require_file: bool = True,
     strict: bool = False,
 ) -> Path | None:
-    """Resolve ``rel_path`` under BASE_DIR, rejecting anything outside the tree.
-
-    - Reject empty input, NUL bytes, and any literal ``..`` substring.
-    - If ``regexes`` is non-empty, the input must match at least one.
-    - Resolve under ``BASE_DIR``; reject when ``resolve`` or ``relative_to`` fails.
-    - If ``require_file`` is True, reject non-files; otherwise reject non-existent.
-    - If ``strict`` is True, use ``resolve(strict=True)`` (rejects dangling symlinks).
-    """
+    """Resolve ``rel_path`` under ``ctx.base_dir``, rejecting anything outside."""
     if not rel_path or "\x00" in rel_path or ".." in rel_path:
         return None
     if regexes and not any(p.match(rel_path) for p in regexes):
         return None
-    from . import core as legacy
-
-    base = legacy.BASE_DIR
+    base = ctx.base_dir
     try:
         if strict:
             full = (base / rel_path).resolve(strict=True)
@@ -89,52 +77,40 @@ def _safe_resolve(
     return full if full.exists() else None
 
 
-def _validate_path(rel_path: str) -> Path | None:
-    """Validate an item-README path; returns the absolute path on success."""
-    return _safe_resolve(rel_path, (_VALID_PATH_RE,), require_file=False)
+def _validate_path(ctx: RenderCtx, rel_path: str) -> Path | None:
+    """Validate an item-README path."""
+    return _safe_resolve(ctx, rel_path, (_VALID_PATH_RE,), require_file=False)
 
 
-def validate_note_path(rel_path: str) -> Path | None:
-    """Public: validate a note/README/knowledge/notes-file path.
-
-    Accepts: item READMEs and any file under ``<item>/notes/**``, plus
-    pages under ``knowledge/``. Paths outside conception are rejected.
-    """
+def validate_note_path(ctx: RenderCtx, rel_path: str) -> Path | None:
+    """Public: validate a note/README/knowledge/notes-file path."""
     return _safe_resolve(
+        ctx,
         rel_path,
         (_VALID_NOTE_RE, _VALID_KNOWLEDGE_NOTE_RE, _VALID_ITEM_FILE_RE),
     )
 
 
-def _validate_doc_path(rel_path: str) -> Path | None:
-    """Resolve a note-body link target against the conception tree.
-
-    Rejects anything outside ``BASE_DIR`` (symlink-safe) or any non-existent
-    file. Returns the resolved absolute path on success, ``None`` otherwise.
-    """
-    return _safe_resolve(rel_path, strict=True)
+def _validate_doc_path(ctx: RenderCtx, rel_path: str) -> Path | None:
+    """Resolve a note-body link target against the conception tree."""
+    return _safe_resolve(ctx, rel_path, strict=True)
 
 
-def validate_download_path(rel_path: str) -> Path | None:
-    return _safe_resolve(rel_path, (_VALID_DOWNLOAD_RE,))
+def validate_download_path(ctx: RenderCtx, rel_path: str) -> Path | None:
+    return _safe_resolve(ctx, rel_path, (_VALID_DOWNLOAD_RE,))
 
 
-def validate_asset_path(rel_path: str) -> tuple[Path, str] | None:
-    full = _safe_resolve(rel_path, (_VALID_ASSET_RE,))
+def validate_asset_path(ctx: RenderCtx, rel_path: str) -> tuple[Path, str] | None:
+    full = _safe_resolve(ctx, rel_path, (_VALID_ASSET_RE,))
     if full is None:
         return None
     ctype = _ASSET_CONTENT_TYPES.get(full.suffix.lower(), "application/octet-stream")
     return full, ctype
 
 
-def validate_file_path(rel_path: str) -> tuple[Path, str] | None:
-    """Validate a raw-byte serve request for the /file endpoint.
-
-    Same acceptance set as :func:`validate_note_path` (note/README/asset
-    files under items, plus pages under ``knowledge/``). Returns the absolute
-    path and a best-effort content type.
-    """
-    full = validate_note_path(rel_path)
+def validate_file_path(ctx: RenderCtx, rel_path: str) -> tuple[Path, str] | None:
+    """Validate a raw-byte serve request for the /file endpoint."""
+    full = validate_note_path(ctx, rel_path)
     if full is None:
         return None
     return full, _guess_content_type(full)
@@ -154,13 +130,8 @@ def _guess_content_type(path: Path) -> str:
     return guess or "application/octet-stream"
 
 
-def _validate_open_path(path_str: str) -> Path | None:
-    """Validate an absolute filesystem path against the workspace sandbox.
-
-    Accepts only directories inside ``_WORKSPACE`` or ``_WORKTREES``. Used
-    by the "open in IDE" action to stop a crafted URL from launching an
-    arbitrary binary against arbitrary paths.
-    """
+def _validate_open_path(ctx: RenderCtx, path_str: str) -> Path | None:
+    """Validate an absolute filesystem path against the workspace sandbox."""
     if not path_str or "\x00" in path_str:
         return None
     try:
@@ -169,13 +140,11 @@ def _validate_open_path(path_str: str) -> Path | None:
         return None
     if not p.is_dir():
         return None
-    from . import core as legacy
-
     roots: list[Path] = []
-    if legacy._WORKSPACE is not None:
-        roots.append(legacy._WORKSPACE.resolve())
-    if legacy._WORKTREES is not None:
-        roots.append(legacy._WORKTREES.resolve())
+    if ctx.workspace is not None:
+        roots.append(ctx.workspace.resolve())
+    if ctx.worktrees is not None:
+        roots.append(ctx.worktrees.resolve())
     for root in roots:
         try:
             p.relative_to(root)

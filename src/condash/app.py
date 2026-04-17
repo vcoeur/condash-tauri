@@ -28,19 +28,54 @@ from nicegui import app as _ng_app
 from nicegui import ui
 
 from . import config as config_mod
-from . import core as legacy
 from .config import (
     OPEN_WITH_SLOT_KEYS,
     CondashConfig,
     OpenWithSlot,
 )
+from .context import RenderCtx, build_ctx, favicon_bytes
+from .git_scan import _git_fingerprint
+from .mutations import (
+    _add_step,
+    _edit_step,
+    _remove_step,
+    _reorder_all,
+    _set_priority,
+    _tidy,
+    _toggle_checkbox,
+    create_note,
+    read_note_raw,
+    rename_note,
+    write_note,
+)
+from .openers import _is_external_url, _open_external, _open_path, _os_open
+from .parser import _compute_fingerprint, _note_kind, _tidy_needed, collect_items
+from .paths import (
+    _validate_doc_path,
+    _validate_open_path,
+    _validate_path,
+    validate_asset_path,
+    validate_download_path,
+    validate_file_path,
+    validate_note_path,
+)
+from .render import _render_note, render_page
 
 log = logging.getLogger(__name__)
 
-# Holds the live runtime config so the in-app editor can mutate it after a
-# successful POST /config without forcing a process restart. Initialized by
-# `run` before NiceGUI starts.
+# Holds the live runtime config and derived RenderCtx so the in-app editor
+# can mutate both after a successful POST /config without forcing a
+# process restart. Initialized by `run` before NiceGUI starts.
 _RUNTIME_CFG: CondashConfig | None = None
+_RUNTIME_CTX: RenderCtx | None = None
+
+
+def _ctx() -> RenderCtx:
+    """Return the live RenderCtx or raise if uninitialised."""
+    if _RUNTIME_CTX is None:
+        raise RuntimeError("condash.app: _RUNTIME_CTX not initialised")
+    return _RUNTIME_CTX
+
 
 # --- Pty session registry --------------------------------------------------
 #
@@ -119,12 +154,12 @@ def _register_routes() -> None:
 
     @_ng_app.get("/", response_class=HTMLResponse)
     def index():
-        items = legacy.collect_items()
-        return HTMLResponse(content=legacy.render_page(items))
+        items = collect_items(_ctx())
+        return HTMLResponse(content=render_page(_ctx(), items))
 
     @_ng_app.get("/favicon.svg")
     def favicon_svg():
-        data = legacy._favicon_bytes()
+        data = favicon_bytes()
         if data is None:
             return Response(status_code=404)
         return Response(
@@ -135,51 +170,51 @@ def _register_routes() -> None:
 
     @_ng_app.get("/favicon.ico")
     def favicon_ico():
-        data = legacy._favicon_bytes()
+        data = favicon_bytes()
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/svg+xml")
 
     @_ng_app.get("/check-updates")
     def check_updates():
-        items = legacy.collect_items()
+        items = collect_items(_ctx())
         return {
-            "fingerprint": legacy._compute_fingerprint(items),
-            "tidy_needed": legacy._tidy_needed(items),
-            "git_fingerprint": legacy._git_fingerprint(),
+            "fingerprint": _compute_fingerprint(items),
+            "tidy_needed": _tidy_needed(items),
+            "git_fingerprint": _git_fingerprint(_ctx()),
         }
 
     @_ng_app.get("/note")
     def get_note(path: str = ""):
-        full = legacy.validate_note_path(path)
+        full = validate_note_path(_ctx(), path)
         if full is None:
             return Response(status_code=403)
-        return HTMLResponse(content=legacy._render_note(full))
+        return HTMLResponse(content=_render_note(_ctx(), full))
 
     @_ng_app.get("/note-raw")
     def get_note_raw(path: str = ""):
         """Return plain-text content + mtime for the in-modal edit mode."""
-        full = legacy.validate_note_path(path)
+        full = validate_note_path(_ctx(), path)
         if full is None:
             return _error(403, "invalid path")
-        kind = legacy._note_kind(full)
+        kind = _note_kind(full)
         if kind not in ("md", "text"):
             return _error(400, f"not editable ({kind})")
-        return legacy.read_note_raw(full)
+        return read_note_raw(_ctx(), full)
 
     @_ng_app.post("/note")
     async def post_note(req: Request):
         """Atomically overwrite a note file with the editor's content."""
         data = await req.json()
-        full = legacy.validate_note_path(str(data.get("path") or ""))
+        full = validate_note_path(_ctx(), str(data.get("path") or ""))
         if full is None:
             return _error(403, "invalid path")
-        if legacy._note_kind(full) not in ("md", "text"):
+        if _note_kind(full) not in ("md", "text"):
             return _error(400, "not editable")
         content = data.get("content")
         if not isinstance(content, str):
             return _error(400, "content must be a string")
-        result = legacy.write_note(full, content, data.get("expected_mtime"))
+        result = write_note(full, content, data.get("expected_mtime"))
         if not result.get("ok"):
             return JSONResponse(status_code=409, content=result)
         return result
@@ -188,7 +223,8 @@ def _register_routes() -> None:
     async def post_note_rename(req: Request):
         """Rename a file under ``<item>/notes/`` preserving the extension."""
         data = await req.json()
-        result = legacy.rename_note(
+        result = rename_note(
+            _ctx(),
             str(data.get("path") or ""),
             str(data.get("new_stem") or ""),
         )
@@ -200,7 +236,8 @@ def _register_routes() -> None:
     async def post_note_create(req: Request):
         """Create an empty note under an item's ``notes/`` directory."""
         data = await req.json()
-        result = legacy.create_note(
+        result = create_note(
+            _ctx(),
             str(data.get("item_readme") or ""),
             str(data.get("filename") or ""),
         )
@@ -210,7 +247,7 @@ def _register_routes() -> None:
 
     @_ng_app.get("/download/{rel_path:path}")
     def download(rel_path: str):
-        full = legacy.validate_download_path(rel_path)
+        full = validate_download_path(_ctx(), rel_path)
         if full is None:
             return Response(status_code=403)
         return Response(
@@ -221,7 +258,7 @@ def _register_routes() -> None:
 
     @_ng_app.get("/asset/{rel_path:path}")
     def asset(rel_path: str):
-        result = legacy.validate_asset_path(rel_path)
+        result = validate_asset_path(_ctx(), rel_path)
         if result is None:
             return Response(status_code=403)
         full, ctype = result
@@ -240,7 +277,7 @@ def _register_routes() -> None:
         static mount: paths are re-validated against conception-tree
         regexes on every call.
         """
-        result = legacy.validate_file_path(rel_path)
+        result = validate_file_path(_ctx(), rel_path)
         if result is None:
             return Response(status_code=403)
         full, ctype = result
@@ -253,10 +290,10 @@ def _register_routes() -> None:
     @_ng_app.post("/toggle")
     async def toggle(req: Request):
         data = await req.json()
-        full = legacy._validate_path(data.get("file", ""))
+        full = _validate_path(_ctx(), data.get("file", ""))
         if not full:
             return _error(400, "invalid path")
-        status = legacy._toggle_checkbox(full, data.get("line", -1))
+        status = _toggle_checkbox(full, data.get("line", -1))
         if status is None:
             return _error(400, "not a checkbox line")
         return {"ok": True, "status": status}
@@ -264,10 +301,10 @@ def _register_routes() -> None:
     @_ng_app.post("/remove-step")
     async def remove_step(req: Request):
         data = await req.json()
-        full = legacy._validate_path(data.get("file", ""))
+        full = _validate_path(_ctx(), data.get("file", ""))
         if not full:
             return _error(400, "invalid path")
-        if legacy._remove_step(full, data.get("line", -1)):
+        if _remove_step(full, data.get("line", -1)):
             return {"ok": True}
         return _error(400, "cannot remove")
 
@@ -277,10 +314,10 @@ def _register_routes() -> None:
         text = (data.get("text") or "").strip()
         if not text:
             return _error(400, "empty text")
-        full = legacy._validate_path(data.get("file", ""))
+        full = _validate_path(_ctx(), data.get("file", ""))
         if not full:
             return _error(400, "invalid path")
-        if legacy._edit_step(full, data.get("line", -1), text):
+        if _edit_step(full, data.get("line", -1), text):
             return {"ok": True}
         return _error(400, "cannot edit")
 
@@ -290,32 +327,32 @@ def _register_routes() -> None:
         text = (data.get("text") or "").strip()
         if not text:
             return _error(400, "empty text")
-        full = legacy._validate_path(data.get("file", ""))
+        full = _validate_path(_ctx(), data.get("file", ""))
         if not full:
             return _error(400, "invalid path")
-        line = legacy._add_step(full, text, data.get("section"))
+        line = _add_step(full, text, data.get("section"))
         return {"ok": True, "line": line}
 
     @_ng_app.post("/set-priority")
     async def set_priority(req: Request):
         data = await req.json()
-        full = legacy._validate_path(data.get("file", ""))
+        full = _validate_path(_ctx(), data.get("file", ""))
         if not full:
             return _error(400, "invalid path")
         priority = data.get("priority", "")
-        if legacy._set_priority(full, priority):
-            moves = legacy._tidy()
+        if _set_priority(full, priority):
+            moves = _tidy(_ctx())
             return {"ok": True, "priority": priority, "moved": bool(moves)}
         return _error(400, "invalid priority")
 
     @_ng_app.post("/reorder-all")
     async def reorder_all(req: Request):
         data = await req.json()
-        full = legacy._validate_path(data.get("file", ""))
+        full = _validate_path(_ctx(), data.get("file", ""))
         if not full:
             return _error(400, "invalid path")
         order = data.get("order") or []
-        if legacy._reorder_all(full, order):
+        if _reorder_all(full, order):
             return {"ok": True}
         return _error(400, "cannot reorder")
 
@@ -347,11 +384,11 @@ def _register_routes() -> None:
     @_ng_app.post("/open")
     async def open_path(req: Request):
         data = await req.json()
-        resolved = legacy._validate_open_path(data.get("path", ""))
+        resolved = _validate_open_path(_ctx(), data.get("path", ""))
         if not resolved:
             return _error(400, "invalid path")
         tool = data.get("tool", "")
-        if legacy._open_path(tool, resolved):
+        if _open_path(_ctx(), tool, resolved):
             return {"ok": True}
         return _error(500, f"could not launch {tool}")
 
@@ -365,10 +402,10 @@ def _register_routes() -> None:
         of the dashboard's webview.
         """
         data = await req.json()
-        resolved = legacy._validate_doc_path(data.get("path", ""))
+        resolved = _validate_doc_path(_ctx(), data.get("path", ""))
         if not resolved:
             return _error(400, "invalid path")
-        if legacy._os_open(resolved):
+        if _os_open(_ctx(), resolved):
             return {"ok": True}
         return _error(500, "could not launch system opener")
 
@@ -377,15 +414,15 @@ def _register_routes() -> None:
         """Open an http(s) URL in the user's default browser."""
         data = await req.json()
         url = str(data.get("url") or "").strip()
-        if not legacy._is_external_url(url):
+        if not _is_external_url(url):
             return _error(400, "invalid url")
-        if legacy._open_external(url):
+        if _open_external(url):
             return {"ok": True}
         return _error(500, "could not launch browser")
 
     @_ng_app.post("/tidy")
     async def tidy(_req: Request):
-        moves = legacy._tidy()
+        moves = _tidy(_ctx())
         return {
             "ok": True,
             "moves": [{"from": f, "to": t} for f, t in moves],
@@ -409,9 +446,10 @@ def _register_routes() -> None:
         except (ValueError, KeyError, TypeError) as exc:
             return _error(400, f"invalid config: {exc}")
         config_mod.save(new_cfg)
-        # Re-init module-level state so paths / repos / open-with changes
+        # Rebuild the RenderCtx so paths / repos / open-with changes
         # take effect on the next request without needing a process restart.
-        legacy.init(new_cfg)
+        global _RUNTIME_CTX
+        _RUNTIME_CTX = build_ctx(new_cfg)
         # Surface which fields require a restart to actually take effect.
         restart_required = []
         old = _RUNTIME_CFG
@@ -482,7 +520,7 @@ def _register_routes() -> None:
             requested_cwd = ws.query_params.get("cwd") or None
             override_cwd: str | None = None
             if requested_cwd:
-                validated = legacy._validate_open_path(requested_cwd)
+                validated = _validate_open_path(_ctx(), requested_cwd)
                 if validated is not None:
                     override_cwd = str(validated)
                 else:
@@ -546,7 +584,7 @@ async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | No
     if override_cwd and os.path.isdir(override_cwd):
         cwd = override_cwd
     else:
-        cwd = str(legacy.BASE_DIR) if legacy.BASE_DIR.is_dir() else os.path.expanduser("~")
+        cwd = str(_ctx().base_dir) if _ctx().base_dir.is_dir() else os.path.expanduser("~")
 
     pid, fd = pty.fork()
     if pid == 0:
@@ -974,9 +1012,9 @@ def _payload_to_config(data: dict) -> CondashConfig:
 
 def run(cfg: CondashConfig) -> None:
     """Launch the condash dashboard (native window or browser, per config)."""
-    global _RUNTIME_CFG
+    global _RUNTIME_CFG, _RUNTIME_CTX
     _RUNTIME_CFG = cfg
-    legacy.init(cfg)
+    _RUNTIME_CTX = build_ctx(cfg)
     _register_routes()
     kwargs: dict = {
         "native": cfg.native,

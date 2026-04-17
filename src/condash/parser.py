@@ -3,13 +3,10 @@
 Entry points:
   - :func:`parse_readme` — read one item's ``README.md`` into the dict shape
     the rest of the package consumes.
-  - :func:`collect_items` — walk every item folder under ``BASE_DIR``.
+  - :func:`collect_items` — walk every item folder under ``ctx.base_dir``.
   - :func:`collect_knowledge` — walk ``knowledge/`` recursively.
   - :func:`_compute_fingerprint` / :func:`_tidy_needed` — cheap checks the
     ``/check-updates`` route runs to decide whether clients must re-fetch.
-
-All functions read ``BASE_DIR`` from :mod:`condash.core`; Phase 2 replaces
-that with an explicit ``RenderCtx`` parameter.
 """
 
 from __future__ import annotations
@@ -18,6 +15,8 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+
+from .context import RenderCtx
 
 log = logging.getLogger(__name__)
 
@@ -154,15 +153,13 @@ def _note_kind(path: Path) -> str:
     return "binary"
 
 
-def _list_notes(item_dir, max_depth: int = 2):
+def _list_notes(ctx: RenderCtx, item_dir, max_depth: int = 2):
     """List every file under ``<item_dir>/notes/`` with its detected kind.
 
     Walks up to ``max_depth`` levels of subdirectories so items can group
     related files (e.g. ``notes/drafts/…``) without the dashboard flattening
     the structure. Hidden files and dirs (``.…``) are skipped.
     """
-    from . import core as legacy
-
     notes_dir = item_dir / "notes"
     if not notes_dir.is_dir():
         return []
@@ -181,7 +178,7 @@ def _list_notes(item_dir, max_depth: int = 2):
             out.append(
                 {
                     "name": str(entry.relative_to(notes_dir)),
-                    "path": str(entry.relative_to(legacy.BASE_DIR)),
+                    "path": str(entry.relative_to(ctx.base_dir)),
                     "kind": _note_kind(entry),
                 }
             )
@@ -190,10 +187,8 @@ def _list_notes(item_dir, max_depth: int = 2):
     return out
 
 
-def parse_readme(path, kind):
+def parse_readme(ctx: RenderCtx, path, kind):
     """Parse a single incident/project README."""
-    from . import core as legacy
-
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -246,11 +241,11 @@ def parse_readme(path, kind):
         sections.insert(0, {"heading": "Steps", "items": []})
 
     deliverables = _parse_deliverables(lines)
-    item_dir = str(path.parent.relative_to(legacy.BASE_DIR))
+    item_dir = str(path.parent.relative_to(ctx.base_dir))
     for d in deliverables:
         d["full_path"] = f"{item_dir}/{d['path']}"
 
-    notes = _list_notes(path.parent)
+    notes = _list_notes(ctx, path.parent)
 
     done = sum(it["done"] for s in sections for it in s["items"])
     total = sum(len(s["items"]) for s in sections)
@@ -272,7 +267,7 @@ def parse_readme(path, kind):
         "notes": notes,
         "done": done,
         "total": total,
-        "path": str(path.relative_to(legacy.BASE_DIR)),
+        "path": str(path.relative_to(ctx.base_dir)),
         "kind": kind,
     }
 
@@ -306,31 +301,20 @@ def _knowledge_title_and_desc(path: Path) -> tuple[str, str]:
     return title, desc[:220]
 
 
-def collect_knowledge() -> dict | None:
+def collect_knowledge(ctx: RenderCtx) -> dict | None:
     """Scan ``knowledge/`` recursively and return a tree for the explorer tab.
 
-    Mirrors the on-disk shape: every directory becomes a node with its
-    direct ``index.md`` (if any) lifted out as a special "index" entry,
-    its non-index ``.md`` files as ``body`` entries, and its subdirectories
-    as ``children`` (recursive). ``count`` is the total navigable page
-    count at and below this node (index counts as 1, body files count, all
-    descendants roll up).
-
-    Returns ``None`` if ``knowledge/`` doesn't exist.
+    Returns ``None`` if ``knowledge/`` doesn't exist under ``ctx.base_dir``.
     """
-    from . import core as legacy
-
-    root = legacy.BASE_DIR / "knowledge"
+    root = ctx.base_dir / "knowledge"
     if not root.is_dir():
         return None
-    return _knowledge_node(root)
+    return _knowledge_node(ctx, root)
 
 
-def _knowledge_node(d: Path) -> dict:
+def _knowledge_node(ctx: RenderCtx, d: Path) -> dict:
     """Build one tree node for directory ``d``."""
-    from . import core as legacy
-
-    is_root = d == legacy.BASE_DIR / "knowledge"
+    is_root = d == ctx.base_dir / "knowledge"
     label = "Knowledge" if is_root else d.name.replace("_", " ").replace("-", " ").title()
     index: dict[str, str] | None = None
     body: list[dict[str, str]] = []
@@ -340,13 +324,13 @@ def _knowledge_node(d: Path) -> dict:
             continue
         if entry.is_file() and entry.suffix.lower() == ".md":
             title, desc = _knowledge_title_and_desc(entry)
-            item = {"path": str(entry.relative_to(legacy.BASE_DIR)), "title": title, "desc": desc}
+            item = {"path": str(entry.relative_to(ctx.base_dir)), "title": title, "desc": desc}
             if entry.name == "index.md":
                 index = item
             else:
                 body.append(item)
         elif entry.is_dir():
-            child = _knowledge_node(entry)
+            child = _knowledge_node(ctx, entry)
             # Drop empty subtrees so the UI doesn't render lone headings.
             if child["count"] > 0:
                 children.append(child)
@@ -354,7 +338,7 @@ def _knowledge_node(d: Path) -> dict:
     return {
         "name": "" if is_root else d.name,
         "label": label,
-        "rel_dir": str(d.relative_to(legacy.BASE_DIR)),
+        "rel_dir": str(d.relative_to(ctx.base_dir)),
         "index": index,
         "body": body,
         "children": children,
@@ -362,22 +346,20 @@ def _knowledge_node(d: Path) -> dict:
     }
 
 
-def collect_items():
+def collect_items(ctx: RenderCtx):
     """Find and parse all incident/project/document READMEs."""
-    from . import core as legacy
-
     items = []
     for kind, folder in [
         ("incident", "incidents"),
         ("project", "projects"),
         ("document", "documents"),
     ]:
-        base = legacy.BASE_DIR / folder
+        base = ctx.base_dir / folder
         if not base.is_dir():
             continue
         readmes = set(base.glob("*/README.md")) | set(base.glob("*/*/README.md"))
         for readme in sorted(readmes):
-            item = parse_readme(readme, kind)
+            item = parse_readme(ctx, readme, kind)
             if item:
                 items.append(item)
 

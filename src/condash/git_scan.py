@@ -6,8 +6,9 @@ and attaches dirty-file counts + worktree listings. A 30-second fingerprint
 cache (keyed off ``HEAD`` + porcelain status) drives the ``/check-updates``
 long-poll so the dashboard only re-renders when something actually changed.
 
-Reads ``_WORKSPACE`` and ``_REPO_STRUCTURE`` from :mod:`condash.core`;
-Phase 2 replaces both with an explicit ``RenderCtx`` parameter.
+``_git_cache`` is a module-level cache keyed by nothing — assumes a single
+active ``RenderCtx`` per process, which is condash's invariant (one window,
+one user).
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import stat
 import subprocess
 import time
 from pathlib import Path
+
+from .context import RenderCtx
 
 _git_cache = {"fingerprint": None, "timestamp": 0.0}
 
@@ -130,11 +133,9 @@ def _git_worktrees(repo_path):
     return worktrees
 
 
-def _load_repository_structure():
+def _load_repository_structure(ctx: RenderCtx):
     """Return configured primary/secondary repo buckets."""
-    from . import core as legacy
-
-    return list(legacy._REPO_STRUCTURE)
+    return list(ctx.repo_structure)
 
 
 def _resolve_submodules(base_path, submodule_names):
@@ -147,16 +148,14 @@ def _resolve_submodules(base_path, submodule_names):
     return out
 
 
-def _collect_git_repos():
+def _collect_git_repos(ctx: RenderCtx):
     """Find git repos under the configured workspace and group them.
 
     Returns ``[]`` (no repo strip) when ``workspace_path`` is unset.
     """
-    from . import core as legacy
-
-    if legacy._WORKSPACE is None:
+    if ctx.workspace is None:
         return []
-    workspace = legacy._WORKSPACE
+    workspace = ctx.workspace
     found = {}
     if workspace.is_dir():
         for child in sorted(workspace.iterdir()):
@@ -177,7 +176,7 @@ def _collect_git_repos():
                 "submodules": [],
             }
 
-    structure = _load_repository_structure()
+    structure = _load_repository_structure(ctx)
     submodule_map = {name: subs for _, entries in structure for name, subs in entries}
 
     def _attach_counts(container):
@@ -211,19 +210,17 @@ def _collect_git_repos():
     return groups
 
 
-def _git_fingerprint():
-    from . import core as legacy
-
+def _git_fingerprint(ctx: RenderCtx):
     now = time.monotonic()
     if _git_cache["fingerprint"] and now - _git_cache["timestamp"] < 30:
         return _git_cache["fingerprint"]
 
-    if legacy._WORKSPACE is None:
+    if ctx.workspace is None:
         _git_cache["fingerprint"] = "no-workspace"
         _git_cache["timestamp"] = now
         return _git_cache["fingerprint"]
 
-    workspace = legacy._WORKSPACE
+    workspace = ctx.workspace
     parts = []
     if workspace.is_dir():
         for child in sorted(workspace.iterdir()):

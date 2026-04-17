@@ -7,9 +7,6 @@ Four public-ish entry points:
     / ``startfile``), with a ``pdf_viewer`` fallback chain for PDFs.
   - :func:`_is_external_url` / :func:`_open_external` — recognise
     ``http(s)://…`` anchors and route them through the host browser.
-
-Reads ``_OPEN_WITH`` and ``_PDF_VIEWER`` from :mod:`condash.core`; Phase 2
-replaces them with an explicit ``RenderCtx`` parameter.
 """
 
 from __future__ import annotations
@@ -22,20 +19,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .context import RenderCtx
+
 log = logging.getLogger(__name__)
 
 
-def _open_path(slot_key, path):
-    """Launch the user-configured command for ``slot_key`` against ``path``.
-
-    ``slot_key`` is one of ``main_ide`` / ``secondary_ide`` / ``terminal``.
-    The fallback chain comes from ``cfg.open_with[slot_key]`` (set by ``init``).
-    Each command is shell-parsed and tried in order until one starts.
-    """
-    from . import core as legacy
-
+def _open_path(ctx: RenderCtx, slot_key, path):
+    """Launch the user-configured command for ``slot_key`` against ``path``."""
     path_str = str(path)
-    slot = legacy._OPEN_WITH.get(slot_key)
+    slot = ctx.open_with.get(slot_key)
     if slot is None:
         log.warning("unknown slot: %r", slot_key)
         return False
@@ -65,16 +57,9 @@ def _open_path(slot_key, path):
     return False
 
 
-def _try_pdf_viewer(path_str: str) -> bool:
-    """Try the configured ``pdf_viewer`` fallback chain.
-
-    Each entry is shlex-split and ``{path}`` replaced by ``path_str``. Returns
-    True on the first command that starts without raising; False if the list
-    is empty or every entry fails (bad shell syntax, missing binary, …).
-    """
-    from . import core as legacy
-
-    for raw in legacy._PDF_VIEWER:
+def _try_pdf_viewer(ctx: RenderCtx, path_str: str) -> bool:
+    """Try the configured ``pdf_viewer`` fallback chain."""
+    for raw in ctx.pdf_viewer:
         if not raw.strip():
             continue
         try:
@@ -101,7 +86,7 @@ def _try_pdf_viewer(path_str: str) -> bool:
     return False
 
 
-def _os_open(path: Path) -> bool:
+def _os_open(ctx: RenderCtx, path: Path) -> bool:
     """Hand ``path`` to the OS-native default-application launcher.
 
     Linux uses ``xdg-open``; macOS ``open``; Windows uses ``os.startfile``.
@@ -109,7 +94,7 @@ def _os_open(path: Path) -> bool:
     back to the OS default if every configured command fails to launch.
     """
     path_str = str(path)
-    if path.suffix.lower() == ".pdf" and _try_pdf_viewer(path_str):
+    if path.suffix.lower() == ".pdf" and _try_pdf_viewer(ctx, path_str):
         return True
     try:
         if sys.platform == "darwin":
