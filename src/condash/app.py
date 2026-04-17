@@ -604,7 +604,7 @@ async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | No
 
     def _on_readable() -> None:
         try:
-            data = os.read(fd, 4096)
+            data = os.read(fd, 65536)
         except BlockingIOError:
             return
         except OSError:
@@ -630,6 +630,15 @@ async def _pump_session(session: PtySession) -> None:
     Runs for the pty's entire lifetime. On EOF (shell exited) unregisters
     the session, sends an ``exit`` frame to whoever was viewing, and
     reaps the child.
+
+    Coalesces any chunks already sitting in the queue into one ws frame
+    before awaiting the socket. A large paste floods the pty with echo
+    output; ``os.read(fd, 4096)`` reads those in 4 KiB chunks but our
+    reader callback loops the queue up fast, so by the time we ``await``
+    on ``out_queue.get()`` there are often several pending chunks. Sending
+    one frame per chunk forces the client to render (and xterm to parse)
+    in 4 KiB increments; coalescing cuts frame count ~10× for the common
+    case and makes large paste echo feel instant.
     """
     while True:
         data = await session.out_queue.get()
@@ -657,6 +666,19 @@ async def _pump_session(session: PtySession) -> None:
                 pass
             return
 
+        chunks = [data]
+        eof_pending = False
+        while not session.out_queue.empty():
+            try:
+                extra = session.out_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if extra is None:
+                eof_pending = True
+                break
+            chunks.append(extra)
+        data = b"".join(chunks) if len(chunks) > 1 else chunks[0]
+
         # Append to ring buffer, trimming the head once we overshoot the
         # cap. `del buffer[:n]` on a bytearray is O(n) but cheap at these
         # sizes (256 KiB) and only runs when the buffer is actually full.
@@ -674,6 +696,56 @@ async def _pump_session(session: PtySession) -> None:
                 # replays from the buffer; keep pty running.
                 if session.attached_ws is ws:
                     session.attached_ws = None
+
+        if eof_pending:
+            session.out_queue.put_nowait(None)
+
+
+async def _pty_write_all(fd: int, data: bytes) -> bool:
+    """Write ``data`` to ``fd`` in full, yielding on EAGAIN.
+
+    The pty master is non-blocking (``O_NONBLOCK``), so a single
+    ``os.write`` can return fewer bytes than requested — or raise
+    ``BlockingIOError`` once the kernel's tty buffer fills up. That's what
+    happens on a large paste: the shell drains the buffer far slower than
+    a WebSocket frame can deliver, so the first ``os.write`` ships ~64 KiB
+    and the rest would be silently dropped or (worse) would surface as an
+    ``OSError`` that tore the ws down. Here we loop, registering a writer
+    callback on EAGAIN so the event loop wakes us when the fd is writable
+    again. Returns ``True`` on success, ``False`` if the fd went bad.
+    """
+    loop = asyncio.get_running_loop()
+    view = memoryview(data)
+    while view:
+        try:
+            written = os.write(fd, view)
+        except BlockingIOError:
+            fut: asyncio.Future[None] = loop.create_future()
+
+            def _signal() -> None:
+                if not fut.done():
+                    fut.set_result(None)
+
+            try:
+                loop.add_writer(fd, _signal)
+            except (OSError, ValueError):
+                return False
+            try:
+                await fut
+            finally:
+                try:
+                    loop.remove_writer(fd)
+                except (OSError, ValueError):
+                    pass
+            continue
+        except OSError:
+            return False
+        if written <= 0:
+            # Shouldn't happen on a healthy fd, but guard against an
+            # infinite loop if the kernel ever returns 0.
+            return False
+        view = view[written:]
+    return True
 
 
 async def _attach_ws(session: PtySession, ws: WebSocket) -> None:
@@ -693,9 +765,8 @@ async def _attach_ws(session: PtySession, ws: WebSocket) -> None:
             if mtype == "websocket.disconnect":
                 break
             if msg.get("bytes"):
-                try:
-                    os.write(session.fd, msg["bytes"])
-                except OSError:
+                ok = await _pty_write_all(session.fd, msg["bytes"])
+                if not ok:
                     break
                 continue
             text = msg.get("text")
