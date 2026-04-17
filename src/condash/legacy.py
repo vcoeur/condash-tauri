@@ -36,6 +36,26 @@ from itertools import groupby
 from pathlib import Path
 from typing import Any
 
+from .paths import (  # noqa: F401 — re-exported for backward compat during the Phase 1 split
+    _ASSET_CONTENT_TYPES,
+    _VALID_ASSET_RE,
+    _VALID_DOWNLOAD_RE,
+    _VALID_ITEM_FILE_RE,
+    _VALID_KNOWLEDGE_NOTE_RE,
+    _VALID_NOTE_FILENAME_RE,
+    _VALID_NOTE_RE,
+    _VALID_PATH_RE,
+    _guess_content_type,
+    _safe_resolve,
+    _validate_doc_path,
+    _validate_open_path,
+    _validate_path,
+    validate_asset_path,
+    validate_download_path,
+    validate_file_path,
+    validate_note_path,
+)
+
 log = logging.getLogger(__name__)
 
 # Populated by init() before any rendering / mutation function is called.
@@ -1158,59 +1178,6 @@ def render_page(items):
 # Editing
 # ---------------------------------------------------------------------------
 
-_VALID_PATH_RE = re.compile(
-    r"^(?:incidents|projects|documents)/"
-    r"(?:\d{4}-\d{2}/)?"
-    r"\d{4}-\d{2}-\d{2}-[\w.-]+/"
-    r"README\.md$"
-)
-
-_VALID_DOWNLOAD_RE = re.compile(
-    r"^(?:incidents|projects|documents)/"
-    r"(?:\d{4}-\d{2}/)?"
-    r"\d{4}-\d{2}-\d{2}-[\w.-]+/"
-    r"(?:notes/)?[\w.-]+\.pdf$"
-)
-
-_VALID_NOTE_RE = re.compile(
-    r"^(?:incidents|projects|documents)/"
-    r"(?:\d{4}-\d{2}/)?"
-    r"\d{4}-\d{2}-\d{2}-[\w.-]+/"
-    r"(?:notes/[\w.-]+|README)\.md$"
-)
-
-# Knowledge pages live outside the date-prefixed item structure. Match
-# `knowledge/<file>.md` at the root (apps.md, conventions.md) and
-# `knowledge/<subdir>/<file>.md` (topics/, external/, internal/, …).
-_VALID_KNOWLEDGE_NOTE_RE = re.compile(r"^knowledge/(?:[\w.-]+/)?[\w.-]+\.md$")
-
-_VALID_ASSET_RE = re.compile(
-    r"^(?:incidents|projects|documents)/"
-    r"(?:\d{4}-\d{2}/)?"
-    r"\d{4}-\d{2}-\d{2}-[\w.-]+/"
-    r"(?:notes/)?[\w./-]+\.(?:png|jpg|jpeg|gif|svg|webp)$",
-    re.IGNORECASE,
-)
-
-_ASSET_CONTENT_TYPES = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".svg": "image/svg+xml",
-    ".webp": "image/webp",
-}
-
-# Any file directly under an item's `notes/` tree. Separate from the
-# narrower image-only asset regex above so /file can serve PDFs, text,
-# and misc binaries for in-modal preview.
-_VALID_ITEM_FILE_RE = re.compile(
-    r"^(?:incidents|projects|documents)/"
-    r"(?:\d{4}-\d{2}/)?"
-    r"\d{4}-\d{2}-\d{2}-[\w.-]+/"
-    r"notes/[\w./-]+$"
-)
-
 _IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]+)(")', re.IGNORECASE)
 
 
@@ -1413,44 +1380,6 @@ def _render_note(full_path: Path) -> str:
     )
 
 
-def _validate_path(rel_path):
-    if ".." in rel_path:
-        return None
-    if not _VALID_PATH_RE.match(rel_path):
-        return None
-    full = (BASE_DIR / rel_path).resolve()
-    try:
-        full.relative_to(BASE_DIR.resolve())
-    except ValueError:
-        return None
-    return full if full.exists() else None
-
-
-def validate_note_path(rel_path: str) -> Path | None:
-    """Public: validate a note/README/knowledge/notes-file path.
-
-    Accepts: item READMEs and any file under `<item>/notes/**`, plus
-    pages under `knowledge/`. Paths outside conception are rejected.
-    """
-    if ".." in rel_path:
-        return None
-    if not (
-        _VALID_NOTE_RE.match(rel_path)
-        or _VALID_KNOWLEDGE_NOTE_RE.match(rel_path)
-        or _VALID_ITEM_FILE_RE.match(rel_path)
-    ):
-        return None
-    full = (BASE_DIR / rel_path).resolve()
-    try:
-        full.relative_to(BASE_DIR.resolve())
-    except ValueError:
-        return None
-    return full if full.is_file() else None
-
-
-_VALID_NOTE_FILENAME_RE = re.compile(r"^[\w.-]+\.[A-Za-z0-9]+$")
-
-
 def read_note_raw(full_path: Path) -> dict[str, Any]:
     """Return the plain bytes + mtime for the edit surface."""
     stat_res = full_path.stat()
@@ -1537,58 +1466,6 @@ def create_note(item_readme_rel: str, filename: str) -> dict[str, Any]:
         "path": str(target.relative_to(BASE_DIR)),
         "mtime": target.stat().st_mtime,
     }
-
-
-def validate_file_path(rel_path: str) -> tuple[Path, str] | None:
-    """Validate a raw-byte serve request for the /file endpoint.
-
-    Same acceptance set as :func:`validate_note_path` (note/README/asset
-    files under items, plus pages under `knowledge/`). Returns the absolute
-    path and a best-effort content type.
-    """
-    result = validate_note_path(rel_path)
-    if result is None:
-        return None
-    return result, _guess_content_type(result)
-
-
-def _guess_content_type(path: Path) -> str:
-    import mimetypes
-
-    ext = path.suffix.lower()
-    if ext in _ASSET_CONTENT_TYPES:
-        return _ASSET_CONTENT_TYPES[ext]
-    if ext == ".pdf":
-        return "application/pdf"
-    if ext == ".md":
-        return "text/markdown; charset=utf-8"
-    guess, _ = mimetypes.guess_type(path.name)
-    return guess or "application/octet-stream"
-
-
-def validate_download_path(rel_path: str) -> Path | None:
-    if ".." in rel_path or not _VALID_DOWNLOAD_RE.match(rel_path):
-        return None
-    full = (BASE_DIR / rel_path).resolve()
-    try:
-        full.relative_to(BASE_DIR.resolve())
-    except ValueError:
-        return None
-    return full if full.is_file() else None
-
-
-def validate_asset_path(rel_path: str) -> tuple[Path, str] | None:
-    if ".." in rel_path or not _VALID_ASSET_RE.match(rel_path):
-        return None
-    full = (BASE_DIR / rel_path).resolve()
-    try:
-        full.relative_to(BASE_DIR.resolve())
-    except ValueError:
-        return None
-    if not full.is_file():
-        return None
-    ctype = _ASSET_CONTENT_TYPES.get(full.suffix.lower(), "application/octet-stream")
-    return full, ctype
 
 
 def _set_priority(full_path, priority):
@@ -1866,29 +1743,6 @@ def _add_step(full_path, text, section_heading=None):
     return insert_at
 
 
-def _validate_open_path(path_str):
-    if not path_str or "\x00" in path_str:
-        return None
-    try:
-        p = Path(path_str).resolve(strict=True)
-    except (OSError, RuntimeError):
-        return None
-    if not p.is_dir():
-        return None
-    roots: list[Path] = []
-    if _WORKSPACE is not None:
-        roots.append(_WORKSPACE.resolve())
-    if _WORKTREES is not None:
-        roots.append(_WORKTREES.resolve())
-    for root in roots:
-        try:
-            p.relative_to(root)
-            return p
-        except ValueError:
-            continue
-    return None
-
-
 def _open_path(slot_key, path):
     """Launch the user-configured command for ``slot_key`` against ``path``.
 
@@ -1925,22 +1779,6 @@ def _open_path(slot_key, path):
             return False
     log.warning("%s: no launcher found (last error: %s)", slot_key, last_err)
     return False
-
-
-def _validate_doc_path(rel_path: str) -> Path | None:
-    """Resolve a note-body link target against the conception tree.
-
-    Rejects anything outside ``BASE_DIR`` (symlink-safe) or any non-existent
-    file. Returns the resolved absolute path on success, ``None`` otherwise.
-    """
-    if not rel_path or "\x00" in rel_path or ".." in rel_path.split("/"):
-        return None
-    try:
-        full = (BASE_DIR / rel_path).resolve(strict=True)
-        full.relative_to(BASE_DIR.resolve())
-    except (OSError, ValueError):
-        return None
-    return full if full.is_file() else None
 
 
 def _try_pdf_viewer(path_str: str) -> bool:
