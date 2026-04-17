@@ -58,7 +58,16 @@ def _open_path(ctx: RenderCtx, slot_key, path):
 
 
 def _try_pdf_viewer(ctx: RenderCtx, path_str: str) -> bool:
-    """Try the configured ``pdf_viewer`` fallback chain."""
+    """Try the configured ``pdf_viewer`` fallback chain.
+
+    Entries may include a literal ``{path}`` placeholder; if none is
+    present the absolute path is appended as an extra argv entry. That
+    matches the intuition of typing ``evince`` into the config field and
+    expecting the PDF to open in evince — without the auto-append the
+    viewer launches with no file argument and the user sees an empty
+    window (the original "I set evince but it doesn't open in evince"
+    bug).
+    """
     for raw in ctx.pdf_viewer:
         if not raw.strip():
             continue
@@ -67,9 +76,12 @@ def _try_pdf_viewer(ctx: RenderCtx, path_str: str) -> bool:
         except ValueError as exc:
             log.warning("pdf_viewer parse failed for %r: %s", raw, exc)
             continue
+        had_placeholder = "{path}" in raw
         argv = [arg.replace("{path}", path_str) for arg in argv]
         if not argv:
             continue
+        if not had_placeholder:
+            argv.append(path_str)
         try:
             subprocess.Popen(
                 argv,
@@ -77,8 +89,10 @@ def _try_pdf_viewer(ctx: RenderCtx, path_str: str) -> bool:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
+            log.info("pdf_viewer: launched %s", argv[0])
             return True
         except FileNotFoundError:
+            log.debug("pdf_viewer: %s not on PATH, trying next", argv[0])
             continue
         except OSError as exc:
             log.warning("pdf_viewer %r failed: %s", argv[0], exc)

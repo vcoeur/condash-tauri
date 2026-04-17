@@ -378,14 +378,21 @@ body {
 }
 .knowledge-empty { color: var(--text-muted); font-size: 0.88rem; padding: 0.6rem 0.2rem; }
 
-/* --- Reload action button ---
-   Always clickable; a small dot indicator lights up when a reload is
-   recommended (items or git). The click refetches content in place. */
-.reload-btn { position: relative; }
-.reload-btn.stale::after {
-    content: ''; position: absolute; top: 2px; right: 2px;
+/* --- Stale / "needs refresh" cue on top-level tabs ---
+   The tab that owns data which changed under us lights up with a small
+   accent dot in its top-right corner. Clicking that same tab (or switching
+   to another tab while stale) refreshes the dashboard in place. */
+.tabs-primary .tab { position: relative; }
+.tabs-primary .tab.stale::after {
+    content: ''; position: absolute; top: 4px; right: 6px;
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--accent); border: 1.5px solid var(--bg-card);
+    pointer-events: none;
+}
+.tabs-primary .tab.active.stale::after {
+    /* Active tab has an accent background — invert the ring so the dot
+       stays legible. */
+    background: #fff; border-color: var(--accent);
 }
 
 /* --- Embedded terminal (bottom pane) ---
@@ -425,8 +432,22 @@ body {
 .term-body { flex: 1; min-height: 0; display: flex; }
 .term-side {
     flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+    position: relative;
 }
 .term-side[hidden] { display: none; }
+/* Which split has focus — a thin accent line at the top of the pane,
+   plus a tinted mount background so the difference is obvious even
+   without a visible caret. Only shown when both sides exist (single
+   pane is trivially the active one). */
+body:not([data-single-term]) .term-side.is-active-side::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent);
+    pointer-events: none;
+}
+body:not([data-single-term]) .term-side.is-active-side .term-mount {
+    background: #101116;
+}
 .term-mount { flex: 1; min-height: 0; padding: 4px 6px; }
 .term-mount .xterm { height: 100%; }
 
@@ -459,7 +480,11 @@ body {
     border: 1px solid transparent; border-bottom: 0;
 }
 .term-tab:hover { background: #262731; color: #e6e6ec; }
-.term-tab.active { background: #0b0b0e; color: #f0f0f5; }
+.term-tab.active {
+    background: #0b0b0e; color: #f0f0f5; font-weight: 600;
+    border-top: 2px solid var(--accent);
+    padding-top: 1px;
+}
 .term-tab-close {
     background: transparent; border: none; color: inherit;
     font-size: 0.9rem; line-height: 1; padding: 0 2px; cursor: pointer;
@@ -774,6 +799,17 @@ body {
 .knowledge-path {
     font-family: ui-monospace, "SF Mono", "Menlo", monospace;
     font-size: 0.72rem; color: var(--text-muted); margin-top: 0.3rem;
+}
+
+/* History pane — reuses .knowledge-* scaffolding (groups, badges, card
+   grid) but each item row carries a small row of status + kind pills. */
+.history-meta {
+    display: flex; flex-wrap: wrap; gap: 0.3rem;
+    margin-top: 0.35rem;
+}
+.history-meta .pill {
+    font-size: 0.7rem; padding: 0.05rem 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
 }
 
 /* --- Note preview modal --- */
@@ -1134,12 +1170,6 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
             <span class="icon" id="theme-icon">&#9790;</span>
             <span id="theme-label">Dark</span>
         </div>
-        <button id="reload-btn" class="theme-toggle reload-btn" onclick="reloadAndTidy()" title="Reload" aria-label="Reload">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="23 4 23 10 17 10"/>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-            </svg>
-        </button>
         <button id="term-btn" class="theme-toggle" onclick="toggleTerminal()" title="Toggle terminal" aria-label="Toggle terminal">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="4 17 10 11 4 5"/>
@@ -1163,10 +1193,12 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     <div class="tab" data-subtab="next" onclick="switchSubtab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
     <div class="tab" data-subtab="backlog" onclick="switchSubtab('backlog')">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
     <div class="tab" data-subtab="done" onclick="switchSubtab('done')">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
+    <div class="tab" data-subtab="history" onclick="switchSubtab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
 </div>
 <main id="main-scroll">
     <div id="projects-pane">
         <div id="cards">{{CARDS}}</div>
+        <div id="history" style="display:none">{{HISTORY}}</div>
     </div>
     <div id="code-pane" style="display:none">
         <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
@@ -1258,7 +1290,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                 </fieldset>
                 <fieldset class="config-fieldset">
                     <legend>PDF viewer</legend>
-                    <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path. Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
+                    <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path; if the command has no <code>{path}</code>, the path is appended as the last argument (so <code>evince</code> behaves the same as <code>evince {path}</code>). Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
                     <label>commands
                         <textarea name="pdf_viewer" rows="3" placeholder="evince {path}&#10;okular {path}"></textarea>
                     </label>
@@ -1493,6 +1525,12 @@ async function saveConfig(ev) {
         if (restart.length) {
             warnEl.textContent = 'Saved. The following changes need a condash restart to take effect: ' + restart.join(', ') + '. Reloading…';
             warnEl.style.display = 'block';
+        } else {
+            // No restart needed → close the modal immediately so the user
+            // sees the refreshed dashboard, not a modal sitting in front
+            // of it. (_reloadInPlace swaps #dash-main, but modals are
+            // siblings and stay put otherwise.)
+            closeConfigModal();
         }
         // Brief pause so the user sees the warning, then refresh. When a
         // restart is required (port change, etc.) we need a real reload so
@@ -1624,12 +1662,15 @@ var TAB_MAP = {
     current: ['now', 'review'],
     next: ['soon', 'later'],
     backlog: ['backlog'],
-    done: ['done']
+    done: ['done'],
+    // History doesn't filter the cards grid — it swaps the pane body to
+    // the on-disk projects tree. Keyed here so lookups don't hit undefined.
+    history: []
 };
 // Tabs where the priority groups should be labelled with a subheader.
 var TAB_SHOWS_HEADINGS = {current: true, next: true};
 var PRIMARY_TABS = ['projects', 'code', 'knowledge'];
-var SUBTABS = ['current', 'next', 'backlog', 'done'];
+var SUBTABS = ['current', 'next', 'backlog', 'done', 'history'];
 var _activeTab = 'projects';
 var _activeSubtab = 'current';
 // Map legacy `?tab=current` style URLs onto the new (primary, sub) pair.
@@ -1651,7 +1692,19 @@ function _persistTabState() {
 
 function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
-    if ((_itemsStale || _gitStale) && tab !== _activeTab) {
+    // Clicking the already-active tab refreshes the dashboard when its
+    // data is stale — the tab's own per-tab dot doubles as a reload
+    // affordance. Clicking a *different* tab already refreshes whenever
+    // any pane is stale (paths below hitting _reloadInPlace).
+    var clickedSameTab = tab === _activeTab;
+    var clickedTabStale =
+        (tab === 'projects' && _itemsStale) ||
+        (tab === 'code' && _gitStale);
+    if (clickedSameTab && clickedTabStale) {
+        _reloadInPlace();
+        return;
+    }
+    if ((_itemsStale || _gitStale) && !clickedSameTab) {
         // Commit the new tab first so _reloadInPlace's post-swap
         // _rebindDashHandlers → switchTab(_activeTab) lands on it —
         // otherwise the user has to click the tab a second time.
@@ -1684,6 +1737,17 @@ function _applySubtab(sub) {
     document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-subtab') === sub);
     });
+    // History swaps the pane body: hide the card grid, show the on-disk
+    // tree. All other subtabs are card-grid filters.
+    var cards = document.getElementById('cards');
+    var history = document.getElementById('history');
+    if (sub === 'history') {
+        if (cards) cards.style.display = 'none';
+        if (history) history.style.display = '';
+        return;
+    }
+    if (cards) cards.style.display = '';
+    if (history) history.style.display = 'none';
     var allowed = TAB_MAP[sub] || [];
     document.querySelectorAll('.card').forEach(function(card) {
         card.classList.toggle('hidden', allowed.indexOf(card.getAttribute('data-priority')) === -1);
@@ -2236,9 +2300,12 @@ async function _reloadNotePreview(path, name) {
 }
 
 document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        var modal = document.getElementById('note-modal');
-        if (modal && modal.classList.contains('open')) closeNotePreview();
+    if (e.key !== 'Escape') return;
+    var noteModal = document.getElementById('note-modal');
+    if (noteModal && noteModal.classList.contains('open')) { closeNotePreview(); return; }
+    var cfgModal = document.getElementById('config-modal');
+    if (cfgModal && cfgModal.style.display && cfgModal.style.display !== 'none') {
+        closeConfigModal();
     }
 });
 
@@ -2457,16 +2524,25 @@ var _itemsStale = false;
 var _gitStale = false;
 
 function _renderStale() {
-    var btn = document.getElementById('reload-btn');
-    var stale = _itemsStale || _gitStale;
-    btn.classList.toggle('stale', stale);
-    var tip;
-    if (_itemsStale && _gitStale) tip = 'Reload — conception data and git status have changed';
-    else if (_itemsStale) tip = 'Reload — conception data has changed';
-    else if (_gitStale) tip = 'Reload — git status has changed';
-    else tip = 'Reload';
-    btn.title = tip;
-    btn.setAttribute('aria-label', tip);
+    // Map each stale source onto the top-level tab whose data changed.
+    // Items fingerprint covers everything under projects/ (cards grid +
+    // history tree). Git fingerprint covers the Code panel. Knowledge has
+    // no stale detection yet, so its tab never lights up.
+    var staleByTab = {
+        projects: _itemsStale,
+        code: _gitStale,
+        knowledge: false,
+    };
+    document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
+        var key = t.getAttribute('data-tab');
+        var isStale = !!staleByTab[key];
+        t.classList.toggle('stale', isStale);
+        if (isStale) {
+            t.title = 'Refresh — data has changed on disk';
+        } else {
+            t.removeAttribute('title');
+        }
+    });
 }
 
 async function checkUpdates() {
@@ -2499,11 +2575,6 @@ async function updateBaseline() {
         _gitStale = false;
         _renderStale();
     } catch (e) {}
-}
-
-/* Reload button: re-fetch dashboard content in place. */
-async function reloadAndTidy() {
-    _reloadInPlace();
 }
 
 /* --- Embedded terminal (multi-tab) ---
@@ -2655,6 +2726,20 @@ function _termShellLabel(tab) {
     label.textContent = tab && tab.shell ? tab.shell : '';
 }
 
+function _termSyncActiveSide() {
+    var sides = ['left', 'right'];
+    sides.forEach(function(side) {
+        var el = _termSideEl(side, 'side');
+        if (!el) return;
+        el.classList.toggle('is-active-side', side === _termLastFocused);
+    });
+    // Single-pane mode — no meaningful "active side" distinction.
+    var leftVisible = _termTabsOn('left').length > 0;
+    var rightVisible = _termTabsOn('right').length > 0;
+    if (leftVisible && rightVisible) document.body.removeAttribute('data-single-term');
+    else document.body.setAttribute('data-single-term', '1');
+}
+
 function _termSetActive(id) {
     var tab = _termTabs.find(function(t) { return t.id === id; });
     if (!tab) return;
@@ -2666,6 +2751,7 @@ function _termSetActive(id) {
         t.mount.classList.toggle('active', active);
         t.button.classList.toggle('active', active);
     });
+    _termSyncActiveSide();
     _termShellLabel(tab);
     // Defer the fit: the just-activated mount flipped from display:none to
     // display:block one line above, but the browser hasn't reflowed yet in
@@ -2720,7 +2806,10 @@ function _termStartRename(tab) {
     input.className = 'term-tab-rename';
     input.value = tab.customName || _termDefaultLabel(tab);
     input.style.width = Math.max(60, tab.labelEl.offsetWidth + 20) + 'px';
+    var committed = false;
     var commit = function(save) {
+        if (committed) return;
+        committed = true;
         if (save) {
             tab.customName = input.value.trim();
             _termPersistTabs();
@@ -2740,8 +2829,18 @@ function _termStartRename(tab) {
     input.onclick = function(ev) { ev.stopPropagation(); };
     tab.button.insertBefore(input, tab.labelEl);
     tab.button.removeChild(tab.labelEl);
-    input.focus();
-    input.select();
+    // Focus must happen *after* every requestAnimationFrame queued by the
+    // two single-click handlers that preceded this double-click: each
+    // click calls _termSetActive, which schedules an rAF that does
+    // tab.term.focus(). A synchronous input.focus() here would lose
+    // focus to xterm when those rAFs fire next frame, triggering our
+    // own onblur and committing an unchanged name. Scheduling input.focus
+    // via rAF parks it after the pending focus steals (rAFs run in FIFO
+    // order within a frame).
+    requestAnimationFrame(function() {
+        input.focus();
+        input.select();
+    });
 }
 
 function _termShowSide(side, show) {
@@ -2754,6 +2853,7 @@ function _termShowSide(side, show) {
     var splitter = document.getElementById('term-splitter');
     if (leftVisible && rightVisible) splitter.removeAttribute('hidden');
     else splitter.setAttribute('hidden', '');
+    _termSyncActiveSide();
 }
 
 function _termCreateTab(side, opts) {
@@ -2776,6 +2876,18 @@ function _termCreateTab(side, opts) {
     var fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(mount);
+    // When the user clicks into this pane directly, mark its side as the
+    // active one so the split's accent indicator follows focus (not just
+    // tab clicks, which _termSetActive already handles).
+    if (term.textarea) {
+        term.textarea.addEventListener('focus', function() {
+            if (_termLastFocused !== side) {
+                _termLastFocused = side;
+                _termSyncActiveSide();
+                _termShellLabel(tab);
+            }
+        });
+    }
     // xterm swallows keys before they bubble. attachCustomKeyEventHandler
     // runs inside xterm's keydown listener — return false + stopPropagation
     // so our shortcut closes the pane from inside the active tab without
