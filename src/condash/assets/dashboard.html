@@ -2789,7 +2789,10 @@ function _termStartRename(tab) {
     input.className = 'term-tab-rename';
     input.value = tab.customName || _termDefaultLabel(tab);
     input.style.width = Math.max(60, tab.labelEl.offsetWidth + 20) + 'px';
+    var committed = false;
     var commit = function(save) {
+        if (committed) return;
+        committed = true;
         if (save) {
             tab.customName = input.value.trim();
             _termPersistTabs();
@@ -2809,8 +2812,18 @@ function _termStartRename(tab) {
     input.onclick = function(ev) { ev.stopPropagation(); };
     tab.button.insertBefore(input, tab.labelEl);
     tab.button.removeChild(tab.labelEl);
-    input.focus();
-    input.select();
+    // Focus must happen *after* every requestAnimationFrame queued by the
+    // two single-click handlers that preceded this double-click: each
+    // click calls _termSetActive, which schedules an rAF that does
+    // tab.term.focus(). A synchronous input.focus() here would lose
+    // focus to xterm when those rAFs fire next frame, triggering our
+    // own onblur and committing an unchanged name. Scheduling input.focus
+    // via rAF parks it after the pending focus steals (rAFs run in FIFO
+    // order within a frame).
+    requestAnimationFrame(function() {
+        input.focus();
+        input.select();
+    });
 }
 
 function _termShowSide(side, show) {
