@@ -21,7 +21,12 @@ from .parser import (
     PRIORITIES,
     STATUS_RE,
 )
-from .paths import _VALID_ITEM_FILE_RE, _VALID_NOTE_FILENAME_RE, _validate_path, validate_note_path
+from .paths import (
+    _VALID_ITEM_NOTES_FILE_RE,
+    _VALID_NOTE_FILENAME_RE,
+    _validate_path,
+    validate_note_path,
+)
 
 
 def read_note_raw(ctx: RenderCtx, full_path: Path) -> dict[str, Any]:
@@ -59,7 +64,7 @@ def rename_note(ctx: RenderCtx, rel_path: str, new_stem: str) -> dict[str, Any]:
     full = validate_note_path(ctx, rel_path)
     if full is None:
         return {"ok": False, "reason": "invalid path"}
-    if not _VALID_ITEM_FILE_RE.match(rel_path):
+    if not _VALID_ITEM_NOTES_FILE_RE.match(rel_path):
         return {"ok": False, "reason": "only files under <item>/notes/ can be renamed"}
     new_stem = (new_stem or "").strip()
     if not new_stem or not re.match(r"^[\w.-]+$", new_stem) or new_stem in (".", ".."):

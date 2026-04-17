@@ -174,10 +174,17 @@ def _render_readme_link(item):
     )
 
 
-def _render_notes(notes, readme_rel: str | None = None):
-    """Render the notes block for an item card."""
+def _render_files(files, readme_rel: str | None = None):
+    """Render the item-files block for a card.
+
+    Lists every file under the item directory (any subdirectory, not only
+    ``notes/``). Paths are shown relative to the item root so the user can
+    tell at a glance whether a file lives in ``notes/``, a sibling folder,
+    or directly at the item root. The ``+`` shortcut still creates a note
+    under ``notes/`` — that remains the canonical place for new writing.
+    """
     items_html = ""
-    for n in notes:
+    for n in files:
         js_path = json.dumps(n["path"]).replace("'", "\\'").replace('"', "'")
         label = n["name"][:-3] if n["name"].endswith(".md") else n["name"]
         kind = n.get("kind", "md")
@@ -186,19 +193,19 @@ def _render_notes(notes, readme_rel: str | None = None):
             f"onclick=\"openNotePreview({js_path},'{h(n['name'])}')\">"
             f"{h(label)}</div>"
         )
-    count = len(notes)
+    count = len(files)
     create_btn = ""
     if readme_rel:
         js_readme = json.dumps(readme_rel).replace("'", "\\'").replace('"', "'")
         create_btn = (
-            f'<button class="notes-new-btn" title="New note" '
+            f'<button class="notes-new-btn" title="New note (under notes/)" '
             f'onclick="event.stopPropagation();createNoteFor({js_readme})">+</button>'
         )
-    empty_class = " is-empty" if not notes else ""
+    empty_class = " is-empty" if not files else ""
     return (
         f'<div class="notes-block{empty_class}">'
         f'<div class="notes-heading" onclick="toggleNotes(this)">'
-        f'Notes <span class="notes-count">({count})</span>'
+        f'Files <span class="notes-count">({count})</span>'
         f"{create_btn}</div>"
         f'<div class="notes-list" style="display:none">{items_html}</div>'
         f"</div>"
@@ -263,7 +270,7 @@ def _render_card(item):
 
     deliverables_html = _render_deliverables(item.get("deliverables", []))
     readme_link_html = _render_readme_link(item)
-    notes_html = _render_notes(item.get("notes", []), readme_rel=item.get("path"))
+    notes_html = _render_files(item.get("files", []), readme_rel=item.get("path"))
 
     summary_html = f'<p class="summary">{h(item["summary"])}</p>' if item["summary"] else ""
 
