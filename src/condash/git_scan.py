@@ -210,6 +210,82 @@ def _collect_git_repos(ctx: RenderCtx):
     return groups
 
 
+def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
+    """Return ``{node_id: hash}`` for the Code tab hierarchy.
+
+    Node-id scheme:
+
+      - ``code`` — whole Code tab.
+      - ``code/<group-label>`` — primary / secondary / Others bucket.
+      - ``code/<group-label>/<repo>`` — a repo.
+      - ``code/<group-label>/<repo>/sub:<name>`` — a submodule under the repo.
+      - ``code/<group-label>/<repo>/wt:<key>`` — a worktree under the repo.
+      - ``code/<group-label>/<repo>/wt:<key>/sub:<name>`` — a submodule
+        inside a worktree.
+
+    Leaf hashes cover branch + dirty count + change-file signature. Group
+    hashes depend only on the set of direct child ids so edits at a repo
+    don't dirty-mark the enclosing group; only add/remove does.
+    """
+    out: dict[str, str] = {}
+    groups = _collect_git_repos(ctx)
+
+    def leaf_hash(node: dict) -> str:
+        files = tuple(sorted(node.get("changed_files") or []))
+        return _hash(
+            (
+                "leaf",
+                node.get("branch", ""),
+                node.get("changed", 0),
+                bool(node.get("dirty")),
+                files,
+            )
+        )
+
+    top_child_ids: list[str] = []
+    for label, repos in groups:
+        group_id = f"code/{label}"
+        repo_ids: list[str] = []
+        for repo in repos:
+            repo_id = f"{group_id}/{repo['name']}"
+            repo_child_ids: list[str] = []
+
+            for sub in repo.get("submodules") or []:
+                sub_id = f"{repo_id}/sub:{sub['name']}"
+                out[sub_id] = leaf_hash(sub)
+                repo_child_ids.append(sub_id)
+
+            for wt in repo.get("worktrees", []) or []:
+                wt_id = f"{repo_id}/wt:{wt['key']}"
+                wt_child_ids: list[str] = []
+                for sub in wt.get("submodules") or []:
+                    sub_id = f"{wt_id}/sub:{sub['name']}"
+                    out[sub_id] = leaf_hash(sub)
+                    wt_child_ids.append(sub_id)
+                # Worktree hash mixes its own state with its children — it's
+                # still a leaf-ish node (has branch/dirty of its own) but we
+                # track its children so adds/removes are detectable.
+                out[wt_id] = _hash(("wt", leaf_hash(wt), tuple(sorted(wt_child_ids))))
+                repo_child_ids.append(wt_id)
+
+            # Repo hash mixes leaf state + direct children membership.
+            out[repo_id] = _hash(("repo", leaf_hash(repo), tuple(sorted(repo_child_ids))))
+            repo_ids.append(repo_id)
+
+        out[group_id] = _hash(("group", label, tuple(sorted(repo_ids))))
+        top_child_ids.append(group_id)
+
+    out["code"] = _hash(("tab", "code", tuple(sorted(top_child_ids))))
+    return out
+
+
+def _hash(data) -> str:
+    """MD5 of ``repr(data)`` truncated — mirrors parser.py so both modules
+    stay consistent. Re-exported intentionally instead of importing to keep
+    this module independent of parser.py."""
+    return hashlib.md5(repr(data).encode()).hexdigest()[:16]
+
+
 def _git_fingerprint(ctx: RenderCtx):
     now = time.monotonic()
     if _git_cache["fingerprint"] and now - _git_cache["timestamp"] < 30:

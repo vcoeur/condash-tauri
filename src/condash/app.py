@@ -33,7 +33,7 @@ from .config import (
     OpenWithSlot,
 )
 from .context import RenderCtx, build_ctx, favicon_bytes
-from .git_scan import _git_fingerprint
+from .git_scan import _git_fingerprint, compute_git_node_fingerprints
 from .mutations import (
     _add_step,
     _edit_step,
@@ -47,7 +47,14 @@ from .mutations import (
     write_note,
 )
 from .openers import _is_external_url, _open_external, _open_path, _os_open
-from .parser import _compute_fingerprint, _note_kind, collect_items
+from .parser import (
+    _compute_fingerprint,
+    _note_kind,
+    collect_items,
+    collect_knowledge,
+    compute_knowledge_node_fingerprints,
+    compute_project_node_fingerprints,
+)
 from .paths import (
     _validate_doc_path,
     _validate_open_path,
@@ -175,10 +182,17 @@ def _register_routes() -> None:
 
     @_ng_app.get("/check-updates")
     def check_updates():
-        items = collect_items(_ctx())
+        ctx = _ctx()
+        items = collect_items(ctx)
+        knowledge = collect_knowledge(ctx)
+        nodes: dict[str, str] = {}
+        nodes.update(compute_project_node_fingerprints(items))
+        nodes.update(compute_knowledge_node_fingerprints(knowledge))
+        nodes.update(compute_git_node_fingerprints(ctx))
         return {
             "fingerprint": _compute_fingerprint(items),
-            "git_fingerprint": _git_fingerprint(_ctx()),
+            "git_fingerprint": _git_fingerprint(ctx),
+            "nodes": nodes,
         }
 
     @_ng_app.get("/note")

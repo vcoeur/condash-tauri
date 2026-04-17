@@ -393,3 +393,125 @@ def _compute_fingerprint(items):
             )
         )
     return hashlib.md5(repr(data).encode()).hexdigest()[:16]
+
+
+def _hash(data) -> str:
+    """MD5 of ``repr(data)`` truncated to 16 hex chars — the fingerprint pattern used everywhere."""
+    return hashlib.md5(repr(data).encode()).hexdigest()[:16]
+
+
+def _card_content_data(item):
+    """Deterministic content tuple for one project card — changes iff the
+    card's user-visible content changes. Priority is *not* included here so a
+    priority change only re-keys the id (card moves groups), it doesn't also
+    content-dirty the card itself."""
+    sections = tuple(
+        (s["heading"], tuple((it["text"], it["status"]) for it in s["items"]))
+        for s in item["sections"]
+    )
+    deliverables = tuple((d["label"], d["path"]) for d in item.get("deliverables", []))
+    files = tuple(n["path"] for n in item.get("files", []))
+    return (
+        item["slug"],
+        item["title"],
+        item["kind"],
+        tuple(item["apps"]),
+        item["summary"],
+        sections,
+        deliverables,
+        files,
+    )
+
+
+def compute_project_node_fingerprints(items) -> dict[str, str]:
+    """Return ``{node_id: hash}`` for the Projects tab hierarchy.
+
+    Node-id scheme (slash-separated, prefix-matchable for ancestor checks):
+
+      - ``projects`` — whole Projects tab. Hash = set of (priority, slug) pairs.
+        Changes iff cards are added, removed, or moved between priorities.
+      - ``projects/<priority>`` — priority group. Hash = set of slugs in that
+        group. Changes iff cards are added or removed from that group.
+      - ``projects/<priority>/<slug>`` — a single card. Hash = card content.
+        Changes iff the card's visible fields change.
+
+    The group hash deliberately ignores child content so a card edit
+    dirty-marks only the card, not its enclosing group or tab. Cards added,
+    removed, or moved bubble up naturally because they change group
+    membership (which the group and tab hashes track).
+    """
+    out: dict[str, str] = {}
+
+    by_priority: dict[str, list] = {}
+    for item in items:
+        by_priority.setdefault(item["priority"], []).append(item)
+
+    # Per-card content hashes.
+    for item in items:
+        node_id = f"projects/{item['priority']}/{item['slug']}"
+        out[node_id] = _hash(_card_content_data(item))
+
+    # Per-group membership hashes.
+    for priority, group in by_priority.items():
+        slugs = tuple(sorted(i["slug"] for i in group))
+        out[f"projects/{priority}"] = _hash(("group", priority, slugs))
+
+    # Whole-tab membership hash.
+    tab_data = tuple(sorted((i["priority"], i["slug"]) for i in items))
+    out["projects"] = _hash(("tab", "projects", tab_data))
+
+    return out
+
+
+def _knowledge_card_content(entry: dict) -> tuple:
+    """Fingerprint data for one knowledge card — title + desc + path."""
+    return (entry.get("path"), entry.get("title"), entry.get("desc"))
+
+
+def _walk_knowledge_nodes(node: dict, out: dict[str, str], parent_id: str | None = None) -> str:
+    """Recursively emit fingerprints for a knowledge tree node and return
+    this node's id so the parent can reference it in its children list."""
+    rel_dir = node["rel_dir"]  # e.g. "knowledge" or "knowledge/topics"
+    node_id = rel_dir  # directories use their rel_dir verbatim as the id
+
+    child_ids: list[str] = []
+
+    if node.get("index"):
+        idx = node["index"]
+        card_id = idx["path"]  # e.g. "knowledge/topics/index.md"
+        out[card_id] = _hash(_knowledge_card_content(idx))
+        child_ids.append(card_id)
+
+    for entry in node.get("body", []):
+        card_id = entry["path"]
+        out[card_id] = _hash(_knowledge_card_content(entry))
+        child_ids.append(card_id)
+
+    for child in node.get("children", []):
+        child_id = _walk_knowledge_nodes(child, out, parent_id=node_id)
+        child_ids.append(child_id)
+
+    # Directory membership hash — list of direct child ids, sorted.
+    out[node_id] = _hash(("dir", node_id, tuple(sorted(child_ids))))
+    return node_id
+
+
+def compute_knowledge_node_fingerprints(tree: dict | None) -> dict[str, str]:
+    """Return ``{node_id: hash}`` for the Knowledge tree.
+
+    Node-id scheme:
+
+      - ``knowledge`` — root directory (tab level).
+      - ``knowledge/<sub-path>`` — any nested directory.
+      - ``knowledge/<sub-path>/<file>.md`` — a leaf card (including
+        ``index.md`` badges).
+
+    Directory hashes depend only on the set of direct child ids, so a card
+    edit dirty-marks only that card. Adds/removes at a directory level
+    dirty-mark just that directory.
+    """
+    if tree is None:
+        return {}
+    out: dict[str, str] = {}
+    _walk_knowledge_nodes(tree, out)
+    return out
