@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import html as html_mod
 import json
+import logging
 import os
 import re
 import shlex
@@ -34,6 +35,8 @@ from importlib.resources import files as _package_files
 from itertools import groupby
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 # Populated by init() before any rendering / mutation function is called.
 BASE_DIR: Path = Path("/nonexistent")
@@ -291,7 +294,8 @@ def parse_readme(path, kind):
     """Parse a single incident/project README."""
     try:
         text = path.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, UnicodeDecodeError) as exc:
+        log.warning("parse_readme: could not read %s: %s", path, exc)
         return None
     lines = text.split("\n")
     if not lines:
@@ -795,7 +799,7 @@ def _git_status(path):
             text=True,
             timeout=5,
         ).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "?", False, 0, []
     changed_files = []
     for ln in status_out.splitlines():
@@ -819,7 +823,7 @@ def _git_worktrees(repo_path):
             text=True,
             timeout=5,
         ).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return []
     main = str(Path(repo_path).resolve())
     worktrees = []
@@ -1342,7 +1346,8 @@ def _preprocess_wikilinks(text: str) -> str:
 def _render_markdown(full_path, note_dir_rel):
     try:
         text = full_path.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, UnicodeDecodeError) as exc:
+        log.warning("render_markdown: could not read %s: %s", full_path, exc)
         return '<p class="note-error">Unable to read note.</p>'
     text = _preprocess_wikilinks(text)
     try:
@@ -1355,8 +1360,8 @@ def _render_markdown(full_path, note_dir_rel):
         )
         if out.returncode == 0 and out.stdout.strip():
             return _rewrite_img_src(out.stdout, note_dir_rel)
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("render_markdown: pandoc failed for %s: %s", full_path, exc)
     return f'<pre class="note-raw">{h(text)}</pre>'
 
 
@@ -1393,7 +1398,8 @@ def _render_note(full_path: Path) -> str:
     if kind == "text":
         try:
             text = full_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except OSError as exc:
+            log.warning("render_note: could not read %s: %s", full_path, exc)
             return '<p class="note-error">Unable to read file.</p>'
         return f'<pre class="note-raw note-preview-text">{h(text)}</pre>'
 
@@ -1740,7 +1746,7 @@ def _git_fingerprint():
                     timeout=5,
                 ).stdout
                 parts.append(f"{child.name}:{head}:{status}")
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 parts.append(f"{child.name}:error")
 
     fp = hashlib.md5("".join(parts).encode()).hexdigest()[:16]
@@ -1865,7 +1871,7 @@ def _validate_open_path(path_str):
         return None
     try:
         p = Path(path_str).resolve(strict=True)
-    except Exception:
+    except (OSError, RuntimeError):
         return None
     if not p.is_dir():
         return None
@@ -1893,11 +1899,11 @@ def _open_path(slot_key, path):
     path_str = str(path)
     slot = _OPEN_WITH.get(slot_key)
     if slot is None:
-        print(f"[open] unknown slot: {slot_key!r}", file=sys.stderr)
+        log.warning("unknown slot: %r", slot_key)
         return False
     candidates = slot.resolve(path_str)
     if not candidates:
-        print(f"[open] {slot_key}: no commands configured", file=sys.stderr)
+        log.warning("%s: no commands configured", slot_key)
         return False
     last_err = None
     for cmd in candidates:
@@ -1909,18 +1915,15 @@ def _open_path(slot_key, path):
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            print(f"[open] {slot_key}: launched {cmd[0]}", file=sys.stderr)
+            log.info("%s: launched %s", slot_key, cmd[0])
             return True
         except FileNotFoundError as exc:
             last_err = exc
             continue
-        except Exception as exc:
-            print(f"[open] {slot_key}: {cmd[0]} failed: {exc}", file=sys.stderr)
+        except OSError as exc:
+            log.warning("%s: %s failed: %s", slot_key, cmd[0], exc)
             return False
-    print(
-        f"[open] {slot_key}: no launcher found (last error: {last_err})",
-        file=sys.stderr,
-    )
+    log.warning("%s: no launcher found (last error: %s)", slot_key, last_err)
     return False
 
 
@@ -1953,7 +1956,7 @@ def _try_pdf_viewer(path_str: str) -> bool:
         try:
             argv = shlex.split(raw)
         except ValueError as exc:
-            print(f"[open-doc] pdf_viewer parse failed for {raw!r}: {exc}", file=sys.stderr)
+            log.warning("pdf_viewer parse failed for %r: %s", raw, exc)
             continue
         argv = [arg.replace("{path}", path_str) for arg in argv]
         if not argv:
@@ -1968,8 +1971,8 @@ def _try_pdf_viewer(path_str: str) -> bool:
             return True
         except FileNotFoundError:
             continue
-        except Exception as exc:
-            print(f"[open-doc] pdf_viewer {argv[0]!r} failed: {exc}", file=sys.stderr)
+        except OSError as exc:
+            log.warning("pdf_viewer %r failed: %s", argv[0], exc)
             continue
     return False
 
@@ -1997,8 +2000,8 @@ def _os_open(path: Path) -> bool:
                 start_new_session=True,
             )
         return True
-    except Exception as exc:
-        print(f"[open-doc] failed: {exc}", file=sys.stderr)
+    except OSError as exc:
+        log.warning("open-doc failed: %s", exc)
         return False
 
 
@@ -2019,8 +2022,8 @@ def _open_external(url: str) -> bool:
 
     try:
         return bool(webbrowser.open(url, new=2))
-    except Exception as exc:
-        print(f"[open-external] failed: {exc}", file=sys.stderr)
+    except (OSError, webbrowser.Error) as exc:
+        log.warning("open-external failed: %s", exc)
         return False
 
 

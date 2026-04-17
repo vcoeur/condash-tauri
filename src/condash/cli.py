@@ -10,6 +10,7 @@ three vcoeur CLI tools present the same config UX to users.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import subprocess
@@ -286,8 +287,16 @@ def _resolve_editor() -> str:
     return "xdg-open"
 
 
+log = logging.getLogger(__name__)
+
+
 def main() -> None:
     """Entry point used by the `condash` console script."""
+    logging.basicConfig(
+        level=os.environ.get("CONDASH_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     app()
 
 

@@ -14,13 +14,14 @@ The name is a contraction of *conception dashboard*. The package distributes on 
 
 - Python 3.11+, `uv`-managed
 - Typer (CLI) + NiceGUI + FastAPI (routes on NiceGUI's embedded FastAPI instance) + pywebview[qt] (native window) + tomlkit (config round-trip preserving comments)
-- No ORM, no async, no test suite yet
+- No ORM. `app.py` mixes sync (legacy rendering helpers) and async (FastAPI routes + the WebSocket pty session) — sync helpers must not call `asyncio.run`; async handlers must not block on subprocess without `run_in_executor`.
+- Smoke test suite under `tests/` (CLI + FastAPI integration); run via `make test`.
 
 ## Architecture
 
 ```
 condash/
-  cli.py       <- Typer app (default launches the window; subcommands: init, config show/edit, tidy, install-desktop, uninstall-desktop)
+  cli.py       <- Typer app (default launches the window; subcommands: init, tidy, install-desktop, uninstall-desktop, config show/path/edit)
   config.py    <- TOML loader + writer (tomlkit round-trip) + CondashConfig dataclass + DEFAULT_CONFIG_TEMPLATE
   app.py       <- NiceGUI bootstrap + FastAPI route registration (`/`, `/toggle`, `/add-step`, `/tidy`, `/config`, …). Holds _RUNTIME_CFG so the in-app editor can mutate config without a restart.
   legacy.py    <- Ported verbatim from conception/tools/dashboard.py: Markdown parser, HTML renderer, mutation helpers, tidy pass. `init()` injects BASE_DIR / workspace / worktrees / repo structure from CondashConfig. `app.py` calls the helpers directly instead of routing through a BaseHTTPRequestHandler.
@@ -49,23 +50,27 @@ Config file lives at `~/.config/condash/config.toml` (or `$XDG_CONFIG_HOME/conda
 ## Commands
 
 ```bash
-uv sync --all-extras            # install deps incl. dev
+make dev-install                # uv sync --all-extras (install runtime + dev deps)
+make test                       # uv run pytest
+make lint                       # uv run ruff check + format --check
+make format                     # uv run ruff check --fix + format
+make run                        # uv run condash (native window)
 uv run condash --version        # smoke test the entry point
-uv run condash                  # launch the native window using ~/.config/condash/config.toml
-uv run ruff check src           # lint
-uv run ruff format src          # format (no Makefile yet — invoke ruff directly)
 uv run condash init             # write a default config template
 uv run condash config show      # print the effective configuration
+uv run condash config path      # print the resolved config-file path
+uv run condash config edit      # open the config file in $VISUAL / $EDITOR
 uv run condash tidy             # move done items into YYYY-MM/ archive dirs
+uv run condash install-desktop  # register the XDG .desktop entry (Linux)
 ```
 
-There is **no `Makefile`** and **no `tests/` directory** yet — unlike quelle and knoten. When adding either, match their shape (`make dev-install / test / lint / format / tool-install` and `tests/test_cli_smoke.py` as the integration anchor) so the three vcoeur CLIs keep the same workflow shape.
+The CLI honours `CONDASH_LOG_LEVEL` (default `INFO`) for the root logger; set to `DEBUG` to surface the clipboard fallback chain and similar low-noise events.
 
 ## Workflow
 
-1. After any code change: `uv run ruff format src && uv run ruff check src` — matches the `make format` step the other vcoeur CLIs have.
-2. Manual smoke test: `uv run condash` against a throwaway `conception_path` (e.g. `/tmp/fake-conception/` with one project README) before committing changes that touch `app.py` or `legacy.py`.
-3. When adding a new FastAPI route in `app.py`: add the matching fetch call in `assets/dashboard.html` and verify it in the browser dev-tools network tab — there is no automated coverage yet.
+1. After any code change: `make format && make lint && make test` — matches the `make format` / `make test` rhythm the other vcoeur CLIs have.
+2. Manual smoke test: `make run` against a throwaway `conception_path` (e.g. `/tmp/fake-conception/` with one project README) before committing changes that touch `app.py` or `legacy.py` the automated smoke does not cover.
+3. When adding a new FastAPI route in `app.py`: add the matching fetch call in `assets/dashboard.html` and consider extending `tests/test_app_smoke.py` if the route is reachable from a `TestClient`.
 4. When porting more behaviour from `conception/tools/dashboard.py`: keep the helper in `legacy.py`, not in `app.py`. `legacy.py` is the "ported verbatim" layer; `app.py` is the NiceGUI/FastAPI wiring.
 5. When touching `config.py`: round-trip at least one fixture through `tomlkit` manually to confirm comments and key order survive the rewrite — the in-app editor depends on this.
 
@@ -73,7 +78,7 @@ There is **no `Makefile`** and **no `tests/` directory** yet — unlike quelle a
 
 - CLI entrypoint: `src/condash/cli.py` — Typer app with a root callback that launches the window and a `config` sub-app for `show / edit / path`.
 - FastAPI routes: `src/condash/app.py::_register_routes` — all the endpoints `dashboard.html` talks to, registered on NiceGUI's embedded FastAPI instance.
-- Markdown parser + renderer: `src/condash/legacy.py` — 1.3 kloc, ported from `conception/tools/dashboard.py`. Module-level globals (`BASE_DIR`, `_WORKSPACE`, `_WORKTREES`, `_REPO_STRUCTURE`) are populated by `legacy.init(cfg)`; **never read them before `init` runs**.
+- Markdown parser + renderer: `src/condash/legacy.py` — ~2.0 kloc. Originally ported from `conception/tools/dashboard.py` but has since grown well past the port (knowledge-tree rendering, wikilink resolver, sandbox-stub filtering, note preview dispatch, …). Module-level globals (`BASE_DIR`, `_WORKSPACE`, `_WORKTREES`, `_REPO_STRUCTURE`, `_OPEN_WITH`, `_PDF_VIEWER`) are populated by `legacy.init(cfg)`; **never read them before `init` runs**.
 - Config dataclass + loader: `src/condash/config.py::CondashConfig` and `config.load`. `ConfigNotFoundError` vs `ConfigIncompleteError` are distinct so the CLI can suggest `init` vs `config edit`.
 - Native window launcher: `src/condash/desktop.py` — writes `~/.local/share/applications/condash.desktop` and the SVG icon. Linux only.
 - Assets shipped in the wheel: `src/condash/assets/` — referenced via `importlib.resources.files("condash") / "assets"`, never via `__file__`, so the app works when installed from a wheel.

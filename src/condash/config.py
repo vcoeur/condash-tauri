@@ -57,11 +57,14 @@ before condash can launch the dashboard. The template is shipped as
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_TEMPLATE = """\
 # condash configuration
@@ -300,7 +303,8 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
     if target.exists():
         try:
             doc = tomlkit.parse(target.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, UnicodeDecodeError, tomlkit.exceptions.TOMLKitError) as exc:
+            log.warning("could not reparse %s (%s); rewriting from scratch", target, exc)
             doc = document()
     else:
         doc = document()

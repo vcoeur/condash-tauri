@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import json
+import logging
 import os
 import secrets
 import signal
@@ -33,6 +34,8 @@ from .config import (
     CondashConfig,
     OpenWithSlot,
 )
+
+log = logging.getLogger(__name__)
 
 # Holds the live runtime config so the in-app editor can mutate it after a
 # successful POST /config without forcing a process restart. Initialized by
@@ -455,11 +458,11 @@ def _register_routes() -> None:
                 await ws.send_text(
                     json.dumps({"type": "session-expired", "session_id": requested_id})
                 )
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, OSError):
                 pass
             try:
                 await ws.close()
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, OSError):
                 pass
             return
 
@@ -472,7 +475,7 @@ def _register_routes() -> None:
             session.attached_ws = None
             try:
                 await old.close()
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, OSError):
                 pass
 
         if session is None:
@@ -483,15 +486,12 @@ def _register_routes() -> None:
                 if validated is not None:
                     override_cwd = str(validated)
                 else:
-                    print(
-                        f"[term] rejecting out-of-sandbox cwd: {requested_cwd!r}",
-                        file=sys.stderr,
-                    )
+                    log.warning("term: rejecting out-of-sandbox cwd: %r", requested_cwd)
             session = await _spawn_pty_session(override_cwd=override_cwd)
             if session is None:
                 try:
                     await ws.close()
-                except Exception:
+                except (WebSocketDisconnect, RuntimeError, OSError):
                     pass
                 return
 
@@ -507,7 +507,7 @@ def _register_routes() -> None:
                     }
                 )
             )
-        except Exception:
+        except (WebSocketDisconnect, RuntimeError, OSError):
             session.attached_ws = None
             return
 
@@ -517,7 +517,7 @@ def _register_routes() -> None:
         if session.buffer:
             try:
                 await ws.send_bytes(bytes(session.buffer))
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, OSError):
                 session.attached_ws = None
                 return
 
@@ -587,7 +587,7 @@ async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | No
             session.out_queue.put_nowait(None)
             try:
                 loop.remove_reader(fd)
-            except Exception:
+            except (OSError, ValueError):
                 pass
             return
         session.out_queue.put_nowait(data)
@@ -615,11 +615,11 @@ async def _pump_session(session: PtySession) -> None:
             if ws is not None:
                 try:
                     await ws.send_text(json.dumps({"type": "exit"}))
-                except Exception:
+                except (WebSocketDisconnect, RuntimeError, OSError):
                     pass
                 try:
                     await ws.close()
-                except Exception:
+                except (WebSocketDisconnect, RuntimeError, OSError):
                     pass
             try:
                 os.close(session.fd)
@@ -643,7 +643,7 @@ async def _pump_session(session: PtySession) -> None:
         if ws is not None:
             try:
                 await ws.send_bytes(data)
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, OSError):
                 # Viewer went away (e.g. F5). Detach so the next attach
                 # replays from the buffer; keep pty running.
                 if session.attached_ws is ws:
@@ -691,8 +691,8 @@ async def _attach_ws(session: PtySession, ws: WebSocket) -> None:
                     )
                 except OSError:
                     pass
-    except Exception:
-        pass
+    except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+        log.debug("attach_ws: receive loop ended: %s", exc)
     finally:
         # Detach only — pty stays alive for the next reconnect.
         if session.attached_ws is ws:
@@ -791,7 +791,7 @@ def _qt_clipboard():
         return None
     try:
         return app.clipboard()
-    except Exception:
+    except (RuntimeError, AttributeError):
         return None
 
 
@@ -802,8 +802,8 @@ def _clipboard_read() -> str:
     if cb is not None:
         try:
             return cb.text() or ""
-        except Exception:
-            pass
+        except RuntimeError as exc:
+            log.debug("clipboard_read: Qt clipboard unavailable: %s", exc)
     for argv in (
         ["wl-paste", "--no-newline"],
         ["xclip", "-selection", "clipboard", "-o"],
@@ -813,7 +813,8 @@ def _clipboard_read() -> str:
             out = _sp.run(argv, capture_output=True, timeout=2)
         except FileNotFoundError:
             continue
-        except Exception:
+        except (OSError, _sp.SubprocessError) as exc:
+            log.debug("clipboard_read: %s failed: %s", argv[0], exc)
             continue
         if out.returncode == 0:
             return out.stdout.decode("utf-8", errors="replace")
@@ -828,8 +829,8 @@ def _clipboard_write(text: str) -> bool:
         try:
             cb.setText(text)
             return True
-        except Exception:
-            pass
+        except RuntimeError as exc:
+            log.debug("clipboard_write: Qt clipboard unavailable: %s", exc)
     for argv in (
         ["wl-copy"],
         ["xclip", "-selection", "clipboard", "-i"],
@@ -839,14 +840,16 @@ def _clipboard_write(text: str) -> bool:
             proc = _sp.Popen(argv, stdin=_sp.PIPE)
         except FileNotFoundError:
             continue
-        except Exception:
+        except OSError as exc:
+            log.debug("clipboard_write: %s failed to spawn: %s", argv[0], exc)
             continue
         try:
             proc.communicate(text.encode("utf-8"), timeout=2)
-        except Exception:
+        except (OSError, _sp.SubprocessError) as exc:
+            log.debug("clipboard_write: %s communicate failed: %s", argv[0], exc)
             try:
                 proc.kill()
-            except Exception:
+            except OSError:
                 pass
             continue
         if proc.returncode == 0:

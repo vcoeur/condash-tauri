@@ -14,6 +14,7 @@ binary called this command, so it survives venv / pipx isolation.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -21,6 +22,8 @@ import sys
 from pathlib import Path
 
 from .app import icon_path
+
+log = logging.getLogger(__name__)
 
 APP_ID = "condash"
 DESKTOP_FILE_NAME = f"{APP_ID}.desktop"
