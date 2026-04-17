@@ -19,23 +19,30 @@ file are:
 
 from __future__ import annotations
 
-import hashlib
 import html as html_mod
 import json
 import logging
 import os
 import re
 import shlex
-import stat
 import subprocess
 import sys
-import time
 from datetime import datetime
 from importlib.resources import files as _package_files
 from itertools import groupby
 from pathlib import Path
 from typing import Any
 
+from .git_scan import (  # noqa: F401 — re-exported for backward compat during the Phase 1 split
+    _collect_git_repos,
+    _git_cache,
+    _git_fingerprint,
+    _git_status,
+    _git_worktrees,
+    _is_sandbox_stub,
+    _load_repository_structure,
+    _resolve_submodules,
+)
 from .parser import (  # noqa: F401 — re-exported for backward compat during the Phase 1 split
     _IMAGE_EXTS,
     _ITEM_DIR_RE,
@@ -447,191 +454,6 @@ def _render_card(item):
         f"</div></div>"
         f"</div>"
     )
-
-
-def _is_sandbox_stub(repo_path: Path, status: str, rel: str) -> bool:
-    """Return True for harness-synthesized stub files that should not count
-    as real repo changes.
-
-    When condash runs inside a sandbox (e.g. Claude Code's bwrap harness),
-    the runtime binds zero-byte read-only copies of the user's home
-    dotfiles (``.bashrc``, ``.gitconfig``, ``.mcp.json``, …) into every
-    working directory so programs don't crash on missing config. These
-    show up as untracked files in ``git status`` but they are not real
-    changes, and the commit skill already filters them with the same
-    logic — we want condash's dirty-badge to agree.
-    """
-    if "D" in status:
-        return False
-    try:
-        st = (Path(repo_path) / rel).lstat()
-    except OSError:
-        return False
-    if stat.S_ISCHR(st.st_mode):
-        return True
-    if stat.S_ISLNK(st.st_mode):
-        try:
-            return os.readlink(str(Path(repo_path) / rel)) == "/dev/null"
-        except OSError:
-            return False
-    if status != "??":
-        return False
-    if not stat.S_ISREG(st.st_mode):
-        return False
-    if st.st_size != 0:
-        return False
-    if st.st_mode & 0o222:
-        return False
-    return True
-
-
-def _git_status(path):
-    try:
-        branch = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-        status_out = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return "?", False, 0, []
-    changed_files = []
-    for ln in status_out.splitlines():
-        if len(ln) < 4:
-            continue
-        status = ln[:2]
-        rest = ln[3:]
-        if " -> " in rest:
-            rest = rest.split(" -> ", 1)[1]
-        if _is_sandbox_stub(path, status, rest):
-            continue
-        changed_files.append(rest)
-    return branch, bool(changed_files), len(changed_files), changed_files
-
-
-def _git_worktrees(repo_path):
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(repo_path), "worktree", "list", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    main = str(Path(repo_path).resolve())
-    worktrees = []
-    current = {}
-    for line in out.splitlines() + [""]:
-        if not line:
-            if current.get("path") and current["path"] != main:
-                wt_path = Path(current["path"])
-                key = (
-                    wt_path.parent.name
-                    if wt_path.parent.parent.name == "worktrees"
-                    else wt_path.name
-                )
-                branch, dirty, changed, changed_files = _git_status(wt_path)
-                worktrees.append(
-                    {
-                        "key": key,
-                        "path": current["path"],
-                        "branch": branch or current.get("branch", ""),
-                        "dirty": dirty,
-                        "changed": changed,
-                        "changed_files": changed_files,
-                    }
-                )
-            current = {}
-            continue
-        if line.startswith("worktree "):
-            current["path"] = line[len("worktree ") :]
-        elif line.startswith("branch "):
-            current["branch"] = line[len("branch ") :].replace("refs/heads/", "")
-    return worktrees
-
-
-def _load_repository_structure():
-    """Return configured primary/secondary repo buckets."""
-    return list(_REPO_STRUCTURE)
-
-
-def _resolve_submodules(base_path, submodule_names):
-    out = []
-    base = Path(base_path)
-    for name in submodule_names:
-        sub = base / name
-        if sub.is_dir():
-            out.append({"name": name, "path": str(sub.resolve())})
-    return out
-
-
-def _collect_git_repos():
-    """Find git repos under the configured workspace and group them.
-
-    Returns ``[]`` (no repo strip) when ``workspace_path`` is unset.
-    """
-    if _WORKSPACE is None:
-        return []
-    workspace = _WORKSPACE
-    found = {}
-    if workspace.is_dir():
-        for child in sorted(workspace.iterdir()):
-            if not child.is_dir() or child.name.startswith("."):
-                continue
-            git_dir = child / ".git"
-            if not git_dir.exists():
-                continue
-            branch, dirty, changed, changed_files = _git_status(child)
-            found[child.name] = {
-                "name": child.name,
-                "path": str(child.resolve()),
-                "branch": branch,
-                "dirty": dirty,
-                "changed": changed,
-                "changed_files": changed_files,
-                "worktrees": _git_worktrees(child),
-                "submodules": [],
-            }
-
-    structure = _load_repository_structure()
-    submodule_map = {name: subs for _, entries in structure for name, subs in entries}
-
-    def _attach_counts(container):
-        changed_files = container.get("changed_files") or []
-        for sub in container.get("submodules") or []:
-            prefix = sub["name"] + "/"
-            sub["changed"] = sum(1 for f in changed_files if f.startswith(prefix))
-            sub["dirty"] = sub["changed"] > 0
-
-    for repo_name, repo in found.items():
-        subs = submodule_map.get(repo_name) or []
-        if not subs:
-            continue
-        repo["submodules"] = _resolve_submodules(repo["path"], subs)
-        _attach_counts(repo)
-        for wt in repo["worktrees"]:
-            wt["submodules"] = _resolve_submodules(wt["path"], subs)
-            _attach_counts(wt)
-
-    groups = []
-    placed = set()
-    for label, entries in structure:
-        bucket = [found[n] for n, _ in entries if n in found]
-        placed.update(n for n, _ in entries if n in found)
-        if bucket:
-            groups.append((label, bucket))
-
-    others = [found[n] for n in sorted(found) if n not in placed]
-    if others:
-        groups.append(("Others", others))
-    return groups
 
 
 _ICON_SVGS = {
@@ -1115,50 +937,6 @@ def _tidy():
 def run_tidy():
     """Public alias used by the CLI entry point."""
     return _tidy()
-
-
-_git_cache = {"fingerprint": None, "timestamp": 0.0}
-
-
-def _git_fingerprint():
-    now = time.monotonic()
-    if _git_cache["fingerprint"] and now - _git_cache["timestamp"] < 30:
-        return _git_cache["fingerprint"]
-
-    if _WORKSPACE is None:
-        _git_cache["fingerprint"] = "no-workspace"
-        _git_cache["timestamp"] = now
-        return _git_cache["fingerprint"]
-
-    workspace = _WORKSPACE
-    parts = []
-    if workspace.is_dir():
-        for child in sorted(workspace.iterdir()):
-            if not child.is_dir() or child.name.startswith("."):
-                continue
-            if not (child / ".git").exists():
-                continue
-            try:
-                head = subprocess.run(
-                    ["git", "-C", str(child), "rev-parse", "HEAD"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                ).stdout.strip()
-                status = subprocess.run(
-                    ["git", "-C", str(child), "status", "--porcelain"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                ).stdout
-                parts.append(f"{child.name}:{head}:{status}")
-            except (OSError, subprocess.SubprocessError):
-                parts.append(f"{child.name}:error")
-
-    fp = hashlib.md5("".join(parts).encode()).hexdigest()[:16]
-    _git_cache["fingerprint"] = fp
-    _git_cache["timestamp"] = now
-    return fp
 
 
 def _toggle_checkbox(full_path, line_num):
