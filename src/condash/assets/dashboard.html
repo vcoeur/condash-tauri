@@ -3124,6 +3124,19 @@ function _termStartRename(tab) {
     });
 }
 
+function _termApplySplitRatio() {
+    var r = parseFloat(localStorage.getItem('term-split-ratio') || '');
+    var leftEl = _termSideEl('left', 'side');
+    var rightEl = _termSideEl('right', 'side');
+    if (isFinite(r) && r > 0 && r < 1) {
+        leftEl.style.flex = r + ' 1 0';
+        rightEl.style.flex = (1 - r) + ' 1 0';
+    } else {
+        leftEl.style.flex = '';
+        rightEl.style.flex = '';
+    }
+}
+
 function _termShowSide(side, show) {
     var sideEl = _termSideEl(side, 'side');
     if (show) sideEl.removeAttribute('hidden');
@@ -3132,8 +3145,20 @@ function _termShowSide(side, show) {
     var leftVisible = _termTabsOn('left').length > 0;
     var rightVisible = _termTabsOn('right').length > 0;
     var splitter = document.getElementById('term-splitter');
-    if (leftVisible && rightVisible) splitter.removeAttribute('hidden');
-    else splitter.setAttribute('hidden', '');
+    if (leftVisible && rightVisible) {
+        splitter.removeAttribute('hidden');
+        // Both sides present — apply any saved split ratio.
+        _termApplySplitRatio();
+    } else {
+        splitter.setAttribute('hidden', '');
+        // Single side — clear inline flex so the lone side falls back
+        // to the CSS default (flex: 1 1 0) and fills the whole .term-body.
+        // Flexbox's "sum of grow factors < 1" rule would otherwise leave
+        // a gap the width of the old split when the saved ratio is < 50/50
+        // on the surviving side.
+        _termSideEl('left', 'side').style.flex = '';
+        _termSideEl('right', 'side').style.flex = '';
+    }
     _termSyncActiveSide();
 }
 
@@ -3397,13 +3422,6 @@ function _termSplitEnd() {
     _termSplitDrag = null;
     _termSendResizeAll();
 }
-(function restoreSplitRatio() {
-    var r = parseFloat(localStorage.getItem('term-split-ratio') || '');
-    if (isFinite(r) && r > 0 && r < 1) {
-        _termSideEl('left', 'side').style.flex = r + ' 1 0';
-        _termSideEl('right', 'side').style.flex = (1 - r) + ' 1 0';
-    }
-})();
 
 /* Drag-resize: adjust the --term-height CSS variable while dragging, then
    persist the final value. */
