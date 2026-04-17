@@ -3034,7 +3034,14 @@ function _termDragEnd() {
     _termDrag = null;
     var h = document.getElementById('term-pane').offsetHeight;
     localStorage.setItem('term-height', h + 'px');
-    _termSendResize();
+    // Must refit every tab on both sides, not just the active one: the
+    // pane height change is symmetric, but _termSendResize() with no arg
+    // only resizes the last-focused tab. With two sides open and the last
+    // focus on the right, the left side's xterm stayed wedged at its old
+    // row count (and vice versa) — looked like "left vertical resize
+    // broken" to the user, because that was the side that usually wasn't
+    // last-focused.
+    _termSendResizeAll();
 }
 
 /* Parse a shortcut spec like "Ctrl+`" / "Ctrl+Shift+T" / "Alt+K" into a
