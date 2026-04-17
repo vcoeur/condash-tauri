@@ -94,6 +94,14 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # useful if you don't have GTK/Qt Python bindings installed.
 # native = true
 
+# pdf_viewer: fallback chain of shell-style commands to open *.pdf files from
+# note-body links and ## Deliverables. Each entry is a single string parsed
+# with `shlex`; the literal `{path}` is replaced with the absolute path of
+# the PDF. Commands are tried in order until one starts successfully. If
+# unset or empty, PDFs fall back to the OS default (xdg-open / open /
+# startfile) — same behaviour as images and other non-PDF files.
+# pdf_viewer = ["evince {path}", "okular {path}"]
+
 # [repositories]
 # primary:   bare directory names (not paths) matched against what is found
 #            under `workspace_path`; shown in the top card of the repo strip.
@@ -244,6 +252,7 @@ class CondashConfig:
     port: int = 0
     native: bool = True
     open_with: dict[str, OpenWithSlot] = field(default_factory=dict)
+    pdf_viewer: list[str] = field(default_factory=list)
 
 
 def config_path() -> Path:
@@ -313,6 +322,10 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
         del doc["worktrees_path"]
     doc["port"] = int(cfg.port)
     doc["native"] = bool(cfg.native)
+    if cfg.pdf_viewer:
+        doc["pdf_viewer"] = list(cfg.pdf_viewer)
+    elif "pdf_viewer" in doc:
+        del doc["pdf_viewer"]
 
     # [repositories]
     repos = doc.get("repositories")
@@ -453,6 +466,11 @@ def _parse(data: dict, source: Path) -> CondashConfig:
     if not isinstance(native_raw, bool):
         raise ConfigIncompleteError(f"{source}: 'native' must be a boolean")
 
+    pdf_viewer_raw = data.get("pdf_viewer", [])
+    if not isinstance(pdf_viewer_raw, list) or not all(isinstance(c, str) for c in pdf_viewer_raw):
+        raise ConfigIncompleteError(f"{source}: 'pdf_viewer' must be a list of command strings")
+    pdf_viewer = [c for c in (s.strip() for s in pdf_viewer_raw) if c]
+
     open_with_raw = data.get("open_with") or {}
     if not isinstance(open_with_raw, dict):
         raise ConfigIncompleteError(f"{source}: 'open_with' must be a table")
@@ -497,6 +515,7 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         port=port_raw,
         native=native_raw,
         open_with=open_with,
+        pdf_viewer=pdf_viewer,
     )
 
 

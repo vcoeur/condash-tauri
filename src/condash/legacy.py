@@ -24,6 +24,7 @@ import html as html_mod
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -55,6 +56,11 @@ _REPO_STRUCTURE: list[tuple[str, list[tuple[str, list[str]]]]] = []
 # dict; render_git_actions falls back to slot-key-as-title when missing.
 _OPEN_WITH: dict[str, Any] = {}
 
+# Populated by init() from CondashConfig.pdf_viewer. Fallback chain of
+# shell-style commands tried for *.pdf files before falling back to the OS
+# default opener. Empty list → current behaviour (xdg-open / open / startfile).
+_PDF_VIEWER: list[str] = []
+
 
 def init(cfg) -> None:
     """Wire runtime configuration into this module.
@@ -63,7 +69,7 @@ def init(cfg) -> None:
     :class:`condash.config.CondashConfig` (typed as ``Any`` here to avoid
     a circular import at module load).
     """
-    global BASE_DIR, _WORKSPACE, _WORKTREES, _REPO_STRUCTURE, _OPEN_WITH
+    global BASE_DIR, _WORKSPACE, _WORKTREES, _REPO_STRUCTURE, _OPEN_WITH, _PDF_VIEWER
     if cfg.conception_path is None:
         # Sentinel path that .is_dir() returns False for — collect_items
         # short-circuits to an empty list and the dashboard renders the
@@ -89,6 +95,7 @@ def init(cfg) -> None:
         ),
     ]
     _OPEN_WITH = dict(cfg.open_with or {})
+    _PDF_VIEWER = list(getattr(cfg, "pdf_viewer", None) or [])
 
 
 def _template_path() -> Path:
@@ -1933,12 +1940,50 @@ def _validate_doc_path(rel_path: str) -> Path | None:
     return full if full.is_file() else None
 
 
+def _try_pdf_viewer(path_str: str) -> bool:
+    """Try the configured ``pdf_viewer`` fallback chain.
+
+    Each entry is shlex-split and ``{path}`` replaced by ``path_str``. Returns
+    True on the first command that starts without raising; False if the list
+    is empty or every entry fails (bad shell syntax, missing binary, …).
+    """
+    for raw in _PDF_VIEWER:
+        if not raw.strip():
+            continue
+        try:
+            argv = shlex.split(raw)
+        except ValueError as exc:
+            print(f"[open-doc] pdf_viewer parse failed for {raw!r}: {exc}", file=sys.stderr)
+            continue
+        argv = [arg.replace("{path}", path_str) for arg in argv]
+        if not argv:
+            continue
+        try:
+            subprocess.Popen(
+                argv,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            print(f"[open-doc] pdf_viewer {argv[0]!r} failed: {exc}", file=sys.stderr)
+            continue
+    return False
+
+
 def _os_open(path: Path) -> bool:
     """Hand ``path`` to the OS-native default-application launcher.
 
     Linux uses ``xdg-open``; macOS ``open``; Windows uses ``os.startfile``.
+    PDFs additionally honour the ``pdf_viewer`` config chain and only fall
+    back to the OS default if every configured command fails to launch.
     """
     path_str = str(path)
+    if path.suffix.lower() == ".pdf" and _try_pdf_viewer(path_str):
+        return True
     try:
         if sys.platform == "darwin":
             subprocess.Popen(["open", path_str], start_new_session=True)

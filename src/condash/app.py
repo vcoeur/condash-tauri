@@ -741,6 +741,7 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
             for slot_key in OPEN_WITH_SLOT_KEYS
             if slot_key in cfg.open_with
         },
+        "pdf_viewer": list(cfg.pdf_viewer),
     }
 
 
@@ -936,6 +937,14 @@ def _payload_to_config(data: dict) -> CondashConfig:
             raise ValueError(f"open_with.{slot_key}.commands must be a list")
         open_with[slot_key] = OpenWithSlot(label=label, commands=commands)
 
+    pdf_viewer_raw = data.get("pdf_viewer", [])
+    if pdf_viewer_raw is None:
+        pdf_viewer: list[str] = []
+    elif isinstance(pdf_viewer_raw, list):
+        pdf_viewer = [str(c).strip() for c in pdf_viewer_raw if str(c).strip()]
+    else:
+        raise ValueError("pdf_viewer must be a list of command strings")
+
     term_raw = data.get("terminal") or {}
     if not isinstance(term_raw, dict):
         raise ValueError("terminal must be an object")
@@ -956,6 +965,7 @@ def _payload_to_config(data: dict) -> CondashConfig:
         port=port_raw,
         native=native_raw,
         open_with=open_with,
+        pdf_viewer=pdf_viewer,
     )
 
 

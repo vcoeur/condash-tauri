@@ -1242,6 +1242,13 @@ body {
                     </label>
                 </fieldset>
                 <fieldset class="config-fieldset">
+                    <legend>PDF viewer</legend>
+                    <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path. Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
+                    <label>commands
+                        <textarea name="pdf_viewer" rows="3" placeholder="evince {path}&#10;okular {path}"></textarea>
+                    </label>
+                </fieldset>
+                <fieldset class="config-fieldset">
                     <legend>Embedded terminal</legend>
                     <label>shell
                         <input type="text" name="terminal_shell" placeholder="(defaults to $SHELL, then /bin/bash)">
@@ -1406,6 +1413,7 @@ async function openConfigModal() {
         _setSlotFields(form, 'main_ide', ow.main_ide);
         _setSlotFields(form, 'secondary_ide', ow.secondary_ide);
         _setSlotFields(form, 'terminal', ow.terminal);
+        form.elements['pdf_viewer'].value = _listToLines(cfg.pdf_viewer || []);
         var term = cfg.terminal || {};
         _setField(form, 'terminal_shell', term.shell);
         _setField(form, 'terminal_shortcut', term.shortcut);
@@ -1443,6 +1451,7 @@ async function saveConfig(ev) {
         native: _getField(form, 'native'),
         repositories_primary: _linesToRepos(form.elements['repositories_primary'].value),
         repositories_secondary: _linesToRepos(form.elements['repositories_secondary'].value),
+        pdf_viewer: _linesToList(form.elements['pdf_viewer'].value),
         terminal: {
             shell: _getField(form, 'terminal_shell'),
             shortcut: _getField(form, 'terminal_shortcut'),
