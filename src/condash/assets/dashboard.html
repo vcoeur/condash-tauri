@@ -395,6 +395,48 @@ body {
     background: #fff; border-color: var(--accent);
 }
 
+/* --- Localized stale markers ---
+   `.node-stale` is applied to the smallest enclosing element that actually
+   changed (a card, a group heading, a knowledge directory, a repo row).
+   `.node-stale-hint` is applied to its ancestors so you can pick the level
+   at which to trigger a local reload. Both surface a small accent dot in
+   the top-right corner of the element — strong for stale, muted for hint. */
+[data-node-id] { position: relative; }
+[data-node-id].node-stale::after,
+[data-node-id].node-stale-hint::after {
+    content: ''; position: absolute; top: 4px; right: 6px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--bg-card);
+    pointer-events: none; z-index: 2;
+}
+[data-node-id].node-stale-hint::after {
+    /* Muted hint: hollow ring on ancestors whose descendants are dirty. */
+    background: transparent;
+    border-color: var(--accent);
+    opacity: 0.65;
+}
+/* Pane wrappers already cover the whole viewport — putting the dot on
+   them would float it in no-man's-land. Suppress. The tab header shows
+   its own stale dot (``.tabs-primary .tab.stale::after``) anyway. */
+#projects-pane[data-node-id].node-stale::after,
+#projects-pane[data-node-id].node-stale-hint::after,
+#code-pane[data-node-id].node-stale::after,
+#code-pane[data-node-id].node-stale-hint::after,
+#knowledge-pane[data-node-id].node-stale::after,
+#knowledge-pane[data-node-id].node-stale-hint::after { display: none; }
+/* Group heading is hidden by default (per-subtab reveal). If a whole
+   group is dirty while its heading isn't shown, we still want the marker
+   visible — the dot attaches to the first visible card of that group
+   via the adjacent-sibling rule below. */
+.card[data-node-id].group-dirty-leader::before {
+    content: ''; position: absolute; top: -10px; left: 12px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--bg-card);
+    pointer-events: none; z-index: 2;
+}
+
 /* --- Embedded terminal (bottom pane) ---
    A flex sibling of .app — opening it shrinks the main scroll region
    rather than overlaying. Height is drag-resizable via the top handle;
@@ -1196,14 +1238,14 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     <div class="tab" data-subtab="history" onclick="switchSubtab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
 </div>
 <main id="main-scroll">
-    <div id="projects-pane">
+    <div id="projects-pane" data-node-id="projects">
         <div id="cards">{{CARDS}}</div>
         <div id="history" style="display:none">{{HISTORY}}</div>
     </div>
-    <div id="code-pane" style="display:none">
+    <div id="code-pane" style="display:none" data-node-id="code">
         <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
     </div>
-    <div id="knowledge-pane" style="display:none">
+    <div id="knowledge-pane" style="display:none" data-node-id="knowledge">
         <div class="knowledge-toolbar">
             <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off">
         </div>
@@ -2517,21 +2559,101 @@ function startEditText(el) {
     };
 }
 
-/* --- Stale-detection polling --- */
-var _lastFingerprint = null;
+/* --- Stale-detection polling (localized, per-node) ---
+   /check-updates returns a {node_id: hash} map covering every card, group,
+   directory, and repo node in the three tabs. We keep the previous map as a
+   baseline and, each poll, compute the set of dirty ids (differ / added /
+   removed). From that set we drive:
+     - `.node-stale` on every DOM element whose own id is dirty (strong dot),
+     - `.node-stale-hint` on ancestor elements (muted dot) — so you can
+       choose to reload at any level above the actual change,
+     - the pre-existing `.stale` dot on the primary tab header (kept for
+       coarse orientation).
+   Node ids are slash-separated; ancestors are derived by trimming segments
+   from the right. */
+var _nodeBaseline = null;    // Object id → hash (null until first poll)
+var _dirtyNodes = new Set(); // ids whose current hash != baseline, or present on only one side
+var _lastFingerprint = null; // kept for back-compat with pickPriority/switchTab
 var _lastGitFingerprint = null;
-var _itemsStale = false;
-var _gitStale = false;
+
+function _deriveLegacyFlags() {
+    // Coarse flags the existing tab-switch / mutation code still reads.
+    var items = false, git = false, knowledge = false;
+    _dirtyNodes.forEach(function(id) {
+        if (id === 'projects' || id.indexOf('projects/') === 0) items = true;
+        else if (id === 'code' || id.indexOf('code/') === 0) git = true;
+        else if (id === 'knowledge' || id.indexOf('knowledge/') === 0) knowledge = true;
+    });
+    _itemsStale = items;
+    _gitStale = git;
+    _knowledgeStale = knowledge;
+}
+
+function _ancestorsOf(id) {
+    // "projects/now/slug" → ["projects/now", "projects"]. Splits on '/';
+    // subtree IDs like wt:foo or sub:bar are single segments so this is safe.
+    var parts = id.split('/');
+    var out = [];
+    for (var i = parts.length - 1; i > 0; i--) {
+        out.push(parts.slice(0, i).join('/'));
+    }
+    return out;
+}
 
 function _renderStale() {
-    // Map each stale source onto the top-level tab whose data changed.
-    // Items fingerprint covers everything under projects/ (cards grid +
-    // history tree). Git fingerprint covers the Code panel. Knowledge has
-    // no stale detection yet, so its tab never lights up.
+    // 1. Clear previous markers everywhere.
+    document.querySelectorAll('[data-node-id].node-stale, [data-node-id].node-stale-hint')
+        .forEach(function(el) {
+            el.classList.remove('node-stale');
+            el.classList.remove('node-stale-hint');
+        });
+    document.querySelectorAll('.group-dirty-leader')
+        .forEach(function(el) { el.classList.remove('group-dirty-leader'); });
+
+    // 2. Collect ancestor hint set from the dirty set.
+    var hintIds = new Set();
+    _dirtyNodes.forEach(function(id) {
+        _ancestorsOf(id).forEach(function(anc) { hintIds.add(anc); });
+    });
+
+    // 3. Apply strong marker on dirty, muted marker on ancestors.
+    _dirtyNodes.forEach(function(id) {
+        // CSS-attribute selectors need values escaped — but our ids only
+        // contain [a-zA-Z0-9/:.\-_], safe for CSS.escape.
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+        document.querySelectorAll('[data-node-id="' + esc + '"]').forEach(function(el) {
+            el.classList.add('node-stale');
+        });
+    });
+    hintIds.forEach(function(id) {
+        if (_dirtyNodes.has(id)) return; // strong wins over hint
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+        document.querySelectorAll('[data-node-id="' + esc + '"]').forEach(function(el) {
+            el.classList.add('node-stale-hint');
+        });
+    });
+
+    // 4. Group headings are hidden on most subtabs. When a group is dirty
+    //    but its heading isn't visible, stamp the marker on the first
+    //    visible card of that priority so the user still sees it.
+    _dirtyNodes.forEach(function(id) {
+        var m = /^projects\/([a-z]+)$/.exec(id);
+        if (!m) return;
+        var pri = m[1];
+        var heading = document.querySelector('.group-heading[data-group="' + pri + '"]');
+        if (heading && !heading.classList.contains('hidden')) return;
+        var firstCard = document.querySelector(
+            '.card[data-priority="' + pri + '"]:not(.hidden)'
+        );
+        if (firstCard) firstCard.classList.add('group-dirty-leader');
+    });
+
+    // 5. Tab-header dots — coarse "something in this tab needs attention".
+    _deriveLegacyFlags();
     var staleByTab = {
         projects: _itemsStale,
         code: _gitStale,
-        knowledge: false,
+        knowledge: _knowledgeStale,
     };
     document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         var key = t.getAttribute('data-tab');
@@ -2545,20 +2667,36 @@ function _renderStale() {
     });
 }
 
+var _itemsStale = false, _gitStale = false, _knowledgeStale = false;
+
+function _diffNodes(baseline, current) {
+    var dirty = new Set();
+    if (!baseline) return dirty;
+    for (var id in current) {
+        if (baseline[id] !== current[id]) dirty.add(id);
+    }
+    for (var id2 in baseline) {
+        if (!(id2 in current)) dirty.add(id2);
+    }
+    return dirty;
+}
+
 async function checkUpdates() {
     try {
         var res = await fetch('/check-updates');
         if (!res.ok) return;
         var data = await res.json();
-        if (_lastFingerprint === null) {
+        var current = data.nodes || {};
+        if (_nodeBaseline === null) {
+            _nodeBaseline = current;
             _lastFingerprint = data.fingerprint;
-        } else if (data.fingerprint !== _lastFingerprint) {
-            _itemsStale = true;
-        }
-        if (_lastGitFingerprint === null) {
             _lastGitFingerprint = data.git_fingerprint;
-        } else if (data.git_fingerprint !== _lastGitFingerprint) {
-            _gitStale = true;
+        } else {
+            // Once a node is marked dirty, it stays dirty until a local or
+            // global reload updates the baseline — so the user can see there
+            // was a change even if they weren't on the tab when it happened.
+            var fresh = _diffNodes(_nodeBaseline, current);
+            fresh.forEach(function(id) { _dirtyNodes.add(id); });
         }
         _renderStale();
     } catch (e) {}
@@ -2569,10 +2707,10 @@ async function updateBaseline() {
         var res = await fetch('/check-updates');
         if (!res.ok) return;
         var data = await res.json();
+        _nodeBaseline = data.nodes || {};
+        _dirtyNodes = new Set();
         _lastFingerprint = data.fingerprint;
         _lastGitFingerprint = data.git_fingerprint;
-        _itemsStale = false;
-        _gitStale = false;
         _renderStale();
     } catch (e) {}
 }

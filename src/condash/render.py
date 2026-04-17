@@ -280,8 +280,10 @@ def _render_card(item):
         else ""
     )
 
+    node_id = f"projects/{pri}/{item['slug']}"
     return (
-        f'<div class="card collapsed" id="{item["slug"]}" data-kind="{item["kind"]}" data-priority="{pri}">'
+        f'<div class="card collapsed" id="{item["slug"]}" '
+        f'data-kind="{item["kind"]}" data-priority="{pri}" data-node-id="{node_id}">'
         f'<div class="card-header">'
         f'<div class="card-header-left" onclick="toggleCard(this.closest(\'.card\'))">'
         f'<span class="kind-prefix kind-{kind}">{kind}</span>'
@@ -309,7 +311,7 @@ def _render_knowledge(root: dict | None) -> str:
     """Render the knowledge tree returned by ``collect_knowledge``."""
     if root is None or root["count"] == 0:
         return '<p class="note-empty">No <code>knowledge/</code> tree under the configured conception path.</p>'
-    parts = ['<div class="knowledge-panel">']
+    parts = ['<div class="knowledge-panel" data-node-id="knowledge">']
     if root["index"]:
         parts.append(_render_index_badge(root["index"], top_level=True))
     if root["body"]:
@@ -325,7 +327,7 @@ def _render_knowledge(root: dict | None) -> str:
 
 def _render_knowledge_group(node: dict) -> str:
     """Render one directory as a collapsible group, recursing into subdirs."""
-    parts = ['<details class="knowledge-group">']
+    parts = [f'<details class="knowledge-group" data-node-id="{h(node["rel_dir"])}">']
     parts.append('<summary class="knowledge-group-heading">')
     parts.append('<span class="knowledge-chevron" aria-hidden="true">&#9656;</span>')
     parts.append(f'<span class="knowledge-group-name">{h(node["label"])}</span>')
@@ -349,7 +351,7 @@ def _render_knowledge_card(e: dict) -> str:
     js_title = json.dumps(e["title"]).replace("'", "\\'").replace('"', "'")
     desc_html = f'<div class="knowledge-desc">{h(e["desc"])}</div>' if e["desc"] else ""
     return (
-        f'<div class="knowledge-card" '
+        f'<div class="knowledge-card" data-node-id="{h(e["path"])}" '
         f'onclick="openNotePreview({js_path},{js_title})">'
         f'<div class="knowledge-title">{h(e["title"])}</div>'
         f"{desc_html}"
@@ -518,7 +520,7 @@ def _render_git_actions(ctx: RenderCtx, path):
     return f'<div class="git-actions">{"".join(items_html)}</div>'
 
 
-def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False):
+def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False, parent_node_id: str = ""):
     """Render subrepo rows at the same visual size as parent repos."""
     if not submodules:
         return ""
@@ -532,8 +534,11 @@ def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False):
             if count
             else '<span class="git-clean">\u2713</span>'
         )
+        node_attr = (
+            f' data-node-id="{parent_node_id}/sub:{h(sub["name"])}"' if parent_node_id else ""
+        )
         rows.append(
-            f'<div class="git-row{dirty_cls}" title="{h(sub["path"])}">'
+            f'<div class="git-row{dirty_cls}"{node_attr} title="{h(sub["path"])}">'
             f"{sub_actions}"
             f'<span class="git-name">{h(sub["name"])}</span>'
             f'<span class="git-branch"></span>'
@@ -556,11 +561,13 @@ def _render_git_repos(ctx: RenderCtx, groups):
     out = []
     chevron = '<span class="git-chevron">\u25b6</span>'
     for label, repos in groups:
-        out.append('<div class="git-group">')
+        group_id = f"code/{label}"
+        out.append(f'<div class="git-group" data-node-id="{h(group_id)}">')
         out.append(f'<div class="git-group-header">{h(label)}</div>')
         out.append('<div class="git-group-body">')
         for r in repos:
-            out.append('<div class="git-repo">')
+            repo_id = f"{group_id}/{r['name']}"
+            out.append(f'<div class="git-repo" data-node-id="{h(repo_id)}">')
             dirty_cls = " git-dirty" if r["dirty"] else ""
             badge = (
                 f'<span class="git-changes">{r["changed"]} changed</span>'
@@ -580,10 +587,13 @@ def _render_git_repos(ctx: RenderCtx, groups):
                 f'<span class="git-status">{badge}</span>'
                 f'<span class="git-spacer"></span></div>'
             )
-            sub_html = _render_submodule_rows(ctx, r.get("submodules") or [])
+            sub_html = _render_submodule_rows(
+                ctx, r.get("submodules") or [], parent_node_id=repo_id
+            )
             if sub_html:
                 out.append(sub_html)
             for wt in r.get("worktrees", []):
+                wt_id = f"{repo_id}/wt:{wt['key']}"
                 wt_dirty_cls = " git-dirty" if wt["dirty"] else ""
                 wt_badge = (
                     f'<span class="git-changes">{wt["changed"]} changed</span>'
@@ -597,6 +607,7 @@ def _render_git_repos(ctx: RenderCtx, groups):
                 wt_chev = chevron if wt_has_subs else ""
                 out.append(
                     f'<div class="git-row git-worktree{wt_dirty_cls}{wt_toggle_cls}" '
+                    f'data-node-id="{h(wt_id)}" '
                     f'title="{h(wt["path"])}"{wt_toggle_attr}>'
                     f"{wt_actions}"
                     f'<span class="git-name">{wt_chev}\u21b3 {h(wt["key"])}</span>'
@@ -604,7 +615,9 @@ def _render_git_repos(ctx: RenderCtx, groups):
                     f'<span class="git-status">{wt_badge}</span>'
                     f'<span class="git-spacer"></span></div>'
                 )
-                wt_sub_html = _render_submodule_rows(ctx, wt.get("submodules") or [], worktree=True)
+                wt_sub_html = _render_submodule_rows(
+                    ctx, wt.get("submodules") or [], worktree=True, parent_node_id=wt_id
+                )
                 if wt_sub_html:
                     out.append(wt_sub_html)
             out.append("</div>")  # /git-repo
@@ -631,7 +644,8 @@ def render_page(ctx: RenderCtx, items):
         pri = item["priority"]
         if pri in labelled_priorities and pri not in seen:
             parts.append(
-                f'<div class="group-heading hidden" data-group="{pri}">{labelled_priorities[pri]}</div>'
+                f'<div class="group-heading hidden" data-group="{pri}" '
+                f'data-node-id="projects/{pri}">{labelled_priorities[pri]}</div>'
             )
             seen.add(pri)
         parts.append(_render_card(item))
