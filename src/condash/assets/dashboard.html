@@ -1506,6 +1506,12 @@ async function saveConfig(ev) {
         if (restart.length) {
             warnEl.textContent = 'Saved. The following changes need a condash restart to take effect: ' + restart.join(', ') + '. Reloading…';
             warnEl.style.display = 'block';
+        } else {
+            // No restart needed → close the modal immediately so the user
+            // sees the refreshed dashboard, not a modal sitting in front
+            // of it. (_reloadInPlace swaps #dash-main, but modals are
+            // siblings and stay put otherwise.)
+            closeConfigModal();
         }
         // Brief pause so the user sees the warning, then refresh. When a
         // restart is required (port change, etc.) we need a real reload so
@@ -2263,9 +2269,12 @@ async function _reloadNotePreview(path, name) {
 }
 
 document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        var modal = document.getElementById('note-modal');
-        if (modal && modal.classList.contains('open')) closeNotePreview();
+    if (e.key !== 'Escape') return;
+    var noteModal = document.getElementById('note-modal');
+    if (noteModal && noteModal.classList.contains('open')) { closeNotePreview(); return; }
+    var cfgModal = document.getElementById('config-modal');
+    if (cfgModal && cfgModal.style.display && cfgModal.style.display !== 'none') {
+        closeConfigModal();
     }
 });
 
