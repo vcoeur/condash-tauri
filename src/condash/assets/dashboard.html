@@ -378,14 +378,21 @@ body {
 }
 .knowledge-empty { color: var(--text-muted); font-size: 0.88rem; padding: 0.6rem 0.2rem; }
 
-/* --- Reload action button ---
-   Always clickable; a small dot indicator lights up when a reload is
-   recommended (items or git). The click refetches content in place. */
-.reload-btn { position: relative; }
-.reload-btn.stale::after {
-    content: ''; position: absolute; top: 2px; right: 2px;
+/* --- Stale / "needs refresh" cue on top-level tabs ---
+   The tab that owns data which changed under us lights up with a small
+   accent dot in its top-right corner. Clicking that same tab (or switching
+   to another tab while stale) refreshes the dashboard in place. */
+.tabs-primary .tab { position: relative; }
+.tabs-primary .tab.stale::after {
+    content: ''; position: absolute; top: 4px; right: 6px;
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--accent); border: 1.5px solid var(--bg-card);
+    pointer-events: none;
+}
+.tabs-primary .tab.active.stale::after {
+    /* Active tab has an accent background — invert the ring so the dot
+       stays legible. */
+    background: #fff; border-color: var(--accent);
 }
 
 /* --- Embedded terminal (bottom pane) ---
@@ -1163,12 +1170,6 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
             <span class="icon" id="theme-icon">&#9790;</span>
             <span id="theme-label">Dark</span>
         </div>
-        <button id="reload-btn" class="theme-toggle reload-btn" onclick="reloadAndTidy()" title="Reload" aria-label="Reload">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="23 4 23 10 17 10"/>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-            </svg>
-        </button>
         <button id="term-btn" class="theme-toggle" onclick="toggleTerminal()" title="Toggle terminal" aria-label="Toggle terminal">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="4 17 10 11 4 5"/>
@@ -1691,7 +1692,19 @@ function _persistTabState() {
 
 function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
-    if ((_itemsStale || _gitStale) && tab !== _activeTab) {
+    // Clicking the already-active tab refreshes the dashboard when its
+    // data is stale — the tab's own per-tab dot doubles as a reload
+    // affordance. Clicking a *different* tab already refreshes whenever
+    // any pane is stale (paths below hitting _reloadInPlace).
+    var clickedSameTab = tab === _activeTab;
+    var clickedTabStale =
+        (tab === 'projects' && _itemsStale) ||
+        (tab === 'code' && _gitStale);
+    if (clickedSameTab && clickedTabStale) {
+        _reloadInPlace();
+        return;
+    }
+    if ((_itemsStale || _gitStale) && !clickedSameTab) {
         // Commit the new tab first so _reloadInPlace's post-swap
         // _rebindDashHandlers → switchTab(_activeTab) lands on it —
         // otherwise the user has to click the tab a second time.
@@ -2511,16 +2524,25 @@ var _itemsStale = false;
 var _gitStale = false;
 
 function _renderStale() {
-    var btn = document.getElementById('reload-btn');
-    var stale = _itemsStale || _gitStale;
-    btn.classList.toggle('stale', stale);
-    var tip;
-    if (_itemsStale && _gitStale) tip = 'Reload — conception data and git status have changed';
-    else if (_itemsStale) tip = 'Reload — conception data has changed';
-    else if (_gitStale) tip = 'Reload — git status has changed';
-    else tip = 'Reload';
-    btn.title = tip;
-    btn.setAttribute('aria-label', tip);
+    // Map each stale source onto the top-level tab whose data changed.
+    // Items fingerprint covers everything under projects/ (cards grid +
+    // history tree). Git fingerprint covers the Code panel. Knowledge has
+    // no stale detection yet, so its tab never lights up.
+    var staleByTab = {
+        projects: _itemsStale,
+        code: _gitStale,
+        knowledge: false,
+    };
+    document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
+        var key = t.getAttribute('data-tab');
+        var isStale = !!staleByTab[key];
+        t.classList.toggle('stale', isStale);
+        if (isStale) {
+            t.title = 'Refresh — data has changed on disk';
+        } else {
+            t.removeAttribute('title');
+        }
+    });
 }
 
 async function checkUpdates() {
@@ -2553,11 +2575,6 @@ async function updateBaseline() {
         _gitStale = false;
         _renderStale();
     } catch (e) {}
-}
-
-/* Reload button: re-fetch dashboard content in place. */
-async function reloadAndTidy() {
-    _reloadInPlace();
 }
 
 /* --- Embedded terminal (multi-tab) ---
