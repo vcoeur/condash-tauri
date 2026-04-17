@@ -150,15 +150,16 @@ def _note_kind(path: Path) -> str:
     return "binary"
 
 
-def _list_notes(ctx: RenderCtx, item_dir, max_depth: int = 2):
-    """List every file under ``<item_dir>/notes/`` with its detected kind.
+def _list_item_files(ctx: RenderCtx, item_dir, max_depth: int = 3):
+    """List every file inside ``item_dir`` (any subdirectory) with its kind.
 
-    Walks up to ``max_depth`` levels of subdirectories so items can group
-    related files (e.g. ``notes/drafts/…``) without the dashboard flattening
-    the structure. Hidden files and dirs (``.…``) are skipped.
+    Walks up to ``max_depth`` levels from the item root so items can keep
+    files under ``notes/``, alongside loose files in the item root, and
+    one further level of nesting (e.g. ``notes/drafts/…``). Hidden entries
+    (``.…``) and the item's top-level ``README.md`` are skipped — the
+    README has its own dedicated preview link on the card.
     """
-    notes_dir = item_dir / "notes"
-    if not notes_dir.is_dir():
+    if not item_dir.is_dir():
         return []
     out: list[dict[str, str]] = []
 
@@ -172,15 +173,17 @@ def _list_notes(ctx: RenderCtx, item_dir, max_depth: int = 2):
                 continue
             if not entry.is_file():
                 continue
+            if depth == 1 and entry.name == "README.md":
+                continue
             out.append(
                 {
-                    "name": str(entry.relative_to(notes_dir)),
+                    "name": str(entry.relative_to(item_dir)),
                     "path": str(entry.relative_to(ctx.base_dir)),
                     "kind": _note_kind(entry),
                 }
             )
 
-    walk(notes_dir, 1)
+    walk(item_dir, 1)
     return out
 
 
@@ -247,7 +250,7 @@ def parse_readme(ctx: RenderCtx, path, kind: str | None = None):
     for d in deliverables:
         d["full_path"] = f"{item_dir}/{d['path']}"
 
-    notes = _list_notes(ctx, path.parent)
+    files = _list_item_files(ctx, path.parent)
 
     done = sum(it["done"] for s in sections for it in s["items"])
     total = sum(len(s["items"]) for s in sections)
@@ -268,7 +271,7 @@ def parse_readme(ctx: RenderCtx, path, kind: str | None = None):
         "summary": summary,
         "sections": sections,
         "deliverables": deliverables,
-        "notes": notes,
+        "files": files,
         "done": done,
         "total": total,
         "path": str(path.relative_to(ctx.base_dir)),
@@ -375,7 +378,7 @@ def _compute_fingerprint(items):
             for s in item["sections"]
         )
         deliverables = tuple((d["label"], d["path"]) for d in item.get("deliverables", []))
-        notes = tuple(n["path"] for n in item.get("notes", []))
+        files = tuple(n["path"] for n in item.get("files", []))
         data.append(
             (
                 item["slug"],
@@ -386,7 +389,7 @@ def _compute_fingerprint(items):
                 item["summary"],
                 sections,
                 deliverables,
-                notes,
+                files,
             )
         )
     return hashlib.md5(repr(data).encode()).hexdigest()[:16]

@@ -19,9 +19,14 @@ _VALID_ITEM_PREFIX = r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/"
 
 _VALID_PATH_RE = re.compile(_VALID_ITEM_PREFIX + r"README\.md$")
 
-_VALID_DOWNLOAD_RE = re.compile(_VALID_ITEM_PREFIX + r"(?:notes/)?[\w.-]+\.pdf$")
+# Any file at any depth under an item directory — cards now surface the
+# full item tree, not just ``notes/``, so the regexes that gate file
+# serving must follow. Traversal is still blocked by ``_safe_resolve``
+# (the ".." reject + relative_to check), so relaxing the regex to an
+# arbitrary subpath stays safe.
+_VALID_DOWNLOAD_RE = re.compile(_VALID_ITEM_PREFIX + r"[\w./-]+\.pdf$")
 
-_VALID_NOTE_RE = re.compile(_VALID_ITEM_PREFIX + r"(?:notes/[\w.-]+|README)\.md$")
+_VALID_NOTE_RE = re.compile(_VALID_ITEM_PREFIX + r"[\w./-]+\.md$")
 
 # Knowledge pages live outside the date-prefixed item structure. Match
 # `knowledge/<file>.md` at the root (apps.md, conventions.md) and
@@ -29,12 +34,16 @@ _VALID_NOTE_RE = re.compile(_VALID_ITEM_PREFIX + r"(?:notes/[\w.-]+|README)\.md$
 _VALID_KNOWLEDGE_NOTE_RE = re.compile(r"^knowledge/(?:[\w.-]+/)?[\w.-]+\.md$")
 
 _VALID_ASSET_RE = re.compile(
-    _VALID_ITEM_PREFIX + r"(?:notes/)?[\w./-]+\.(?:png|jpg|jpeg|gif|svg|webp)$",
+    _VALID_ITEM_PREFIX + r"[\w./-]+\.(?:png|jpg|jpeg|gif|svg|webp)$",
     re.IGNORECASE,
 )
 
-# Any file directly under an item's `notes/` tree.
-_VALID_ITEM_FILE_RE = re.compile(_VALID_ITEM_PREFIX + r"notes/[\w./-]+$")
+# Any file at any depth inside an item directory.
+_VALID_ITEM_FILE_RE = re.compile(_VALID_ITEM_PREFIX + r"[\w./-]+$")
+
+# Restricted to files directly under ``<item>/notes/`` — used by rename
+# (only notes are user-renamable; loose item files and READMEs are not).
+_VALID_ITEM_NOTES_FILE_RE = re.compile(_VALID_ITEM_PREFIX + r"notes/[\w./-]+$")
 
 _VALID_NOTE_FILENAME_RE = re.compile(r"^[\w.-]+\.[A-Za-z0-9]+$")
 

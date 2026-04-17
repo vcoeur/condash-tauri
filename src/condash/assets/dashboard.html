@@ -783,6 +783,14 @@ body {
     padding: 1rem;
 }
 .note-modal-backdrop.open { display: flex; }
+/* When the embedded terminal is open, the note preview modal must not
+   cover it — the user types into the terminal while reading the note.
+   Shrink the backdrop to everything *above* the terminal pane so pointer
+   events pass through to xterm and the terminal stays visually uncovered.
+   Config modal keeps its full-viewport coverage (needs focus). */
+body[data-term-open="1"] #note-modal.note-modal-backdrop {
+    bottom: var(--term-height, 38vh);
+}
 .note-modal {
     background: var(--bg-card); color: var(--text);
     border: 1px solid var(--border); border-radius: 12px;
@@ -1541,6 +1549,7 @@ function openInTerminal(ev, path) {
     var pane = document.getElementById('term-pane');
     if (pane.hasAttribute('hidden')) {
         pane.removeAttribute('hidden');
+        _termSyncOpenFlag(true);
         localStorage.setItem('term-open', '1');
     }
     var side = _termLastFocused === 'right' ? 'right' : 'left';
@@ -2903,6 +2912,7 @@ function _termCloseTab(id) {
         // Both sides empty — hide the pane. Next reopen spawns a fresh tab.
         var pane = document.getElementById('term-pane');
         pane.setAttribute('hidden', '');
+        _termSyncOpenFlag(false);
         localStorage.removeItem('term-open');
         _termShellLabel(null);
         return;
@@ -2922,9 +2932,18 @@ function termNewTab(side) {
     var pane = document.getElementById('term-pane');
     if (pane.hasAttribute('hidden')) {
         pane.removeAttribute('hidden');
+        _termSyncOpenFlag(true);
         localStorage.setItem('term-open', '1');
     }
     _termCreateTab(side || 'left');
+}
+
+function _termSyncOpenFlag(open) {
+    // Mirror the pane's visibility onto body[data-term-open] so CSS rules
+    // that need to react (e.g. the note modal's bottom offset) can match
+    // on an attribute selector instead of sniffing the pane's [hidden].
+    if (open) document.body.setAttribute('data-term-open', '1');
+    else document.body.removeAttribute('data-term-open');
 }
 
 function toggleTerminal() {
@@ -2932,6 +2951,7 @@ function toggleTerminal() {
     var opening = pane.hasAttribute('hidden');
     if (opening) {
         pane.removeAttribute('hidden');
+        _termSyncOpenFlag(true);
         localStorage.setItem('term-open', '1');
         if (_termTabs.length === 0) _termCreateTab('left');
         setTimeout(function() {
@@ -2940,6 +2960,7 @@ function toggleTerminal() {
         }, 0);
     } else {
         pane.setAttribute('hidden', '');
+        _termSyncOpenFlag(false);
         localStorage.removeItem('term-open');
     }
 }
@@ -3013,7 +3034,14 @@ function _termDragEnd() {
     _termDrag = null;
     var h = document.getElementById('term-pane').offsetHeight;
     localStorage.setItem('term-height', h + 'px');
-    _termSendResize();
+    // Must refit every tab on both sides, not just the active one: the
+    // pane height change is symmetric, but _termSendResize() with no arg
+    // only resizes the last-focused tab. With two sides open and the last
+    // focus on the right, the left side's xterm stayed wedged at its old
+    // row count (and vice versa) — looked like "left vertical resize
+    // broken" to the user, because that was the side that usually wasn't
+    // last-focused.
+    _termSendResizeAll();
 }
 
 /* Parse a shortcut spec like "Ctrl+`" / "Ctrl+Shift+T" / "Alt+K" into a
@@ -3101,6 +3129,7 @@ _loadTermShortcut();
             if (typeof Terminal === 'undefined') return;
             var pane = document.getElementById('term-pane');
             pane.removeAttribute('hidden');
+            _termSyncOpenFlag(true);
             if (persisted.length === 0) {
                 // No sessions recorded (fresh open, or first run after
                 // this feature shipped) — preserve the old behaviour of
