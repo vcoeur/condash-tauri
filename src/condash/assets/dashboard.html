@@ -425,8 +425,22 @@ body {
 .term-body { flex: 1; min-height: 0; display: flex; }
 .term-side {
     flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+    position: relative;
 }
 .term-side[hidden] { display: none; }
+/* Which split has focus — a thin accent line at the top of the pane,
+   plus a tinted mount background so the difference is obvious even
+   without a visible caret. Only shown when both sides exist (single
+   pane is trivially the active one). */
+body:not([data-single-term]) .term-side.is-active-side::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent);
+    pointer-events: none;
+}
+body:not([data-single-term]) .term-side.is-active-side .term-mount {
+    background: #101116;
+}
 .term-mount { flex: 1; min-height: 0; padding: 4px 6px; }
 .term-mount .xterm { height: 100%; }
 
@@ -459,7 +473,11 @@ body {
     border: 1px solid transparent; border-bottom: 0;
 }
 .term-tab:hover { background: #262731; color: #e6e6ec; }
-.term-tab.active { background: #0b0b0e; color: #f0f0f5; }
+.term-tab.active {
+    background: #0b0b0e; color: #f0f0f5; font-weight: 600;
+    border-top: 2px solid var(--accent);
+    padding-top: 1px;
+}
 .term-tab-close {
     background: transparent; border: none; color: inherit;
     font-size: 0.9rem; line-height: 1; padding: 0 2px; cursor: pointer;
@@ -2691,6 +2709,20 @@ function _termShellLabel(tab) {
     label.textContent = tab && tab.shell ? tab.shell : '';
 }
 
+function _termSyncActiveSide() {
+    var sides = ['left', 'right'];
+    sides.forEach(function(side) {
+        var el = _termSideEl(side, 'side');
+        if (!el) return;
+        el.classList.toggle('is-active-side', side === _termLastFocused);
+    });
+    // Single-pane mode — no meaningful "active side" distinction.
+    var leftVisible = _termTabsOn('left').length > 0;
+    var rightVisible = _termTabsOn('right').length > 0;
+    if (leftVisible && rightVisible) document.body.removeAttribute('data-single-term');
+    else document.body.setAttribute('data-single-term', '1');
+}
+
 function _termSetActive(id) {
     var tab = _termTabs.find(function(t) { return t.id === id; });
     if (!tab) return;
@@ -2702,6 +2734,7 @@ function _termSetActive(id) {
         t.mount.classList.toggle('active', active);
         t.button.classList.toggle('active', active);
     });
+    _termSyncActiveSide();
     _termShellLabel(tab);
     // Defer the fit: the just-activated mount flipped from display:none to
     // display:block one line above, but the browser hasn't reflowed yet in
@@ -2790,6 +2823,7 @@ function _termShowSide(side, show) {
     var splitter = document.getElementById('term-splitter');
     if (leftVisible && rightVisible) splitter.removeAttribute('hidden');
     else splitter.setAttribute('hidden', '');
+    _termSyncActiveSide();
 }
 
 function _termCreateTab(side, opts) {
@@ -2812,6 +2846,18 @@ function _termCreateTab(side, opts) {
     var fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(mount);
+    // When the user clicks into this pane directly, mark its side as the
+    // active one so the split's accent indicator follows focus (not just
+    // tab clicks, which _termSetActive already handles).
+    if (term.textarea) {
+        term.textarea.addEventListener('focus', function() {
+            if (_termLastFocused !== side) {
+                _termLastFocused = side;
+                _termSyncActiveSide();
+                _termShellLabel(tab);
+            }
+        });
+    }
     // xterm swallows keys before they bubble. attachCustomKeyEventHandler
     // runs inside xterm's keydown listener — return false + stopPropagation
     // so our shortcut closes the pane from inside the active tab without
