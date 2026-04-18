@@ -478,6 +478,22 @@ body {
     box-shadow: 0 -4px 12px rgba(0,0,0,0.25);
 }
 .term-pane[hidden] { display: none; }
+
+/* Lightweight transient banner for shortcut-triggered actions that have
+   no button to flash (e.g. "no recent screenshot found"). Centred at the
+   bottom of the viewport and faded by JS after a short timeout. */
+.shortcut-toast {
+    position: fixed; left: 50%; bottom: 1.5rem;
+    transform: translateX(-50%);
+    background: #2a2b30; color: #f5f5f5;
+    padding: 0.5rem 0.9rem; border-radius: 6px;
+    font-size: 0.85rem; max-width: 80vw;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    pointer-events: none; z-index: 9999;
+    opacity: 0; transition: opacity 0.18s ease-out;
+}
+.shortcut-toast.is-visible { opacity: 1; }
+.shortcut-toast.is-err { background: #5a2a2a; }
 .term-handle {
     height: 4px; cursor: ns-resize; background: var(--border);
     flex-shrink: 0;
@@ -1533,6 +1549,14 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                         <input type="text" name="terminal_shortcut" placeholder="Ctrl+`">
                         <small>Modifiers: Ctrl, Shift, Alt, Meta. Key names: single chars or KeyboardEvent.key names (Enter, Escape, …).</small>
                     </label>
+                    <label>screenshot directory
+                        <input type="text" name="terminal_screenshot_dir" placeholder="(defaults to $XDG_PICTURES_DIR/Screenshots, then ~/Pictures/Screenshots)">
+                        <small id="term-screenshot-dir-resolved"></small>
+                    </label>
+                    <label>screenshot paste shortcut
+                        <input type="text" name="terminal_screenshot_paste_shortcut" placeholder="Ctrl+Shift+V">
+                        <small>Pastes the absolute path of the newest image (.png, .jpg, .jpeg, .webp) in the screenshot directory into the active terminal tab — no Enter, you confirm.</small>
+                    </label>
                 </fieldset>
                 <fieldset class="config-fieldset">
                     <legend>Open with</legend>
@@ -1692,10 +1716,18 @@ async function openConfigModal() {
         var term = cfg.terminal || {};
         _setField(form, 'terminal_shell', term.shell);
         _setField(form, 'terminal_shortcut', term.shortcut);
+        _setField(form, 'terminal_screenshot_dir', term.screenshot_dir);
+        _setField(form, 'terminal_screenshot_paste_shortcut', term.screenshot_paste_shortcut);
         var resolvedNote = document.getElementById('term-shell-resolved');
         if (resolvedNote) {
             resolvedNote.textContent = term.resolved_shell
                 ? 'Currently resolved: ' + term.resolved_shell
+                : '';
+        }
+        var resolvedDirNote = document.getElementById('term-screenshot-dir-resolved');
+        if (resolvedDirNote) {
+            resolvedDirNote.textContent = term.resolved_screenshot_dir
+                ? 'Currently resolved: ' + term.resolved_screenshot_dir
                 : '';
         }
         // Stash the loaded port/native so we can detect changes on save.
@@ -1730,6 +1762,8 @@ async function saveConfig(ev) {
         terminal: {
             shell: _getField(form, 'terminal_shell'),
             shortcut: _getField(form, 'terminal_shortcut'),
+            screenshot_dir: _getField(form, 'terminal_screenshot_dir'),
+            screenshot_paste_shortcut: _getField(form, 'terminal_screenshot_paste_shortcut'),
         },
         open_with: {
             main_ide: _readSlotFields(form, 'main_ide'),
@@ -1750,6 +1784,10 @@ async function saveConfig(ev) {
             return;
         }
         var restart = (body && body.restart_required) || [];
+        // Refresh the cached shortcut specs so terminal-toggle and
+        // screenshot-paste keybindings pick up the new config without a
+        // full reload (when no restart is required).
+        _loadTermShortcuts();
         if (restart.length) {
             warnEl.textContent = 'Saved. The following changes need a condash restart to take effect: ' + restart.join(', ') + '. Reloading…';
             warnEl.style.display = 'block';
@@ -4116,6 +4154,15 @@ function _termCreateTab(side, opts) {
             toggleTerminal();
             return false;
         }
+        // Screenshot-paste shortcut. Intercept here too — xterm's keydown
+        // handler runs before our document listener, and the default
+        // Ctrl+Shift+V collides with the Ctrl+V clipboard branch below.
+        if (_screenshotPasteShortcut && _matchShortcut(ev, _screenshotPasteShortcut)) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            pasteRecentScreenshot();
+            return false;
+        }
         // Ctrl+C: copy the current selection if there is one, otherwise
         // let xterm send ^C (SIGINT) as normal. Ctrl+Shift+C: always copy
         // (no-op without a selection) — matches GNOME Terminal / Ghostty.
@@ -4399,33 +4446,119 @@ function _matchShortcut(ev, spec) {
 }
 
 var _termShortcut = null;
+var _screenshotPasteShortcut = null;
 
-async function _loadTermShortcut() {
+async function _loadTermShortcuts() {
     try {
         var res = await fetch('/config');
         if (!res.ok) return;
         var cfg = await res.json();
-        var spec = _parseShortcut((cfg.terminal && cfg.terminal.shortcut) || 'Ctrl+`');
-        _termShortcut = spec;
+        var term = cfg.terminal || {};
+        _termShortcut = _parseShortcut(term.shortcut || 'Ctrl+`');
+        _screenshotPasteShortcut = _parseShortcut(term.screenshot_paste_shortcut || 'Ctrl+Shift+V');
     } catch (e) {}
 }
 
+/* Lightweight transient banner shown by keyboard-shortcut actions that
+   don't have a button to flash. Reuses one DOM node — multiple calls
+   restart the visibility timer rather than stacking. */
+var _toastTimer = null;
+function _showToast(msg, opts) {
+    var el = document.getElementById('shortcut-toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'shortcut-toast';
+        el.className = 'shortcut-toast';
+        document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.toggle('is-err', !!(opts && opts.error));
+    // Force reflow so the opacity transition replays on rapid re-fires.
+    void el.offsetWidth;
+    el.classList.add('is-visible');
+    if (_toastTimer) clearTimeout(_toastTimer);
+    var ms = (opts && opts.ms) || 1800;
+    _toastTimer = setTimeout(function() {
+        el.classList.remove('is-visible');
+    }, ms);
+}
+
+/* Look up the most recent screenshot path server-side and inject it into
+   the active terminal tab — no Enter, the user confirms. Mirrors workOn():
+   if no tab is open, open the pane + spawn one and poll until ws is ready.
+   Surfaces errors via a transient toast since there's no button to flash. */
+async function pasteRecentScreenshot() {
+    var info;
+    try {
+        var res = await fetch('/recent-screenshot');
+        info = await res.json();
+        if (!res.ok) {
+            _showToast((info && info.error) || ('HTTP ' + res.status), {error: true});
+            return;
+        }
+    } catch (e) {
+        _showToast('Could not query screenshot directory', {error: true});
+        return;
+    }
+    if (!info.path) {
+        var dirNote = info.dir ? ' (' + info.dir + ')' : '';
+        _showToast('No screenshot found' + dirNote + (info.reason ? ' — ' + info.reason : ''), {error: true});
+        return;
+    }
+    var text = info.path;
+    var active = _termActiveTab();
+    if (active && active.ws && active.ws.readyState === WebSocket.OPEN) {
+        active.ws.send(new TextEncoder().encode(text));
+        active.term.focus();
+        return;
+    }
+    var pane = document.getElementById('term-pane');
+    if (pane.hasAttribute('hidden')) {
+        pane.removeAttribute('hidden');
+        _termSyncOpenFlag(true);
+        localStorage.setItem('term-open', '1');
+    }
+    if (_termTabs.length === 0) _termCreateTab('left');
+    var tries = 0;
+    (function trySend() {
+        var tab = _termActiveTab();
+        if (tab && tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+            tab.ws.send(new TextEncoder().encode(text));
+            tab.term.focus();
+            return;
+        }
+        if (++tries < 40) setTimeout(trySend, 75);
+    })();
+}
+
 document.addEventListener('keydown', function(ev) {
-    if (!_termShortcut) return;
-    // Ignore keys typed inside inputs/textareas unless the shortcut
-    // includes a modifier (otherwise plain keys would swallow user input).
     var inEditable = ev.target && (ev.target.tagName === 'INPUT' ||
                                    ev.target.tagName === 'TEXTAREA' ||
                                    ev.target.isContentEditable);
-    var hasModifier = _termShortcut.ctrl || _termShortcut.alt || _termShortcut.meta;
-    if (inEditable && !hasModifier) return;
-    if (_matchShortcut(ev, _termShortcut)) {
-        ev.preventDefault();
-        toggleTerminal();
+    if (_termShortcut) {
+        var hasModifier = _termShortcut.ctrl || _termShortcut.alt || _termShortcut.meta;
+        if (!(inEditable && !hasModifier) && _matchShortcut(ev, _termShortcut)) {
+            ev.preventDefault();
+            toggleTerminal();
+            return;
+        }
+    }
+    if (_screenshotPasteShortcut) {
+        var hasMod = _screenshotPasteShortcut.ctrl || _screenshotPasteShortcut.alt || _screenshotPasteShortcut.meta;
+        // The default Ctrl+Shift+V collides with xterm's paste — that
+        // handler is registered inside attachCustomKeyEventHandler and
+        // fires first, so we'd never see the event. Catch it here at the
+        // capture phase below instead. For non-terminal targets the bubble
+        // phase is fine, so we still listen here.
+        if (!(inEditable && !hasMod) && _matchShortcut(ev, _screenshotPasteShortcut)) {
+            ev.preventDefault();
+            pasteRecentScreenshot();
+            return;
+        }
     }
 });
 
-_loadTermShortcut();
+_loadTermShortcuts();
 
 // Restore persisted height + open state + any live pty sessions on load.
 (function restoreTerm() {

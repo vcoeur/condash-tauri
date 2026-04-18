@@ -129,8 +129,18 @@ DEFAULT_CONFIG_TEMPLATE = """\
 #               Key names follow the HTML KeyboardEvent.key convention
 #               (single chars like "T", "`", or names like "Enter",
 #               "Escape"). Examples: "Ctrl+`", "Ctrl+Shift+T", "Alt+T".
-# shell    = "/bin/zsh"
-# shortcut = "Ctrl+`"
+#   - screenshot_dir: absolute path to the directory holding screenshots.
+#                     Unset → $XDG_PICTURES_DIR/Screenshots, else
+#                     ~/Pictures/Screenshots (Linux) or ~/Desktop (macOS).
+#   - screenshot_paste_shortcut: keyboard combo that pastes the absolute
+#                                path of the most recent image file in
+#                                screenshot_dir into the active terminal
+#                                tab (no Enter — user confirms). Same
+#                                format as `shortcut`. Default Ctrl+Shift+V.
+# shell                     = "/bin/zsh"
+# shortcut                  = "Ctrl+`"
+# screenshot_dir            = "/home/me/Pictures/Screenshots"
+# screenshot_paste_shortcut = "Ctrl+Shift+V"
 
 # [open_with.<slot>]
 # Three vendor-neutral launcher slots: `main_ide`, `secondary_ide`, `terminal`.
@@ -225,6 +235,23 @@ class OpenWithSlot:
 
 
 DEFAULT_TERMINAL_SHORTCUT = "Ctrl+`"
+DEFAULT_SCREENSHOT_PASTE_SHORTCUT = "Ctrl+Shift+V"
+SCREENSHOT_IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def default_screenshot_dir() -> Path:
+    """Best-guess default location for OS screenshots.
+
+    Honours ``$XDG_PICTURES_DIR`` (a standard XDG user-dirs key) when set;
+    otherwise falls back to ``~/Pictures/Screenshots`` on Linux and
+    ``~/Desktop`` on macOS (Apple's default capture location).
+    """
+    xdg_pictures = os.environ.get("XDG_PICTURES_DIR")
+    if xdg_pictures:
+        return Path(xdg_pictures).expanduser() / "Screenshots"
+    if os.uname().sysname == "Darwin":
+        return Path.home() / "Desktop"
+    return Path.home() / "Pictures" / "Screenshots"
 
 
 @dataclass
@@ -235,10 +262,23 @@ class TerminalConfig:
     means "use ``$SHELL``, falling back to /bin/bash". ``shortcut`` is a
     single keyboard combo parsed by the frontend (see the README for the
     accepted format — `Ctrl+<key>`, `Ctrl+Shift+T`, etc.).
+
+    ``screenshot_dir`` is an absolute path searched for the most recent
+    image file when the screenshot-paste shortcut fires; ``None`` means
+    use :func:`default_screenshot_dir`. ``screenshot_paste_shortcut`` is
+    the keybinding that triggers that paste.
     """
 
     shell: str | None = None
     shortcut: str = DEFAULT_TERMINAL_SHORTCUT
+    screenshot_dir: str | None = None
+    screenshot_paste_shortcut: str = DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+
+    def resolved_screenshot_dir(self) -> Path:
+        """Return the effective screenshot directory (configured or default)."""
+        if self.screenshot_dir:
+            return Path(self.screenshot_dir).expanduser()
+        return default_screenshot_dir()
 
 
 @dataclass
@@ -349,6 +389,13 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
     elif "shell" in term_table:
         del term_table["shell"]
     term_table["shortcut"] = cfg.terminal.shortcut or DEFAULT_TERMINAL_SHORTCUT
+    if cfg.terminal.screenshot_dir:
+        term_table["screenshot_dir"] = cfg.terminal.screenshot_dir
+    elif "screenshot_dir" in term_table:
+        del term_table["screenshot_dir"]
+    term_table["screenshot_paste_shortcut"] = (
+        cfg.terminal.screenshot_paste_shortcut or DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+    )
 
     # [open_with.<slot>]
     open_with_table = doc.get("open_with")
@@ -503,9 +550,21 @@ def _parse(data: dict, source: Path) -> CondashConfig:
     term_shortcut = terminal_raw.get("shortcut", DEFAULT_TERMINAL_SHORTCUT)
     if not isinstance(term_shortcut, str) or not term_shortcut.strip():
         raise ConfigIncompleteError(f"{source}: 'terminal.shortcut' must be a non-empty string")
+    screenshot_dir = terminal_raw.get("screenshot_dir")
+    if screenshot_dir is not None and not isinstance(screenshot_dir, str):
+        raise ConfigIncompleteError(f"{source}: 'terminal.screenshot_dir' must be a string")
+    paste_shortcut = terminal_raw.get(
+        "screenshot_paste_shortcut", DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+    )
+    if not isinstance(paste_shortcut, str) or not paste_shortcut.strip():
+        raise ConfigIncompleteError(
+            f"{source}: 'terminal.screenshot_paste_shortcut' must be a non-empty string"
+        )
     terminal = TerminalConfig(
         shell=(term_shell.strip() or None) if term_shell else None,
         shortcut=term_shortcut.strip(),
+        screenshot_dir=(screenshot_dir.strip() or None) if screenshot_dir else None,
+        screenshot_paste_shortcut=paste_shortcut.strip(),
     )
 
     return CondashConfig(

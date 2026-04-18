@@ -53,6 +53,52 @@ def test_toggle_flips_checkbox(cfg: CondashConfig):
     assert "- [x] first task" in target.read_text(encoding="utf-8")
 
 
+def test_recent_screenshot_missing_dir(cfg: CondashConfig, tmp_path):
+    cfg.terminal.screenshot_dir = str(tmp_path / "does-not-exist")
+    client = _client(cfg)
+    response = client.get("/recent-screenshot")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] is None
+    assert "does not exist" in body["reason"]
+
+
+def test_recent_screenshot_empty_dir(cfg: CondashConfig, tmp_path):
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    cfg.terminal.screenshot_dir = str(shots)
+    client = _client(cfg)
+    response = client.get("/recent-screenshot")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] is None
+    assert body["dir"] == str(shots)
+    assert "no image" in body["reason"]
+
+
+def test_recent_screenshot_picks_newest(cfg: CondashConfig, tmp_path):
+    import os
+    import time
+
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    older = shots / "old.png"
+    newer = shots / "new.jpg"
+    other = shots / "notes.txt"
+    older.write_bytes(b"a")
+    newer.write_bytes(b"b")
+    other.write_bytes(b"c")
+    now = time.time()
+    os.utime(older, (now - 100, now - 100))
+    os.utime(newer, (now, now))
+    os.utime(other, (now + 100, now + 100))  # newest, but not an image
+    cfg.terminal.screenshot_dir = str(shots)
+    client = _client(cfg)
+    response = client.get("/recent-screenshot")
+    assert response.status_code == 200
+    assert response.json()["path"] == str(newer)
+
+
 def test_download_rejects_traversal(cfg: CondashConfig):
     client = _client(cfg)
     # Path matches the /download/{rel_path:path} route so the handler runs

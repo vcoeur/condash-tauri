@@ -29,6 +29,7 @@ from nicegui import ui
 from . import config as config_mod
 from .config import (
     OPEN_WITH_SLOT_KEYS,
+    SCREENSHOT_IMAGE_EXTENSIONS,
     CondashConfig,
     OpenWithSlot,
 )
@@ -537,6 +538,54 @@ def _register_routes() -> None:
             return {"ok": True}
         return _error(500, "could not launch browser")
 
+    @_ng_app.get("/recent-screenshot")
+    def recent_screenshot():
+        """Return the absolute path of the newest image in the screenshot dir.
+
+        Used by the screenshot-paste shortcut to inject a path into the
+        active terminal tab without an extra clipboard hop. The directory
+        comes from ``terminal.screenshot_dir`` (or the OS-appropriate
+        default); only files with an image extension we recognise are
+        considered, and "newest" is by file mtime.
+
+        Returns ``{path: <abs>, dir: <abs>}`` on success or ``{path: null,
+        dir: <abs>, reason: <message>}`` when the directory is missing,
+        unreadable, or empty.
+        """
+        cfg = _RUNTIME_CFG
+        if cfg is None:
+            return _error(500, "config not initialised")
+        directory = cfg.terminal.resolved_screenshot_dir()
+        payload = {"path": None, "dir": str(directory), "reason": ""}
+        if not directory.exists():
+            payload["reason"] = "directory does not exist"
+            return payload
+        if not directory.is_dir():
+            payload["reason"] = "configured path is not a directory"
+            return payload
+        try:
+            entries = list(directory.iterdir())
+        except PermissionError:
+            payload["reason"] = "permission denied"
+            return payload
+        candidates: list[tuple[float, Path]] = []
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in SCREENSHOT_IMAGE_EXTENSIONS:
+                continue
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, entry))
+        if not candidates:
+            payload["reason"] = "no image files found"
+            return payload
+        candidates.sort(key=lambda pair: pair[0], reverse=True)
+        payload["path"] = str(candidates[0][1])
+        return payload
+
     @_ng_app.get("/config")
     def get_config():
         cfg = _RUNTIME_CFG
@@ -950,6 +999,9 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
             "shell": cfg.terminal.shell or "",
             "shortcut": cfg.terminal.shortcut,
             "resolved_shell": _resolve_terminal_shell(cfg),
+            "screenshot_dir": cfg.terminal.screenshot_dir or "",
+            "resolved_screenshot_dir": str(cfg.terminal.resolved_screenshot_dir()),
+            "screenshot_paste_shortcut": cfg.terminal.screenshot_paste_shortcut,
         },
         "open_with": {
             slot_key: {
@@ -1173,7 +1225,17 @@ def _payload_to_config(data: dict) -> CondashConfig:
     shortcut_in = (
         str(term_raw.get("shortcut") or "").strip() or config_mod.DEFAULT_TERMINAL_SHORTCUT
     )
-    terminal = config_mod.TerminalConfig(shell=shell_in, shortcut=shortcut_in)
+    screenshot_dir_in = str(term_raw.get("screenshot_dir") or "").strip() or None
+    paste_shortcut_in = (
+        str(term_raw.get("screenshot_paste_shortcut") or "").strip()
+        or config_mod.DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+    )
+    terminal = config_mod.TerminalConfig(
+        shell=shell_in,
+        shortcut=shortcut_in,
+        screenshot_dir=screenshot_dir_in,
+        screenshot_paste_shortcut=paste_shortcut_in,
+    )
 
     return CondashConfig(
         conception_path=conception,
