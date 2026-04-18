@@ -1365,6 +1365,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
         <div class="tab active" data-tab="projects" onclick="switchTab('projects')">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
         <div class="tab" data-tab="code" onclick="switchTab('code')">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
         <div class="tab" data-tab="knowledge" onclick="switchTab('knowledge')">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
+        <div class="tab" data-tab="history" onclick="switchTab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
     </div>
     <div class="header-actions">
         <button id="refresh-all-btn" class="theme-toggle" onclick="refreshAll()" title="Refresh everything (escape hatch — clears all dirty markers)" aria-label="Refresh everything">
@@ -1401,15 +1402,10 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     <div class="tab" data-subtab="next" onclick="switchSubtab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
     <div class="tab" data-subtab="backlog" onclick="switchSubtab('backlog')">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
     <div class="tab" data-subtab="done" onclick="switchSubtab('done')">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
-    <div class="tab" data-subtab="history" onclick="switchSubtab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
 </div>
 <main id="main-scroll">
     <div id="projects-pane" data-node-id="projects">
-        <div class="search-toolbar projects-toolbar">
-            <input id="projects-search" type="search" placeholder="Search projects — title, apps, tags, summary…" oninput="filterProjects(this.value)" autocomplete="off">
-        </div>
         <div id="cards">{{CARDS}}</div>
-        <div id="history" style="display:none">{{HISTORY}}</div>
     </div>
     <div id="code-pane" style="display:none" data-node-id="code">
         <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
@@ -1419,6 +1415,12 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
             <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off">
         </div>
         <div id="knowledge">{{KNOWLEDGE}}</div>
+    </div>
+    <div id="history-pane" style="display:none" data-node-id="history">
+        <div class="search-toolbar history-toolbar">
+            <input id="history-search" type="search" placeholder="Search history — title, apps, tags, summary…" oninput="filterHistory(this.value)" autocomplete="off">
+        </div>
+        <div id="history">{{HISTORY}}</div>
     </div>
 </main>
 </div>
@@ -1954,17 +1956,16 @@ var TAB_MAP = {
     next: ['soon', 'later'],
     backlog: ['backlog'],
     done: ['done'],
-    // History doesn't filter the cards grid — it swaps the pane body to
-    // the on-disk projects tree. Keyed here so lookups don't hit undefined.
-    history: []
 };
 // Tabs where the priority groups should be labelled with a subheader.
 var TAB_SHOWS_HEADINGS = {current: true, next: true};
-var PRIMARY_TABS = ['projects', 'code', 'knowledge'];
-var SUBTABS = ['current', 'next', 'backlog', 'done', 'history'];
+var PRIMARY_TABS = ['projects', 'code', 'knowledge', 'history'];
+var SUBTABS = ['current', 'next', 'backlog', 'done'];
 var _activeTab = 'projects';
 var _activeSubtab = 'current';
 // Map legacy `?tab=current` style URLs onto the new (primary, sub) pair.
+// History used to be a Projects sub-tab; legacy `?tab=projects&sub=history`
+// or `?tab=history-subtab` links land on the new History primary tab.
 var LEGACY_TAB_ALIAS = {
     current: ['projects', 'current'],
     next: ['projects', 'next'],
@@ -1988,8 +1989,10 @@ function switchTab(tab) {
     // affordance. Clicking a *different* tab already refreshes whenever
     // any pane is stale (paths below hitting _reloadInPlace).
     var clickedSameTab = tab === _activeTab;
+    // History shares the projects on-disk data source, so _itemsStale
+    // signals staleness for both tabs.
     var clickedTabStale =
-        (tab === 'projects' && _itemsStale) ||
+        ((tab === 'projects' || tab === 'history') && _itemsStale) ||
         (tab === 'code' && _gitStale) ||
         (tab === 'knowledge' && _knowledgeStale);
     if (clickedSameTab && clickedTabStale) {
@@ -2012,6 +2015,7 @@ function switchTab(tab) {
     document.getElementById('projects-pane').style.display = tab === 'projects' ? '' : 'none';
     document.getElementById('code-pane').style.display = tab === 'code' ? '' : 'none';
     document.getElementById('knowledge-pane').style.display = tab === 'knowledge' ? '' : 'none';
+    document.getElementById('history-pane').style.display = tab === 'history' ? '' : 'none';
     // The Current/Next/Backlog/Done filter only applies under Projects.
     document.getElementById('projects-subtabs').style.display = tab === 'projects' ? '' : 'none';
     if (tab === 'projects') _applySubtab(_activeSubtab);
@@ -2029,17 +2033,6 @@ function _applySubtab(sub) {
     document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-subtab') === sub);
     });
-    // History swaps the pane body: hide the card grid, show the on-disk
-    // tree. All other subtabs are card-grid filters.
-    var cards = document.getElementById('cards');
-    var history = document.getElementById('history');
-    if (sub === 'history') {
-        if (cards) cards.style.display = 'none';
-        if (history) history.style.display = '';
-        return;
-    }
-    if (cards) cards.style.display = '';
-    if (history) history.style.display = 'none';
     var allowed = TAB_MAP[sub] || [];
     document.querySelectorAll('.card').forEach(function(card) {
         card.classList.toggle('hidden', allowed.indexOf(card.getAttribute('data-priority')) === -1);
@@ -2053,11 +2046,6 @@ function _applySubtab(sub) {
         }
         h.classList.toggle('hidden', !show);
     });
-    // Subtab just reshuffled which cards are .hidden — re-run any active
-    // search filter so group headings + empty state match the new set.
-    if (typeof _projectsSearchQ !== 'undefined' && _projectsSearchQ) {
-        filterProjects(_projectsSearchQ);
-    }
 }
 
 async function pickPriority(file, val, wrap) {
@@ -2163,6 +2151,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Legacy URL support: old ?tab=current links land on Projects/Current.
     var alias = LEGACY_TAB_ALIAS[tab];
     if (alias) { tab = alias[0]; sub = alias[1] || sub; }
+    // History was a Projects sub-tab — legacy `?tab=projects&sub=history`
+    // lands on the new History primary tab.
+    if (tab === 'projects' && sub === 'history') { tab = 'history'; sub = ''; }
     if (PRIMARY_TABS.indexOf(tab) === -1) tab = 'projects';
     if (tab === 'projects' && SUBTABS.indexOf(sub) !== -1) _activeSubtab = sub;
     switchTab(tab);
@@ -2327,7 +2318,7 @@ function updateTabCounts() {
     });
 }
 
-/* --- Search: shared helpers used by filterKnowledge + filterProjects ---
+/* --- Search: shared helpers used by filterKnowledge + filterHistory ---
    Tokenise on whitespace; a card matches iff every token is a substring of
    its textContent (case-insensitive). textContent covers title, description,
    apps, kind, tags and whatever else the server-rendered card contains, so
@@ -2361,7 +2352,7 @@ function _setEmpty(panel, cls, text) {
 
 /* Last query per pane — re-applied after _reloadInPlace swaps the DOM so
    an active filter survives a background refresh. */
-var _projectsSearchQ = '';
+var _historySearchQ = '';
 var _knowledgeSearchQ = '';
 
 /* Build an HTML snippet showing ~`radius` chars of context around the
@@ -2484,69 +2475,26 @@ function filterKnowledge(q) {
         'knowledge-empty', 'No knowledge pages match "' + qTrim + '".');
 }
 
-/* --- Projects search ---
-   Dispatches by active subtab: the card grid uses a flat .card filter
-   with a .search-hidden class that composes with the subtab's .hidden
-   class; the History view reuses _filterTree because it renders as a
-   knowledge-card tree. Whichever view isn't active gets reset so state
-   from a previous query doesn't linger when the user flips subtabs. */
-function _filterCardsGrid(tokens, qTrim) {
-    var cardsContainer = document.getElementById('cards');
-    if (!cardsContainer) return;
-    var cards = cardsContainer.querySelectorAll('.card');
-    var totalVisible = 0;
-    cards.forEach(function(c) {
-        var match = _cardMatches(c, tokens);
-        c.classList.toggle('search-hidden', !match);
-        if (match && !c.classList.contains('hidden')) totalVisible += 1;
-    });
-    // Hide group headings whose priority group has no visible card
-    // under the combined (subtab + search) filter.
-    document.querySelectorAll('.group-heading').forEach(function(h) {
-        var pri = h.getAttribute('data-group');
-        var any = document.querySelector(
-            '.card[data-priority="' + pri + '"]:not(.hidden):not(.search-hidden)'
-        );
-        h.classList.toggle('search-hidden', !any);
-    });
-    _setEmpty(cardsContainer, 'projects-empty',
-        (tokens.length > 0 && totalVisible === 0)
-            ? 'No projects match "' + qTrim + '".' : null);
-}
-function _resetCardsGrid() {
-    var cardsContainer = document.getElementById('cards');
-    if (!cardsContainer) return;
-    cardsContainer.querySelectorAll('.card.search-hidden').forEach(function(c) {
-        c.classList.remove('search-hidden');
-    });
-    document.querySelectorAll('.group-heading.search-hidden').forEach(function(h) {
-        h.classList.remove('search-hidden');
-    });
-    _setEmpty(cardsContainer, 'projects-empty', null);
-}
-function filterProjects(q) {
-    _projectsSearchQ = q || '';
-    var tokens = _searchTokens(q);
+/* --- History search ---
+   The History tab renders as a knowledge-card tree, so the token-AND
+   filter in _filterTree applies directly. */
+function filterHistory(q) {
+    _historySearchQ = q || '';
+    var panel = document.getElementById('history');
+    if (!panel) return;
     var qTrim = (q || '').trim();
-    var history = document.getElementById('history');
-    if (_activeSubtab === 'history') {
-        _resetCardsGrid();
-        if (history) _filterTree(history, tokens, qTrim,
-            'projects-empty', 'No projects match "' + qTrim + '".');
-    } else {
-        if (history) _resetTree(history, 'projects-empty');
-        _filterCardsGrid(tokens, qTrim);
-    }
+    _filterTree(panel, _searchTokens(q), qTrim,
+        'history-empty', 'No projects match "' + qTrim + '".');
 }
 
 /* Re-apply any active search after the DOM is swapped or the subtab
    changes. Safe to call when the search input isn't present (other
    primary tab active). */
 function _reapplySearches() {
-    if (_projectsSearchQ) {
-        var p = document.getElementById('projects-search');
-        if (p) p.value = _projectsSearchQ;
-        filterProjects(_projectsSearchQ);
+    if (_historySearchQ) {
+        var h = document.getElementById('history-search');
+        if (h) h.value = _historySearchQ;
+        filterHistory(_historySearchQ);
     }
     if (_knowledgeSearchQ) {
         var k = document.getElementById('knowledge-search');
@@ -3593,6 +3541,7 @@ function _renderStale() {
         projects: _itemsStale,
         code: _gitStale,
         knowledge: _knowledgeStale,
+        history: _itemsStale,
     };
     document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         var key = t.getAttribute('data-tab');
