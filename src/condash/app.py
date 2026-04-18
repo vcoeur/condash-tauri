@@ -1019,7 +1019,14 @@ def _repo_entries(names: list[str], submodules: dict[str, list[str]]) -> list[di
 
 
 def _config_to_payload(cfg: CondashConfig) -> dict:
-    """Serialise the live config to JSON for ``GET /config``."""
+    """Serialise the live config to JSON for ``GET /config``.
+
+    ``repositories_yaml_source`` / ``preferences_yaml_source`` surface
+    where the YAML-managed fields currently come from — the YAML file
+    when it exists, empty when conception_path is unset or the YAML
+    hasn't been written yet (first-run migration state). The matching
+    ``_expected_path`` fields report the future write target.
+    """
     return {
         "conception_path": str(cfg.conception_path) if cfg.conception_path else "",
         "workspace_path": str(cfg.workspace_path) if cfg.workspace_path else "",
@@ -1028,6 +1035,18 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
         "native": bool(cfg.native),
         "repositories_primary": _repo_entries(cfg.repositories_primary, cfg.repo_submodules),
         "repositories_secondary": _repo_entries(cfg.repositories_secondary, cfg.repo_submodules),
+        "repositories_yaml_source": str(cfg.yaml_source) if cfg.yaml_source else "",
+        "repositories_yaml_expected_path": (
+            str(config_mod.repositories_yaml_path(cfg.conception_path))
+            if cfg.conception_path
+            else ""
+        ),
+        "preferences_yaml_source": (str(cfg.preferences_source) if cfg.preferences_source else ""),
+        "preferences_yaml_expected_path": (
+            str(config_mod.preferences_yaml_path(cfg.conception_path))
+            if cfg.conception_path
+            else ""
+        ),
         "terminal": {
             "shell": cfg.terminal.shell or "",
             "shortcut": cfg.terminal.shortcut,

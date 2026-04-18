@@ -336,16 +336,31 @@ def collect_knowledge(ctx: RenderCtx) -> dict | None:
 
     Returns ``None`` if ``knowledge/`` doesn't exist under ``ctx.base_dir``.
     """
-    root = ctx.base_dir / "knowledge"
+    return collect_tree(ctx, "knowledge", root_label="Knowledge")
+
+
+def collect_tree(ctx: RenderCtx, root_name: str, root_label: str) -> dict | None:
+    """Generic tree walker shared by the knowledge and code explorers.
+
+    ``root_name`` is the directory under ``ctx.base_dir`` (``"knowledge"`` or
+    ``"code"``). ``root_label`` is the human-readable label used at the root
+    node only. The returned shape is:
+
+    ``{name, label, rel_dir, index?, body[], children[], count}``
+
+    matching the long-standing knowledge-tree contract. Non-markdown files
+    are skipped; dot-files are skipped; empty subtrees are pruned.
+    """
+    root = ctx.base_dir / root_name
     if not root.is_dir():
         return None
-    return _knowledge_node(ctx, root)
+    return _tree_node(ctx, root, root_dir=root, root_label=root_label)
 
 
-def _knowledge_node(ctx: RenderCtx, d: Path) -> dict:
+def _tree_node(ctx: RenderCtx, d: Path, *, root_dir: Path, root_label: str) -> dict:
     """Build one tree node for directory ``d``."""
-    is_root = d == ctx.base_dir / "knowledge"
-    label = "Knowledge" if is_root else d.name.replace("_", " ").replace("-", " ").title()
+    is_root = d == root_dir
+    label = root_label if is_root else d.name.replace("_", " ").replace("-", " ").title()
     index: dict[str, str] | None = None
     body: list[dict[str, str]] = []
     children: list[dict] = []
@@ -360,7 +375,7 @@ def _knowledge_node(ctx: RenderCtx, d: Path) -> dict:
             else:
                 body.append(item)
         elif entry.is_dir():
-            child = _knowledge_node(ctx, entry)
+            child = _tree_node(ctx, entry, root_dir=root_dir, root_label=root_label)
             # Drop empty subtrees so the UI doesn't render lone headings.
             if child["count"] > 0:
                 children.append(child)

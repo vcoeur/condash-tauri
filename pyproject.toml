@@ -29,6 +29,7 @@ classifiers = [
 dependencies = [
     "nicegui>=2.0",
     "pywebview[qt]>=6.0",
+    "pyyaml>=6.0",
     "tomlkit>=0.13",
     "typer>=0.16",
 ]

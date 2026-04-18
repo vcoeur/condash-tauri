@@ -64,7 +64,52 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 log = logging.getLogger(__name__)
+
+REPOSITORIES_YAML_REL = "config/repositories.yml"
+PREFERENCES_YAML_REL = "config/preferences.yml"
+
+REPOSITORIES_YAML_HEADER = """\
+# Versioned workspace config for this conception tree.
+#
+# Source of truth for what condash used to carry in `[repositories]` and
+# `[open_with]`. Read by:
+#   - condash (dashboard repo strip + "open with" buttons + workspace scan)
+#   - /pr skill (to know which repos exist; the PR base branch is inferred
+#     from `origin/HEAD` on the main checkout, not stored here)
+#
+# Paths may contain `~` (expanded to $HOME).
+# Commands follow condash's `{path}` convention: the literal `{path}` is
+# replaced with the absolute path of the repo or worktree being opened.
+#
+# condash rewrites this file when the Repositories tab of the Configuration
+# modal is saved. Comments outside this header are discarded on that
+# round-trip — hand-edit freely, but do not rely on inline comments being
+# preserved.
+#
+# Repo entries accept:
+#   - a bare directory name (e.g. "condash"), or
+#   - "<org>/<repo>" for depth-2 workspace layouts (when workspace_path is
+#     a parent of org folders rather than of repos directly), or
+#   - a mapping `{name: ..., submodules: [...]}` to attach subrepository
+#     rows rendered as expandable sub-rows in the repo strip.
+"""
+
+PREFERENCES_YAML_HEADER = """\
+# Versioned user preferences for this conception tree.
+#
+# Picks up the TOML keys condash used to carry in the top-level scalar
+# `pdf_viewer` list and the `[terminal]` table. Read by condash.
+#
+# Paths may contain `~` (expanded to $HOME).
+# Commands follow condash's `{path}` convention where applicable.
+#
+# condash rewrites this file when the Preferences tab of the Configuration
+# modal is saved. Comments outside this header are discarded on that
+# round-trip.
+"""
 
 DEFAULT_CONFIG_TEMPLATE = """\
 # condash configuration
@@ -300,7 +345,23 @@ class TerminalConfig:
 
 @dataclass
 class CondashConfig:
-    """Runtime configuration for a condash session."""
+    """Runtime configuration for a condash session.
+
+    Fields split by backing store:
+
+    - **TOML** (``~/.config/condash/config.toml``): ``conception_path``,
+      ``port``, ``native``, ``pdf_viewer``, ``terminal``. Per-machine runtime
+      settings that don't belong in the shared conception tree.
+    - **YAML** (``<conception_path>/config/repositories.yml``): ``workspace_path``,
+      ``worktrees_path``, ``repositories_primary`` / ``_secondary`` (with
+      submodules), ``open_with``. Versioned alongside the conception repo so
+      every machine sees the same workspace layout.
+
+    ``yaml_source`` records where the YAML-managed fields were loaded from
+    on the current run: the YAML path when the file existed at load time,
+    the TOML path when the values were migrated in from the legacy TOML
+    sections, or ``None`` when conception_path is unset.
+    """
 
     conception_path: Path | None = None
     workspace_path: Path | None = None
@@ -313,6 +374,8 @@ class CondashConfig:
     native: bool = True
     open_with: dict[str, OpenWithSlot] = field(default_factory=dict)
     pdf_viewer: list[str] = field(default_factory=list)
+    yaml_source: Path | None = None
+    preferences_source: Path | None = None
 
 
 def config_path() -> Path:
@@ -350,6 +413,13 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
     the edits made by the in-app editor or ``CondashConfig`` round-trips.
 
     If the target does not exist, a fresh document is built from scratch.
+
+    **YAML split** — the YAML-managed fields (``workspace_path`` /
+    ``worktrees_path`` / ``[repositories]`` / ``[open_with]``) are written
+    to ``<conception_path>/config/repositories.yml`` via
+    :func:`save_repositories_yaml` and stripped from the TOML document. When
+    ``conception_path`` is unset the YAML cannot be written, so those keys
+    stay in TOML as a degraded fallback until a conception path is set.
     """
     import tomlkit
     from tomlkit import comment, document, nl, table
@@ -368,76 +438,90 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
         doc.add(comment("condash configuration"))
         doc.add(nl())
 
-    # Top-level scalars
+    # Top-level scalars — the TOML carries only the three boot keys
+    # (conception_path, port, native) when a conception_path is set.
     if cfg.conception_path is not None:
         doc["conception_path"] = str(cfg.conception_path)
     elif "conception_path" in doc:
         del doc["conception_path"]
-    if cfg.workspace_path is not None:
-        doc["workspace_path"] = str(cfg.workspace_path)
-    elif "workspace_path" in doc:
-        del doc["workspace_path"]
-    if cfg.worktrees_path is not None:
-        doc["worktrees_path"] = str(cfg.worktrees_path)
-    elif "worktrees_path" in doc:
-        del doc["worktrees_path"]
     doc["port"] = int(cfg.port)
     doc["native"] = bool(cfg.native)
-    if cfg.pdf_viewer:
-        doc["pdf_viewer"] = list(cfg.pdf_viewer)
-    elif "pdf_viewer" in doc:
-        del doc["pdf_viewer"]
 
-    # [repositories]
-    repos = doc.get("repositories")
-    if not hasattr(repos, "value"):
-        repos = table()
-        doc["repositories"] = repos
-    repos["primary"] = _render_repo_list(cfg.repositories_primary, cfg.repo_submodules)
-    repos["secondary"] = _render_repo_list(cfg.repositories_secondary, cfg.repo_submodules)
+    # YAML-managed fields live under <conception_path>/config/. When a
+    # conception_path is set, write the YAMLs and strip the matching keys
+    # from the TOML so there's one source of truth on disk. Degraded mode
+    # (no conception_path) keeps everything in TOML.
+    yaml_target = save_repositories_yaml(cfg)
+    prefs_target = save_preferences_yaml(cfg)
 
-    # [terminal]
-    term_table = doc.get("terminal")
-    if not hasattr(term_table, "value"):
-        term_table = table()
-        doc["terminal"] = term_table
-    if cfg.terminal.shell:
-        term_table["shell"] = cfg.terminal.shell
-    elif "shell" in term_table:
-        del term_table["shell"]
-    term_table["shortcut"] = cfg.terminal.shortcut or DEFAULT_TERMINAL_SHORTCUT
-    if cfg.terminal.screenshot_dir:
-        term_table["screenshot_dir"] = cfg.terminal.screenshot_dir
-    elif "screenshot_dir" in term_table:
-        del term_table["screenshot_dir"]
-    term_table["screenshot_paste_shortcut"] = (
-        cfg.terminal.screenshot_paste_shortcut or DEFAULT_SCREENSHOT_PASTE_SHORTCUT
-    )
-    term_table["launcher_command"] = (
-        cfg.terminal.launcher_command if cfg.terminal.launcher_command is not None else ""
-    )
-    term_table["move_tab_left_shortcut"] = (
-        cfg.terminal.move_tab_left_shortcut or DEFAULT_MOVE_TAB_LEFT_SHORTCUT
-    )
-    term_table["move_tab_right_shortcut"] = (
-        cfg.terminal.move_tab_right_shortcut or DEFAULT_MOVE_TAB_RIGHT_SHORTCUT
-    )
+    if yaml_target is not None:
+        for key in ("workspace_path", "worktrees_path", "repositories", "open_with"):
+            if key in doc:
+                del doc[key]
+    else:
+        if cfg.workspace_path is not None:
+            doc["workspace_path"] = str(cfg.workspace_path)
+        elif "workspace_path" in doc:
+            del doc["workspace_path"]
+        if cfg.worktrees_path is not None:
+            doc["worktrees_path"] = str(cfg.worktrees_path)
+        elif "worktrees_path" in doc:
+            del doc["worktrees_path"]
+        repos = doc.get("repositories")
+        if not hasattr(repos, "value"):
+            repos = table()
+            doc["repositories"] = repos
+        repos["primary"] = _render_repo_list(cfg.repositories_primary, cfg.repo_submodules)
+        repos["secondary"] = _render_repo_list(cfg.repositories_secondary, cfg.repo_submodules)
+        open_with_table = doc.get("open_with")
+        if not hasattr(open_with_table, "value"):
+            open_with_table = table()
+            doc["open_with"] = open_with_table
+        for slot_key in OPEN_WITH_SLOT_KEYS:
+            slot = cfg.open_with.get(slot_key)
+            if slot is None:
+                continue
+            slot_table = open_with_table.get(slot_key)
+            if not hasattr(slot_table, "value"):
+                slot_table = table()
+                open_with_table[slot_key] = slot_table
+            slot_table["label"] = slot.label
+            slot_table["commands"] = list(slot.commands)
 
-    # [open_with.<slot>]
-    open_with_table = doc.get("open_with")
-    if not hasattr(open_with_table, "value"):
-        open_with_table = table()
-        doc["open_with"] = open_with_table
-    for slot_key in OPEN_WITH_SLOT_KEYS:
-        slot = cfg.open_with.get(slot_key)
-        if slot is None:
-            continue
-        slot_table = open_with_table.get(slot_key)
-        if not hasattr(slot_table, "value"):
-            slot_table = table()
-            open_with_table[slot_key] = slot_table
-        slot_table["label"] = slot.label
-        slot_table["commands"] = list(slot.commands)
+    if prefs_target is not None:
+        for key in ("pdf_viewer", "terminal"):
+            if key in doc:
+                del doc[key]
+    else:
+        if cfg.pdf_viewer:
+            doc["pdf_viewer"] = list(cfg.pdf_viewer)
+        elif "pdf_viewer" in doc:
+            del doc["pdf_viewer"]
+        term_table = doc.get("terminal")
+        if not hasattr(term_table, "value"):
+            term_table = table()
+            doc["terminal"] = term_table
+        if cfg.terminal.shell:
+            term_table["shell"] = cfg.terminal.shell
+        elif "shell" in term_table:
+            del term_table["shell"]
+        term_table["shortcut"] = cfg.terminal.shortcut or DEFAULT_TERMINAL_SHORTCUT
+        if cfg.terminal.screenshot_dir:
+            term_table["screenshot_dir"] = cfg.terminal.screenshot_dir
+        elif "screenshot_dir" in term_table:
+            del term_table["screenshot_dir"]
+        term_table["screenshot_paste_shortcut"] = (
+            cfg.terminal.screenshot_paste_shortcut or DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+        )
+        term_table["launcher_command"] = (
+            cfg.terminal.launcher_command if cfg.terminal.launcher_command is not None else ""
+        )
+        term_table["move_tab_left_shortcut"] = (
+            cfg.terminal.move_tab_left_shortcut or DEFAULT_MOVE_TAB_LEFT_SHORTCUT
+        )
+        term_table["move_tab_right_shortcut"] = (
+            cfg.terminal.move_tab_right_shortcut or DEFAULT_MOVE_TAB_RIGHT_SHORTCUT
+        )
 
     rendered = tomlkit.dumps(doc)
     tmp = target.with_suffix(target.suffix + ".tmp")
@@ -465,9 +549,16 @@ def write_default_template(target: Path) -> None:
 def _parse_repo_list(raw: object, source: Path, key: str) -> tuple[list[str], dict[str, list[str]]]:
     """Split a ``primary`` / ``secondary`` list into (names, submodules map).
 
-    Each entry is either a bare string (name only) or an inline table
-    ``{name = "...", submodules = [...]}``. Submodule paths are plain
-    subdirectories relative to the repo root, not real git submodules.
+    Each entry is either a bare string (name only) or an inline table with
+    ``{name = "...", submodules = [...]}`` — ``name`` is required,
+    ``submodules`` optional. Name may be bare (``"condash"``, for a flat
+    workspace) or slashed (``"myorg/repo-x"``, for a depth-2 workspace
+    where ``workspace_path`` is a parent of org folders). Submodule paths
+    are plain subdirectories relative to the repo root, not real git
+    submodules.
+
+    The PR base branch is **not** carried here — ``/pr`` resolves it from
+    ``origin/HEAD`` on the main checkout at call time.
     """
     if raw is None:
         return [], {}
@@ -624,6 +715,241 @@ def _parse(data: dict, source: Path) -> CondashConfig:
     )
 
 
+def repositories_yaml_path(conception_path: Path | None) -> Path | None:
+    """Return ``<conception_path>/config/repositories.yml`` or ``None``.
+
+    Used by both loaders and savers so the path is defined in one place.
+    """
+    if conception_path is None:
+        return None
+    return Path(conception_path).expanduser() / REPOSITORIES_YAML_REL
+
+
+def preferences_yaml_path(conception_path: Path | None) -> Path | None:
+    """Return ``<conception_path>/config/preferences.yml`` or ``None``."""
+    if conception_path is None:
+        return None
+    return Path(conception_path).expanduser() / PREFERENCES_YAML_REL
+
+
+def load_preferences_yaml(target: Path) -> dict:
+    """Read the preferences YAML file into a dict.
+
+    Raises :class:`ConfigIncompleteError` on malformed YAML. Missing-file
+    handling lives in :func:`load`; this function assumes ``target`` exists.
+    """
+    try:
+        loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigIncompleteError(f"{target}: malformed YAML: {exc}") from exc
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ConfigIncompleteError(f"{target}: top-level YAML must be a mapping")
+    return loaded
+
+
+def _apply_preferences_yaml(cfg: CondashConfig, data: dict, source: Path) -> None:
+    """Overlay ``pdf_viewer`` + ``terminal`` from the preferences YAML onto
+    ``cfg`` in place. Both keys are optional; missing fields keep whatever
+    defaults / TOML values cfg already carries.
+    """
+    if "pdf_viewer" in data:
+        raw = data.get("pdf_viewer") or []
+        if not isinstance(raw, list) or not all(isinstance(c, str) for c in raw):
+            raise ConfigIncompleteError(f"{source}: 'pdf_viewer' must be a list of command strings")
+        cfg.pdf_viewer = [c for c in (s.strip() for s in raw) if c]
+
+    term_raw = data.get("terminal")
+    if term_raw is not None:
+        if not isinstance(term_raw, dict):
+            raise ConfigIncompleteError(f"{source}: 'terminal' must be a mapping")
+        current = cfg.terminal
+
+        def _str(key: str, default: str) -> str:
+            val = term_raw.get(key, default)
+            if not isinstance(val, str) or not val.strip():
+                raise ConfigIncompleteError(
+                    f"{source}: 'terminal.{key}' must be a non-empty string"
+                )
+            return val.strip()
+
+        shell_raw = term_raw.get("shell")
+        if shell_raw is not None and not isinstance(shell_raw, str):
+            raise ConfigIncompleteError(f"{source}: 'terminal.shell' must be a string")
+        screenshot_dir_raw = term_raw.get("screenshot_dir")
+        if screenshot_dir_raw is not None and not isinstance(screenshot_dir_raw, str):
+            raise ConfigIncompleteError(f"{source}: 'terminal.screenshot_dir' must be a string")
+        launcher_raw = term_raw.get("launcher_command", current.launcher_command)
+        if not isinstance(launcher_raw, str):
+            raise ConfigIncompleteError(f"{source}: 'terminal.launcher_command' must be a string")
+
+        cfg.terminal = TerminalConfig(
+            shell=(shell_raw.strip() or None) if shell_raw else None,
+            shortcut=_str("shortcut", current.shortcut),
+            screenshot_dir=(screenshot_dir_raw.strip() or None) if screenshot_dir_raw else None,
+            screenshot_paste_shortcut=_str(
+                "screenshot_paste_shortcut", current.screenshot_paste_shortcut
+            ),
+            launcher_command=launcher_raw.strip(),
+            move_tab_left_shortcut=_str("move_tab_left_shortcut", current.move_tab_left_shortcut),
+            move_tab_right_shortcut=_str(
+                "move_tab_right_shortcut", current.move_tab_right_shortcut
+            ),
+        )
+
+    cfg.preferences_source = source
+
+
+def save_preferences_yaml(cfg: CondashConfig, path: Path | None = None) -> Path | None:
+    """Atomically write ``cfg.pdf_viewer`` + ``cfg.terminal`` to the
+    preferences YAML. Returns the written path, or ``None`` when no path
+    can be resolved (``conception_path`` unset and no explicit ``path``).
+    """
+    target = path or preferences_yaml_path(cfg.conception_path)
+    if target is None:
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    term = cfg.terminal
+    payload: dict = {
+        "pdf_viewer": list(cfg.pdf_viewer),
+        "terminal": {
+            "shell": term.shell or "",
+            "shortcut": term.shortcut or DEFAULT_TERMINAL_SHORTCUT,
+            "screenshot_dir": term.screenshot_dir or "",
+            "screenshot_paste_shortcut": (
+                term.screenshot_paste_shortcut or DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+            ),
+            "launcher_command": term.launcher_command or "",
+            "move_tab_left_shortcut": (
+                term.move_tab_left_shortcut or DEFAULT_MOVE_TAB_LEFT_SHORTCUT
+            ),
+            "move_tab_right_shortcut": (
+                term.move_tab_right_shortcut or DEFAULT_MOVE_TAB_RIGHT_SHORTCUT
+            ),
+        },
+    }
+    body = yaml.safe_dump(payload, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    rendered = PREFERENCES_YAML_HEADER + "\n" + body
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(rendered, encoding="utf-8")
+    tmp.replace(target)
+    return target
+
+
+def load_repositories_yaml(target: Path) -> dict:
+    """Read the repositories YAML file into a dict.
+
+    Raises :class:`ConfigIncompleteError` on malformed YAML. Missing-file
+    handling lives in :func:`load`; this function assumes ``target`` exists.
+    """
+    try:
+        loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigIncompleteError(f"{target}: malformed YAML: {exc}") from exc
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ConfigIncompleteError(f"{target}: top-level YAML must be a mapping")
+    return loaded
+
+
+def _apply_repositories_yaml(cfg: CondashConfig, data: dict, source: Path) -> None:
+    """Overlay the YAML-managed fields onto ``cfg`` in place."""
+    ws_raw = data.get("workspace_path")
+    cfg.workspace_path = Path(str(ws_raw)).expanduser() if ws_raw else None
+
+    wt_raw = data.get("worktrees_path")
+    cfg.worktrees_path = Path(str(wt_raw)).expanduser() if wt_raw else None
+
+    repos = data.get("repositories") or {}
+    if not isinstance(repos, dict):
+        raise ConfigIncompleteError(f"{source}: 'repositories' must be a mapping")
+    primary, primary_subs = _parse_repo_list(repos.get("primary"), source, "primary")
+    secondary, secondary_subs = _parse_repo_list(repos.get("secondary"), source, "secondary")
+    cfg.repositories_primary = primary
+    cfg.repositories_secondary = secondary
+    cfg.repo_submodules = {**primary_subs, **secondary_subs}
+
+    open_with_raw = data.get("open_with") or {}
+    if not isinstance(open_with_raw, dict):
+        raise ConfigIncompleteError(f"{source}: 'open_with' must be a mapping")
+    open_with: dict[str, OpenWithSlot] = {}
+    for slot_key in OPEN_WITH_SLOT_KEYS:
+        defaults = DEFAULT_OPEN_WITH[slot_key]
+        slot_data = open_with_raw.get(slot_key) or {}
+        if not isinstance(slot_data, dict):
+            raise ConfigIncompleteError(f"{source}: 'open_with.{slot_key}' must be a mapping")
+        label = slot_data.get("label", defaults["label"])
+        if not isinstance(label, str):
+            raise ConfigIncompleteError(f"{source}: 'open_with.{slot_key}.label' must be a string")
+        commands_raw = slot_data.get("commands", defaults["commands"])
+        if not isinstance(commands_raw, list) or not all(isinstance(c, str) for c in commands_raw):
+            raise ConfigIncompleteError(
+                f"{source}: 'open_with.{slot_key}.commands' must be a list of strings"
+            )
+        open_with[slot_key] = OpenWithSlot(label=label, commands=list(commands_raw))
+    cfg.open_with = open_with
+    cfg.yaml_source = source
+
+
+def _render_yaml_repo_list(
+    names: list[str],
+    repo_submodules: dict[str, list[str]],
+) -> list:
+    """Serialise a repo-name list for YAML. Entries with submodules become
+    mappings (``{name: ..., submodules: [...]}``); bare-name entries stay
+    as strings. Order preserved.
+    """
+    out: list = []
+    for name in names:
+        subs = repo_submodules.get(name) or []
+        if subs:
+            out.append({"name": name, "submodules": list(subs)})
+        else:
+            out.append(name)
+    return out
+
+
+def save_repositories_yaml(cfg: CondashConfig, path: Path | None = None) -> Path | None:
+    """Atomically write ``cfg``'s YAML-managed fields to the repositories
+    YAML file. Returns the written path, or ``None`` when no path can be
+    resolved (``conception_path`` unset and no explicit ``path`` passed).
+
+    Comments in the existing file are discarded; the file-level header is
+    re-injected from :data:`REPOSITORIES_YAML_HEADER` on every write.
+    """
+    target = path or repositories_yaml_path(cfg.conception_path)
+    if target is None:
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    payload: dict = {
+        "workspace_path": str(cfg.workspace_path) if cfg.workspace_path else "",
+        "worktrees_path": str(cfg.worktrees_path) if cfg.worktrees_path else "",
+        "repositories": {
+            "primary": _render_yaml_repo_list(cfg.repositories_primary, cfg.repo_submodules),
+            "secondary": _render_yaml_repo_list(cfg.repositories_secondary, cfg.repo_submodules),
+        },
+        "open_with": {
+            slot_key: {
+                "label": cfg.open_with[slot_key].label,
+                "commands": list(cfg.open_with[slot_key].commands),
+            }
+            for slot_key in OPEN_WITH_SLOT_KEYS
+            if slot_key in cfg.open_with
+        },
+    }
+
+    body = yaml.safe_dump(payload, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    rendered = REPOSITORIES_YAML_HEADER + "\n" + body
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(rendered, encoding="utf-8")
+    tmp.replace(target)
+    return target
+
+
 def load(
     path: Path | None = None,
     *,
@@ -633,11 +959,18 @@ def load(
 ) -> CondashConfig:
     """Load config from disk.
 
-    Raises ``ConfigNotFoundError`` if the file does not exist. Missing
+    Reads the TOML at ``~/.config/condash/config.toml``, then — when
+    ``conception_path`` resolves to an existing repositories YAML at
+    ``<conception_path>/config/repositories.yml`` — overlays that file's
+    values onto the YAML-managed fields (``workspace_path`` / ``worktrees_path``
+    / ``repositories`` / ``open_with``). The TOML values for those fields
+    are used only as a first-run fallback when no YAML is present, and are
+    stripped from disk on the next :func:`save`.
+
+    Raises ``ConfigNotFoundError`` if the TOML file does not exist. Missing
     ``conception_path`` no longer raises — it leaves the field as ``None``
     so the dashboard can launch and let the user pick it from the gear.
-    ``ConfigIncompleteError`` is still raised for shape errors (e.g. a
-    non-integer port or a malformed ``[repositories]`` entry).
+    ``ConfigIncompleteError`` is still raised for shape errors.
 
     ``conception_override`` / ``port_override`` / ``native_override`` are
     one-shot runtime overrides (e.g. from ``--conception-path`` /
@@ -657,4 +990,47 @@ def load(
         cfg.port = port_override
     if native_override is not None:
         cfg.native = native_override
+
+    yaml_target = repositories_yaml_path(cfg.conception_path)
+    if yaml_target is not None and yaml_target.is_file():
+        yaml_data = load_repositories_yaml(yaml_target)
+        _apply_repositories_yaml(cfg, yaml_data, yaml_target)
+
+    prefs_target = preferences_yaml_path(cfg.conception_path)
+    if prefs_target is not None and prefs_target.is_file():
+        prefs_data = load_preferences_yaml(prefs_target)
+        _apply_preferences_yaml(cfg, prefs_data, prefs_target)
+
+    if cfg.yaml_source is not None or cfg.preferences_source is not None:
+        _log_deprecated_toml_keys(data, target)
+
     return cfg
+
+
+def _log_deprecated_toml_keys(toml_data: dict, toml_path: Path) -> None:
+    """One-shot startup warning when the TOML still carries YAML-managed
+    keys after the YAML has taken over. The next save drops them; until
+    then the duplicates are ignored silently except for this log line.
+    """
+    leftovers: list[tuple[str, str]] = []
+    if toml_data.get("workspace_path"):
+        leftovers.append(("workspace_path", REPOSITORIES_YAML_REL))
+    if toml_data.get("worktrees_path"):
+        leftovers.append(("worktrees_path", REPOSITORIES_YAML_REL))
+    if toml_data.get("repositories"):
+        leftovers.append(("[repositories]", REPOSITORIES_YAML_REL))
+    if toml_data.get("open_with"):
+        leftovers.append(("[open_with]", REPOSITORIES_YAML_REL))
+    if toml_data.get("pdf_viewer"):
+        leftovers.append(("pdf_viewer", PREFERENCES_YAML_REL))
+    if toml_data.get("terminal"):
+        leftovers.append(("[terminal]", PREFERENCES_YAML_REL))
+    if leftovers:
+        for key, moved_to in leftovers:
+            log.info(
+                "%s: %s is now managed by %s — the next Save from the Configuration "
+                "modal will remove it from the TOML.",
+                toml_path,
+                key,
+                moved_to,
+            )

@@ -20,7 +20,12 @@ from pathlib import Path
 
 from .context import RenderCtx
 from .git_scan import _collect_git_repos
-from .parser import PRI_ORDER, _knowledge_title_and_desc, _note_kind, collect_knowledge
+from .parser import (
+    PRI_ORDER,
+    _knowledge_title_and_desc,
+    _note_kind,
+    collect_knowledge,
+)
 from .wikilinks import _preprocess_wikilinks
 
 log = logging.getLogger(__name__)
@@ -382,7 +387,11 @@ def _render_card(item):
 def _render_knowledge(root: dict | None) -> str:
     """Render the knowledge tree returned by ``collect_knowledge``."""
     if root is None or root["count"] == 0:
-        return '<p class="note-empty">No <code>knowledge/</code> tree under the configured conception path.</p>'
+        return (
+            '<p class="note-empty">'
+            "No <code>knowledge/</code> tree under the configured conception path."
+            "</p>"
+        )
     parts = ['<div class="knowledge-panel" data-node-id="knowledge">']
     if root["index"]:
         parts.append(_render_index_badge(root["index"], top_level=True))
@@ -791,6 +800,7 @@ def render_page(ctx: RenderCtx, items):
     knowledge_root = collect_knowledge(ctx)
     knowledge_html = _render_knowledge(knowledge_root)
     count_knowledge = knowledge_root["count"] if knowledge_root else 0
+
     count_projects = len(all_items)
 
     history_html = _render_history(ctx, all_items)

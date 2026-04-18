@@ -148,10 +148,39 @@ def _resolve_submodules(base_path, submodule_names):
     return out
 
 
+def _scan_repo(found: dict, repo_dir: Path, display_name: str) -> None:
+    """Probe ``repo_dir`` and record the result under ``display_name`` in
+    ``found``. Caller has already confirmed ``repo_dir/.git`` exists.
+    """
+    branch, dirty, changed, changed_files = _git_status(repo_dir)
+    found[display_name] = {
+        "name": display_name,
+        "path": str(repo_dir.resolve()),
+        "branch": branch,
+        "dirty": dirty,
+        "changed": changed,
+        "changed_files": changed_files,
+        "worktrees": _git_worktrees(repo_dir),
+        "submodules": [],
+    }
+
+
 def _collect_git_repos(ctx: RenderCtx):
     """Find git repos under the configured workspace and group them.
 
     Returns ``[]`` (no repo strip) when ``workspace_path`` is unset.
+
+    Scan depth:
+
+    - **Depth 1** — direct children of ``workspace_path``. If a child has
+      its own ``.git/`` it's a repo; display name = child directory name.
+    - **Depth 2** — when a direct child has no ``.git/`` but is itself a
+      directory, descend one level. Each grandchild with a ``.git/``
+      becomes a repo with display name ``<org>/<repo>``. This supports
+      workspaces where ``workspace_path`` is a parent of org folders
+      (e.g. ``~/src`` containing ``myorg/`` and ``vcoeur/``).
+
+    Depth is capped at 2 — no deeper recursion, no symlink chasing.
     """
     if ctx.workspace is None:
         return []
@@ -161,20 +190,20 @@ def _collect_git_repos(ctx: RenderCtx):
         for child in sorted(workspace.iterdir()):
             if not child.is_dir() or child.name.startswith("."):
                 continue
-            git_dir = child / ".git"
-            if not git_dir.exists():
+            if (child / ".git").exists():
+                _scan_repo(found, child, child.name)
                 continue
-            branch, dirty, changed, changed_files = _git_status(child)
-            found[child.name] = {
-                "name": child.name,
-                "path": str(child.resolve()),
-                "branch": branch,
-                "dirty": dirty,
-                "changed": changed,
-                "changed_files": changed_files,
-                "worktrees": _git_worktrees(child),
-                "submodules": [],
-            }
+            # Depth 2 — the child is an org-style grouping directory.
+            try:
+                grandchildren = sorted(child.iterdir())
+            except OSError:
+                continue
+            for grand in grandchildren:
+                if not grand.is_dir() or grand.name.startswith("."):
+                    continue
+                if not (grand / ".git").exists():
+                    continue
+                _scan_repo(found, grand, f"{child.name}/{grand.name}")
 
     structure = _load_repository_structure(ctx)
     submodule_map = {name: subs for _, entries in structure for name, subs in entries}

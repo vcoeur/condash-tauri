@@ -298,6 +298,30 @@ body {
 
 /* --- Config modal form --- */
 .config-modal { max-width: 720px; }
+.config-tabs {
+    display: flex; gap: 0.25rem; margin: 0 0 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.config-tab {
+    background: none; border: 0; padding: 0.5rem 0.9rem;
+    font: inherit; font-size: 0.88rem; font-weight: 500;
+    color: var(--text-secondary); cursor: pointer;
+    border-bottom: 2px solid transparent; border-radius: 0;
+    margin-bottom: -1px;
+}
+.config-tab:hover { color: var(--text); }
+.config-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.config-tab-pane { display: none; }
+.config-tab-pane.active { display: block; }
+.config-yaml-source {
+    margin: 0 0 0.75rem; padding: 0.5rem 0.75rem;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; font-size: 0.75rem; color: var(--text-muted);
+}
+.config-yaml-source code { font-size: 0.8em; }
 .config-fieldset {
     border: 1px solid var(--border); border-radius: 8px;
     padding: 0.75rem 1rem 1rem; margin: 0 0 1rem;
@@ -1518,96 +1542,112 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
         </div>
         <div class="note-modal-body">
             <form id="config-form" onsubmit="saveConfig(event)">
-                <fieldset class="config-fieldset">
-                    <legend>Paths</legend>
-                    <label>conception_path
-                        <input type="text" name="conception_path" placeholder="/path/to/conception">
-                        <small>Absolute path to the directory holding your <code>projects/</code> tree.</small>
-                    </label>
-                    <label>workspace_path
-                        <input type="text" name="workspace_path">
-                        <small>Directory containing your code repos. Empty = repo strip hidden.</small>
-                    </label>
-                    <label>worktrees_path
-                        <input type="text" name="worktrees_path">
-                        <small>Extra git-worktrees sandbox for "open in IDE".</small>
-                    </label>
-                </fieldset>
-                <fieldset class="config-fieldset">
-                    <legend>Server <span class="config-restart-hint">— restart required after change</span></legend>
-                    <label>port
-                        <input type="number" name="port" min="0" max="65535">
-                        <small>0 lets the OS pick a free port.</small>
-                    </label>
-                    <label class="config-checkbox">
-                        <input type="checkbox" name="native">
-                        Open in native window (uncheck for browser mode)
-                    </label>
-                </fieldset>
-                <fieldset class="config-fieldset">
-                    <legend>Repositories</legend>
-                    <p class="config-help">One repo per line. To attach subrepository rows (plain subdirectories rendered as expandable sub-rows in the repo strip), write <code>reponame: sub/one, sub/two</code>.</p>
-                    <label>primary
-                        <textarea name="repositories_primary" rows="4" placeholder="knoten&#10;vcoeur.com: apps/web, apps/api"></textarea>
-                    </label>
-                    <label>secondary
-                        <textarea name="repositories_secondary" rows="3" placeholder="conception"></textarea>
-                    </label>
-                </fieldset>
-                <fieldset class="config-fieldset">
-                    <legend>PDF viewer</legend>
-                    <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path; if the command has no <code>{path}</code>, the path is appended as the last argument (so <code>evince</code> behaves the same as <code>evince {path}</code>). Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
-                    <label>commands
-                        <textarea name="pdf_viewer" rows="3" placeholder="evince {path}&#10;okular {path}"></textarea>
-                    </label>
-                </fieldset>
-                <fieldset class="config-fieldset">
-                    <legend>Embedded terminal</legend>
-                    <label>shell
-                        <input type="text" name="terminal_shell" placeholder="(defaults to $SHELL, then /bin/bash)">
-                        <small id="term-shell-resolved"></small>
-                    </label>
-                    <label>toggle shortcut
-                        <input type="text" name="terminal_shortcut" placeholder="Ctrl+`">
-                        <small>Modifiers: Ctrl, Shift, Alt, Meta. Key names: single chars or KeyboardEvent.key names (Enter, Escape, …).</small>
-                    </label>
-                    <label>screenshot directory
-                        <input type="text" name="terminal_screenshot_dir" placeholder="(defaults to $XDG_PICTURES_DIR/Screenshots, then ~/Pictures/Screenshots)">
-                        <small id="term-screenshot-dir-resolved"></small>
-                    </label>
-                    <label>screenshot paste shortcut
-                        <input type="text" name="terminal_screenshot_paste_shortcut" placeholder="Ctrl+Shift+V">
-                        <small>Pastes the absolute path of the newest image (.png, .jpg, .jpeg, .webp) in the screenshot directory into the active terminal tab — no Enter, you confirm.</small>
-                    </label>
-                </fieldset>
-                <fieldset class="config-fieldset">
-                    <legend>Open with</legend>
-                    <p class="config-help">Each slot is a fallback chain of shell-style commands (one per line). The literal <code>{path}</code> is replaced with the repo's absolute path. The first command that starts is used.</p>
-                    <div data-slot="main_ide">
-                        <label>main_ide — label
-                            <input type="text" data-field="label">
+                <div class="config-tabs" role="tablist">
+                    <button type="button" class="config-tab active" data-config-tab="general" onclick="switchConfigTab('general')">General</button>
+                    <button type="button" class="config-tab" data-config-tab="repositories" onclick="switchConfigTab('repositories')">Repositories</button>
+                    <button type="button" class="config-tab" data-config-tab="preferences" onclick="switchConfigTab('preferences')">Preferences</button>
+                </div>
+                <div class="config-tab-pane active" data-config-pane="general">
+                    <fieldset class="config-fieldset">
+                        <legend>Paths</legend>
+                        <label>conception_path
+                            <input type="text" name="conception_path" placeholder="/path/to/conception">
+                            <small>Absolute path to the directory holding your <code>projects/</code> tree. Repositories + preferences live under <code>&lt;conception_path&gt;/config/*.yml</code>.</small>
                         </label>
-                        <label>main_ide — commands
-                            <textarea data-field="commands" rows="4" placeholder="idea {path}&#10;idea.sh {path}"></textarea>
+                    </fieldset>
+                    <fieldset class="config-fieldset">
+                        <legend>Server <span class="config-restart-hint">— restart required after change</span></legend>
+                        <label>port
+                            <input type="number" name="port" min="0" max="65535">
+                            <small>0 lets the OS pick a free port.</small>
                         </label>
-                    </div>
-                    <div data-slot="secondary_ide">
-                        <label>secondary_ide — label
-                            <input type="text" data-field="label">
+                        <label class="config-checkbox">
+                            <input type="checkbox" name="native">
+                            Open in native window (uncheck for browser mode)
                         </label>
-                        <label>secondary_ide — commands
-                            <textarea data-field="commands" rows="4" placeholder="code {path}&#10;codium {path}"></textarea>
+                    </fieldset>
+                </div>
+                <div class="config-tab-pane" data-config-pane="repositories">
+                    <p id="config-repositories-source" class="config-yaml-source" style="display:none"></p>
+                    <fieldset class="config-fieldset">
+                        <legend>Workspace</legend>
+                        <label>workspace_path
+                            <input type="text" name="workspace_path">
+                            <small>Directory condash scans for repos. Depth-1 hits (<code>&lt;workspace&gt;/&lt;repo&gt;/.git</code>) become repo rows; depth-2 hits (<code>&lt;workspace&gt;/&lt;org&gt;/&lt;repo&gt;/.git</code>) become rows named <code>&lt;org&gt;/&lt;repo&gt;</code>. Empty = repo strip hidden.</small>
                         </label>
-                    </div>
-                    <div data-slot="terminal">
-                        <label>terminal — label
-                            <input type="text" data-field="label">
+                        <label>worktrees_path
+                            <input type="text" name="worktrees_path">
+                            <small>Extra git-worktrees sandbox for "open in IDE".</small>
                         </label>
-                        <label>terminal — commands
-                            <textarea data-field="commands" rows="4" placeholder="ghostty --working-directory={path}&#10;gnome-terminal --working-directory {path}"></textarea>
+                    </fieldset>
+                    <fieldset class="config-fieldset">
+                        <legend>Repositories</legend>
+                        <p class="config-help">One repo per line. Slashed names (<code>myorg/backend</code>) match depth-2 scan hits. Append submodules as <code>reponame: sub/one, sub/two</code>. Per-repo <code>base_branch</code> (used by <code>/pr</code>) is preserved on save — edit it in <code>config/repositories.yml</code> directly until the modal grows a field for it.</p>
+                        <label>primary
+                            <textarea name="repositories_primary" rows="4" placeholder="knoten&#10;vcoeur.com: apps/web, apps/api"></textarea>
                         </label>
-                    </div>
-                </fieldset>
+                        <label>secondary
+                            <textarea name="repositories_secondary" rows="3" placeholder="conception"></textarea>
+                        </label>
+                    </fieldset>
+                    <fieldset class="config-fieldset">
+                        <legend>Open with</legend>
+                        <p class="config-help">Each slot is a fallback chain of shell-style commands (one per line). The literal <code>{path}</code> is replaced with the repo's absolute path. The first command that starts is used.</p>
+                        <div data-slot="main_ide">
+                            <label>main_ide — label
+                                <input type="text" data-field="label">
+                            </label>
+                            <label>main_ide — commands
+                                <textarea data-field="commands" rows="4" placeholder="idea {path}&#10;idea.sh {path}"></textarea>
+                            </label>
+                        </div>
+                        <div data-slot="secondary_ide">
+                            <label>secondary_ide — label
+                                <input type="text" data-field="label">
+                            </label>
+                            <label>secondary_ide — commands
+                                <textarea data-field="commands" rows="4" placeholder="code {path}&#10;codium {path}"></textarea>
+                            </label>
+                        </div>
+                        <div data-slot="terminal">
+                            <label>terminal — label
+                                <input type="text" data-field="label">
+                            </label>
+                            <label>terminal — commands
+                                <textarea data-field="commands" rows="4" placeholder="ghostty --working-directory={path}&#10;gnome-terminal --working-directory {path}"></textarea>
+                            </label>
+                        </div>
+                    </fieldset>
+                </div>
+                <div class="config-tab-pane" data-config-pane="preferences">
+                    <p id="config-preferences-source" class="config-yaml-source" style="display:none"></p>
+                    <fieldset class="config-fieldset">
+                        <legend>PDF viewer</legend>
+                        <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path; if the command has no <code>{path}</code>, the path is appended as the last argument (so <code>evince</code> behaves the same as <code>evince {path}</code>). Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
+                        <label>commands
+                            <textarea name="pdf_viewer" rows="3" placeholder="evince {path}&#10;okular {path}"></textarea>
+                        </label>
+                    </fieldset>
+                    <fieldset class="config-fieldset">
+                        <legend>Embedded terminal</legend>
+                        <label>shell
+                            <input type="text" name="terminal_shell" placeholder="(defaults to $SHELL, then /bin/bash)">
+                            <small id="term-shell-resolved"></small>
+                        </label>
+                        <label>toggle shortcut
+                            <input type="text" name="terminal_shortcut" placeholder="Ctrl+`">
+                            <small>Modifiers: Ctrl, Shift, Alt, Meta. Key names: single chars or KeyboardEvent.key names (Enter, Escape, …).</small>
+                        </label>
+                        <label>screenshot directory
+                            <input type="text" name="terminal_screenshot_dir" placeholder="(defaults to $XDG_PICTURES_DIR/Screenshots, then ~/Pictures/Screenshots)">
+                            <small id="term-screenshot-dir-resolved"></small>
+                        </label>
+                        <label>screenshot paste shortcut
+                            <input type="text" name="terminal_screenshot_paste_shortcut" placeholder="Ctrl+Shift+V">
+                            <small>Pastes the absolute path of the newest image (.png, .jpg, .jpeg, .webp) in the screenshot directory into the active terminal tab — no Enter, you confirm.</small>
+                        </label>
+                    </fieldset>
+                </div>
                 <div id="config-error" class="config-error" style="display:none"></div>
                 <div id="config-restart-warning" class="config-restart-warning" style="display:none"></div>
                 <div class="config-actions">
@@ -1711,6 +1751,30 @@ function _readSlotFields(form, slotKey) {
     };
 }
 
+function switchConfigTab(name) {
+    var tabs = document.querySelectorAll('#config-form .config-tab');
+    tabs.forEach(function(t){
+        t.classList.toggle('active', t.getAttribute('data-config-tab') === name);
+    });
+    var panes = document.querySelectorAll('#config-form .config-tab-pane');
+    panes.forEach(function(p){
+        p.classList.toggle('active', p.getAttribute('data-config-pane') === name);
+    });
+}
+
+function _setYamlSourceHint(elId, source, expected, label) {
+    var el = document.getElementById(elId);
+    if (!el) return;
+    if (source) {
+        el.innerHTML = 'These fields are stored in <code>' + source + '</code>.';
+    } else if (expected) {
+        el.innerHTML = 'These fields migrate to <code>' + expected + '</code> on the next Save.';
+    } else {
+        el.innerHTML = 'Set a <code>conception_path</code> on the General tab to move these fields into <code>' + label + '</code>.';
+    }
+    el.style.display = '';
+}
+
 async function openConfigModal() {
     var modal = document.getElementById('config-modal');
     var form = document.getElementById('config-form');
@@ -1718,6 +1782,7 @@ async function openConfigModal() {
     var warnEl = document.getElementById('config-restart-warning');
     errEl.style.display = 'none';
     warnEl.style.display = 'none';
+    switchConfigTab('general');
     modal.style.display = 'flex';
     try {
         var res = await fetch('/config');
@@ -1755,6 +1820,18 @@ async function openConfigModal() {
         // Stash the loaded port/native so we can detect changes on save.
         form.dataset.loadedPort = String(cfg.port);
         form.dataset.loadedNative = String(cfg.native);
+        _setYamlSourceHint(
+            'config-repositories-source',
+            cfg.repositories_yaml_source,
+            cfg.repositories_yaml_expected_path,
+            'config/repositories.yml',
+        );
+        _setYamlSourceHint(
+            'config-preferences-source',
+            cfg.preferences_yaml_source,
+            cfg.preferences_yaml_expected_path,
+            'config/preferences.yml',
+        );
     } catch (e) {
         errEl.textContent = 'Could not load config: ' + e;
         errEl.style.display = 'block';
@@ -2088,7 +2165,7 @@ function switchSubtab(sub) {
 }
 
 function _applySubtab(sub) {
-    document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
+    document.querySelectorAll('#projects-subtabs .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-subtab') === sub);
     });
     var allowed = TAB_MAP[sub] || [];
@@ -2364,8 +2441,8 @@ function updateTabCounts() {
     var projectsCount = document.querySelectorAll('#cards .card').length;
     var projectsTab = document.querySelector('.tabs-primary .tab[data-tab="projects"] .tab-count');
     if (projectsTab) projectsTab.textContent = '(' + projectsCount + ')';
-    // Subtabs
-    document.querySelectorAll('.tabs-secondary .tab').forEach(function(t) {
+    // Projects sub-tabs — these filter the `#cards` grid; count per tab.
+    document.querySelectorAll('#projects-subtabs .tab').forEach(function(t) {
         var tab = t.getAttribute('data-subtab');
         var allowed = TAB_MAP[tab] || [];
         var count = [].slice.call(document.querySelectorAll('.card')).filter(function(c) {
