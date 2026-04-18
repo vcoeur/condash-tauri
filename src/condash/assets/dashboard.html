@@ -1090,6 +1090,13 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     margin-left: 0.6rem; flex-shrink: 0; border-radius: 4px;
 }
 .note-modal-close:hover { color: var(--text); background: var(--accent-bg); }
+.note-modal-back {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 1rem; line-height: 1; cursor: pointer; padding: 0 6px;
+    margin-right: 0.4rem; flex-shrink: 0; border-radius: 4px;
+}
+.note-modal-back:hover { color: var(--text); background: var(--accent-bg); }
+.note-modal-back[hidden] { display: none; }
 .note-modal-search {
     display: flex; align-items: center; gap: 0.4rem;
     padding: 0.4rem 1.2rem;
@@ -1708,6 +1715,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 <div id="note-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNotePreview()">
     <div class="note-modal" id="note-modal-inner" data-mode="view">
         <div class="note-modal-header">
+            <button class="note-modal-back" id="note-modal-back" onclick="noteNavBack()" aria-label="Back" title="Back to previous note" hidden>&#9664;</button>
             <span class="note-modal-title" id="note-modal-title" ondblclick="startRenameNote()" title="Double-click to rename (notes/ files only)">Note</span>
             <div class="note-mode-toggle" id="note-mode-toggle" role="group" aria-label="Note mode">
                 <button class="note-mode-btn" data-mode="view" onclick="setNoteMode('view')" title="View (rendered)">View</button>
@@ -3038,6 +3046,13 @@ function _mountPdfsIn(container) {
     }
 }
 
+/* Back-navigation stack. Every time a link inside the note modal opens
+   a different note (wikilinks, relative .md links), the currently shown
+   {path, name} is pushed before the replacement. The back button in the
+   modal header pops one level. Cleared on close — this is an in-modal
+   navigation history, not a persistent browser history. */
+var _noteNavStack = [];
+
 /* Notes open in three modes. The modal carries `data-mode` on its inner
    element (#note-modal-inner); three sibling panes inside #note-modal-body
    are hidden/shown by CSS. `_noteModal` tracks the state shared across
@@ -3117,6 +3132,34 @@ async function openNotePreview(path, name) {
         ta.value = raw.content;
     }
     _syncModeControls();
+    _syncNoteBack();
+}
+
+/* Push the currently-shown note onto the back stack and open the target.
+   Used by link handlers inside the note modal (wikilinks + internal .md).
+   The button-driven "back" path calls openNotePreview without pushing so
+   the stack only grows on forward navigation. */
+async function _navigateToNote(path, name, anchor) {
+    if (_noteModal.path) {
+        var titleEl = document.getElementById('note-modal-title');
+        var currentName = titleEl ? titleEl.textContent : _noteModal.path;
+        _noteNavStack.push({path: _noteModal.path, name: currentName});
+    }
+    await openNotePreview(path, name);
+    if (anchor) _scrollNoteToAnchor(anchor);
+}
+
+function _syncNoteBack() {
+    var btn = document.getElementById('note-modal-back');
+    if (!btn) return;
+    if (_noteNavStack.length > 0) btn.removeAttribute('hidden');
+    else btn.setAttribute('hidden', '');
+}
+
+async function noteNavBack() {
+    if (_noteNavStack.length === 0) return;
+    var entry = _noteNavStack.pop();
+    await openNotePreview(entry.path, entry.name);
 }
 
 /* Resolve a path relative to `baseDir` — `baseDir/../foo` collapses to
@@ -3165,7 +3208,7 @@ function _wireNoteLinks(body, notePath) {
             ev.preventDefault();
             var href = a.getAttribute('href');
             var label = a.textContent || href;
-            openNotePreview(href, label);
+            _navigateToNote(href, label);
         });
     });
     // Unresolved wikilinks: click does nothing but flash the hover title.
@@ -3194,11 +3237,10 @@ function _wireNoteLinks(body, notePath) {
         var anchor = hashIdx >= 0 ? href.substring(hashIdx + 1) : '';
         if (pathPart && /\.md$/i.test(pathPart)) {
             var resolvedMd = _resolveNotePath(noteDir, pathPart);
-            a.addEventListener('click', async function(ev) {
+            a.addEventListener('click', function(ev) {
                 ev.preventDefault();
                 var label = a.textContent || resolvedMd;
-                await openNotePreview(resolvedMd, label);
-                _scrollNoteToAnchor(anchor);
+                _navigateToNote(resolvedMd, label, anchor);
             });
             return;
         }
@@ -3219,6 +3261,8 @@ function closeNotePreview() {
     _destroyCm();
     _hideSaveError();
     _noteModal.path = null;
+    _noteNavStack = [];
+    _syncNoteBack();
     noteSearchClose();
 }
 
