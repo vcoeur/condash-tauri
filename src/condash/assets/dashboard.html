@@ -4589,21 +4589,30 @@ new MutationObserver(function() {
    Exposes window.__cm6 once the module graph resolves so the classic
    <script> above can lazily mount editors on demand. If the CDN is
    unreachable we leave __cm6 unset; the "Edit" toggle stays disabled
-   and users fall back to the plain textarea. */
+   and users fall back to the plain textarea.
+
+   `?deps=` pins @codemirror/state and @codemirror/view to matching
+   versions across every bundle so esm.sh serves a single deduped URL
+   per package. Without it, `codemirror` and `@codemirror/lang-markdown`
+   each ship their own copy of state/view, and extensions registered
+   via `basicSetup` carry Compartment/StateField objects from a
+   different module graph than `EditorView` — editor mounts empty.
+   Versions must be recent enough for the transitive @codemirror/search
+   and @codemirror/autocomplete (pulled in by basicSetup at `^6.0.0`)
+   to find their imports — notably `showDialog`, added in view@6.37.0. */
 (async function() {
+    const DEPS = '?deps=@codemirror/state@6.6.0,@codemirror/view@6.41.0';
     try {
-        const [core, lang, viewMod, stateMod, cmds] = await Promise.all([
-            import('https://esm.sh/codemirror@6.0.1'),
-            import('https://esm.sh/@codemirror/lang-markdown@6.3.0'),
-            import('https://esm.sh/@codemirror/view@6.34.0'),
-            import('https://esm.sh/@codemirror/state@6.5.0'),
-            import('https://esm.sh/@codemirror/commands@6.7.0'),
+        const [core, lang, viewMod, stateMod] = await Promise.all([
+            import('https://esm.sh/codemirror@6.0.2' + DEPS),
+            import('https://esm.sh/@codemirror/lang-markdown@6.5.0' + DEPS),
+            import('https://esm.sh/@codemirror/view@6.41.0?deps=@codemirror/state@6.6.0'),
+            import('https://esm.sh/@codemirror/state@6.6.0'),
         ]);
-        const {EditorView} = viewMod;
-        const {EditorState, Compartment} = stateMod;
-        const {keymap} = viewMod;
-        const {basicSetup} = core;
+        const {EditorView, basicSetup} = core;
         const {markdown} = lang;
+        const {keymap} = viewMod;
+        const {EditorState, Compartment} = stateMod;
 
         /* Build a theme bound to condash's CSS variables so the editor
            stays aligned with dark/light without a second theme system.
