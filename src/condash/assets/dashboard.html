@@ -3135,11 +3135,25 @@ function _resolveNotePath(baseDir, rel) {
     return out.join('/');
 }
 
+/* Scroll a pandoc-generated heading into view inside the modal pane.
+   Heading ids are produced by pandoc's gfm auto_identifiers; the caller
+   supplies the fragment from a link href. No-op if the id is missing. */
+function _scrollNoteToAnchor(anchor) {
+    if (!anchor) return;
+    var pane = document.getElementById('note-pane-view');
+    if (!pane) return;
+    var el = null;
+    try { el = pane.querySelector('#' + CSS.escape(anchor)); } catch (_) {}
+    if (el) el.scrollIntoView({block: 'start'});
+}
+
 /* Route note-body link clicks:
    - http(s) → POST /open-external → host browser (bypasses pywebview).
-   - in-page anchors (#foo) → leave default behaviour.
+   - in-page anchors (#foo), mailto: → leave default behaviour.
+   - relative .md (with optional #anchor) → resolve inside the conception
+     tree and open in the same modal via openNotePreview.
    - anything else → resolve against the note's directory and POST /open-doc
-     so the OS default viewer handles PDFs, images, markdown, etc. */
+     so the OS default viewer handles PDFs, images, and other files. */
 function _wireNoteLinks(body, notePath) {
     var noteDir = notePath.lastIndexOf('/') >= 0
         ? notePath.substring(0, notePath.lastIndexOf('/'))
@@ -3170,19 +3184,33 @@ function _wireNoteLinks(body, notePath) {
                     body: JSON.stringify({url: href}),
                 });
             });
-        } else if (href.startsWith('#') || href.startsWith('mailto:')) {
             return;
-        } else {
-            var resolved = _resolveNotePath(noteDir, href);
-            a.addEventListener('click', function(ev) {
-                ev.preventDefault();
-                fetch('/open-doc', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path: resolved}),
-                });
-            });
         }
+        if (href.startsWith('#') || href.startsWith('mailto:')) {
+            return;
+        }
+        var hashIdx = href.indexOf('#');
+        var pathPart = hashIdx >= 0 ? href.substring(0, hashIdx) : href;
+        var anchor = hashIdx >= 0 ? href.substring(hashIdx + 1) : '';
+        if (pathPart && /\.md$/i.test(pathPart)) {
+            var resolvedMd = _resolveNotePath(noteDir, pathPart);
+            a.addEventListener('click', async function(ev) {
+                ev.preventDefault();
+                var label = a.textContent || resolvedMd;
+                await openNotePreview(resolvedMd, label);
+                _scrollNoteToAnchor(anchor);
+            });
+            return;
+        }
+        var resolved = _resolveNotePath(noteDir, pathPart || href);
+        a.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            fetch('/open-doc', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: resolved}),
+            });
+        });
     });
 }
 
