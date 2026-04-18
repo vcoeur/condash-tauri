@@ -3135,6 +3135,7 @@ function _mountCm() {
     var exts = [
         cm6.basicSetup,
         cm6.markdown(),
+        cm6.EditorView.lineWrapping,
         cm6.keymap.of([
             {key: 'Mod-s', preventDefault: true, run: function() { saveEdit(); return true; }},
         ]),
