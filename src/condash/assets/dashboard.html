@@ -963,6 +963,80 @@ body:not([data-single-term]) .term-side.is-active-side .term-mount {
     text-transform: uppercase; letter-spacing: 0.03em;
 }
 
+/* History search results — flat list rendered when the query is non-empty.
+   Each .history-result groups one project's hits; each .history-hit row is
+   a clickable file preview. */
+#history-results {
+    display: flex; flex-direction: column; gap: 0.75rem;
+}
+.history-result {
+    border: 1px solid var(--border-light); border-radius: 8px;
+    background: var(--bg-card-hover);
+    padding: 0.6rem 0.75rem;
+}
+.history-result-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.history-result-title {
+    font-weight: 600; font-size: 0.95rem; color: var(--text);
+    margin-right: 0.15rem;
+}
+.history-result-header .pill {
+    font-size: 0.7rem; padding: 0.05rem 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+.history-result-month {
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.72rem; color: var(--text-muted);
+    margin-left: auto;
+}
+.history-jump {
+    background: transparent; border: 1px solid var(--border-light);
+    border-radius: 6px; padding: 0.15rem 0.35rem; cursor: pointer;
+    color: var(--text-secondary);
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.history-jump:hover { border-color: var(--accent); color: var(--accent); }
+.history-result-hits {
+    list-style: none; margin: 0.5rem 0 0; padding: 0;
+    display: flex; flex-direction: column; gap: 0.3rem;
+}
+.history-hit {
+    display: grid; grid-template-columns: minmax(120px, 0.3fr) 1fr;
+    gap: 0.5rem; align-items: baseline;
+    padding: 0.25rem 0.4rem; border-radius: 4px;
+    cursor: pointer; font-size: 0.82rem;
+}
+.history-hit:hover { background: var(--accent-bg); }
+.hit-src {
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.74rem; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hit-src-title  { color: var(--accent); }
+.hit-src-readme { color: var(--text-secondary); }
+.hit-snippet {
+    color: var(--text); line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+.hit-snippet mark {
+    background: var(--accent); color: #fff;
+    padding: 0 2px; border-radius: 2px; font-weight: 600;
+}
+
+/* Focus flash: animated ring on a project card after jumpToProject(). The
+   ring fades over ~1.8s so the eye can land on the card without a
+   permanent highlight.  */
+@keyframes focus-flash-pulse {
+    0%   { box-shadow: 0 0 0 3px var(--accent), 0 0 14px 2px var(--accent); }
+    100% { box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent; }
+}
+.card.focus-flash {
+    animation: focus-flash-pulse 1.8s ease-out;
+    position: relative;
+}
+
 /* --- Note preview modal --- */
 .note-modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,0.55);
@@ -1603,8 +1677,9 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     </div>
     <div id="history-pane" style="display:none" data-node-id="history">
         <div class="search-toolbar history-toolbar">
-            <input id="history-search" type="search" placeholder="Search history — title, apps, tags, summary…" oninput="filterHistory(this.value)" autocomplete="off">
+            <input id="history-search" type="search" placeholder="Search history — title, apps, notes, filenames…" oninput="filterHistory(this.value)" autocomplete="off">
         </div>
+        <div id="history-results" hidden></div>
         <div id="history">{{HISTORY}}</div>
     </div>
 </main>
@@ -2738,15 +2813,140 @@ function filterKnowledge(q) {
 }
 
 /* --- History search ---
-   The History tab renders as a knowledge-card tree, so the token-AND
-   filter in _filterTree applies directly. */
+   Empty query → tree view (on-disk layout grouped by month).
+   Non-empty query → debounced fetch of /search-history that indexes README
+   bodies, note/text-file contents and filenames on the server, rendered as
+   a flat results list below the toolbar. */
+var _historySearchTimer = null;
+var _historySearchAbort = null;
 function filterHistory(q) {
     _historySearchQ = q || '';
-    var panel = document.getElementById('history');
-    if (!panel) return;
-    var qTrim = (q || '').trim();
-    _filterTree(panel, _searchTokens(q), qTrim,
-        'history-empty', 'No projects match "' + qTrim + '".');
+    var pane = document.getElementById('history-pane');
+    var tree = document.getElementById('history');
+    var results = document.getElementById('history-results');
+    if (!pane || !tree || !results) return;
+    var qTrim = _historySearchQ.trim();
+    if (!qTrim) {
+        if (_historySearchTimer) { clearTimeout(_historySearchTimer); _historySearchTimer = null; }
+        if (_historySearchAbort) { _historySearchAbort.abort(); _historySearchAbort = null; }
+        pane.classList.remove('history-pane--query');
+        results.hidden = true;
+        results.innerHTML = '';
+        tree.hidden = false;
+        return;
+    }
+    pane.classList.add('history-pane--query');
+    tree.hidden = true;
+    results.hidden = false;
+    if (_historySearchTimer) clearTimeout(_historySearchTimer);
+    _historySearchTimer = setTimeout(function(){ _runHistorySearch(qTrim); }, 150);
+}
+
+async function _runHistorySearch(q) {
+    if (_historySearchAbort) _historySearchAbort.abort();
+    _historySearchAbort = new AbortController();
+    var results = document.getElementById('history-results');
+    if (!results) return;
+    try {
+        var res = await fetch('/search-history?q=' + encodeURIComponent(q),
+                              {signal: _historySearchAbort.signal});
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var hits = await res.json();
+        // Discard the response if the query has changed since this fetch
+        // started — another keystroke already ran a newer fetch.
+        if (_historySearchQ.trim() !== q) return;
+        _renderHistoryResults(hits, q);
+    } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        results.innerHTML = '<p class="history-empty">Search failed: ' +
+            _escapeHtml(String(err && err.message || err)) + '</p>';
+    }
+}
+
+function _renderHistoryResults(hits, q) {
+    var results = document.getElementById('history-results');
+    if (!results) return;
+    if (!hits || !hits.length) {
+        results.innerHTML = '<p class="history-empty">No projects match "' +
+            _escapeHtml(q) + '".</p>';
+        return;
+    }
+    var out = [];
+    for (var i = 0; i < hits.length; i++) {
+        out.push(_historyResultBlock(hits[i]));
+    }
+    results.innerHTML = out.join('');
+}
+
+function _historyResultBlock(row) {
+    var hitsHtml = '';
+    for (var i = 0; i < row.hits.length; i++) {
+        var h = row.hits[i];
+        var pathAttr = _escapeHtml(h.path || '');
+        var labelAttr = _escapeHtml(h.label || '');
+        // Snippet already comes HTML-escaped with <mark> wrappers from the
+        // server — inject as HTML, not text.
+        var snippetHtml = h.snippet || '';
+        hitsHtml += (
+            '<li class="history-hit" ' +
+            'data-path="' + pathAttr + '" ' +
+            'data-label="' + labelAttr + '" ' +
+            'onclick="_openHistoryHit(this)">' +
+            '<span class="hit-src hit-src-' + _escapeHtml(h.source) + '">' +
+                _escapeHtml(h.label || h.source) + '</span>' +
+            '<span class="hit-snippet">' + snippetHtml + '</span>' +
+            '</li>'
+        );
+    }
+    return (
+        '<div class="history-result" ' +
+        'data-slug="' + _escapeHtml(row.slug) + '" ' +
+        'data-status="' + _escapeHtml(row.status || '') + '" ' +
+        'data-subtab="' + _escapeHtml(row.subtab || 'current') + '">' +
+        '<div class="history-result-header">' +
+            '<span class="history-result-title">' + _escapeHtml(row.title) + '</span>' +
+            '<span class="pill">' + _escapeHtml(row.kind) + '</span>' +
+            '<span class="pill pri-' + _escapeHtml(row.status) + '">' +
+                _escapeHtml(row.status) + '</span>' +
+            '<span class="history-result-month">' + _escapeHtml(row.month) + '</span>' +
+            '<button class="history-jump" onclick="jumpToProject(this)" ' +
+                'title="Open in Projects tab" aria-label="Jump to project">' +
+                '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" ' +
+                'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+                'stroke-linejoin="round" aria-hidden="true">' +
+                '<circle cx="12" cy="12" r="9"/>' +
+                '<circle cx="12" cy="12" r="5"/>' +
+                '<circle cx="12" cy="12" r="1.2" fill="currentColor"/>' +
+                '</svg>' +
+            '</button>' +
+        '</div>' +
+        '<ul class="history-result-hits">' + hitsHtml + '</ul>' +
+        '</div>'
+    );
+}
+
+function _openHistoryHit(el) {
+    var path = el.getAttribute('data-path');
+    var label = el.getAttribute('data-label');
+    if (path) openNotePreview(path, label || path);
+}
+
+function jumpToProject(btn) {
+    var row = btn.closest('.history-result');
+    if (!row) return;
+    var slug = row.getAttribute('data-slug');
+    var sub = row.getAttribute('data-subtab') || 'current';
+    switchTab('projects');
+    switchSubtab(sub);
+    var card = document.getElementById(slug);
+    if (!card) return;
+    card.classList.remove('collapsed');
+    card.scrollIntoView({behavior: 'smooth', block: 'center'});
+    card.classList.remove('focus-flash');
+    // Re-trigger the animation by forcing a reflow before re-adding.
+    void card.offsetWidth;
+    card.classList.add('focus-flash');
+    setTimeout(function(){ card.classList.remove('focus-flash'); }, 1800);
 }
 
 /* Re-apply any active search after the DOM is swapped or the subtab
@@ -2756,6 +2956,8 @@ function _reapplySearches() {
     if (_historySearchQ) {
         var h = document.getElementById('history-search');
         if (h) h.value = _historySearchQ;
+        // Re-run the query against the fresh DOM. In query mode this also
+        // re-fetches /search-history so newly-added files surface.
         filterHistory(_historySearchQ);
     }
     if (_knowledgeSearchQ) {

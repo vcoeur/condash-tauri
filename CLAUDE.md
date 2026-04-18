@@ -94,6 +94,7 @@ The CLI honours `CONDASH_LOG_LEVEL` (default `INFO`) for the root logger; set to
 - Runtime context: `src/condash/context.py::RenderCtx` + `build_ctx(cfg)`. Frozen dataclass carrying `base_dir`, `workspace`, `worktrees`, `repo_structure`, `open_with`, `pdf_viewer`, `template`. Rebuilt on every `/config` POST.
 - Path validators: `src/condash/paths.py::_safe_resolve` is the shared traversal guard; every route-facing validator composes regex gates on top of it.
 - Parsers + renderers: `src/condash/parser.py` (README + knowledge tree), `src/condash/render.py` (HTML for cards / notes / knowledge / git strip / page).
+- History search: `src/condash/search.py::search_items` — token-AND scan of each project's README body, note/text-file content and filenames. Exposed as `GET /search-history?q=…`; the History tab's input switches to a query-mode results list (`dashboard.html::filterHistory` / `_runHistorySearch`) with a jump-to-project button.
 - File mutations: `src/condash/mutations.py` — toggle / add / edit / remove step, rename / create note, priority edit.
 - Git scan + repo strip: `src/condash/git_scan.py` — workspace scan, per-repo status, worktree listing, fingerprint cache for the `/check-updates` long-poll.
 - External launchers: `src/condash/openers.py` — open-in-IDE, PDF viewer chain, OS default opener, external URL routing.

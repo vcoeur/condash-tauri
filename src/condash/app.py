@@ -78,6 +78,7 @@ from .render import (
     render_knowledge_group_fragment,
     render_page,
 )
+from .search import search_items
 
 log = logging.getLogger(__name__)
 
@@ -286,6 +287,15 @@ def _register_routes() -> None:
                 return _error(404, "dir not found")
             return HTMLResponse(content=render_knowledge_group_fragment(node))
         return _error(404, "unsupported id")
+
+    @_ng_app.get("/search-history")
+    def search_history(q: str = ""):
+        """Broadened history-tab search — matches README bodies, notes, and
+        filenames. Returns a list of per-project hits shaped by
+        :func:`search.search_items`. Empty query → ``[]``."""
+        ctx = _ctx()
+        items = collect_items(ctx)
+        return JSONResponse(search_items(ctx, items, q))
 
     @_ng_app.get("/note")
     def get_note(path: str = ""):
