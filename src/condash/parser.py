@@ -278,8 +278,17 @@ def parse_readme(ctx: RenderCtx, path, kind: str | None = None):
     done = sum(it["done"] for s in sections for it in s["items"])
     total = sum(len(s["items"]) for s in sections)
 
-    priority = meta.get("status", "backlog").lower()
+    raw_status = meta.get("status", "").strip()
+    priority = raw_status.lower() if raw_status else "backlog"
+    invalid_status = None
     if priority not in PRIORITIES:
+        invalid_status = raw_status
+        log.warning(
+            "unknown Status %r in %s — coerced to 'backlog'. Valid: %s",
+            raw_status,
+            path.relative_to(ctx.base_dir),
+            ", ".join(PRIORITIES),
+        )
         priority = "backlog"
 
     resolved_kind = meta.get("kind", "").lower() or kind or "project"
@@ -289,6 +298,7 @@ def parse_readme(ctx: RenderCtx, path, kind: str | None = None):
         "title": title,
         "date": date,
         "priority": priority,
+        "invalid_status": invalid_status,
         "apps": apps,
         "severity": severity,
         "summary": summary,

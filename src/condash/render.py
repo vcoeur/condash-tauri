@@ -328,6 +328,17 @@ def _render_card(item):
         f'<span class="pri-menu">{pri_options}</span></span>'
     )
 
+    invalid_status = item.get("invalid_status")
+    invalid_badge = ""
+    if invalid_status:
+        escaped = h(invalid_status)
+        invalid_badge = (
+            f'<span class="invalid-status-badge" '
+            f'title="Unknown Status &quot;{escaped}&quot; in README — treated as backlog. '
+            f'Valid: now, soon, later, backlog, review, done.">'
+            f"!? {escaped}</span>"
+        )
+
     progress = ""
     if item["total"] > 0:
         pct = round(item["done"] / item["total"] * 100)
@@ -373,7 +384,7 @@ def _render_card(item):
         f'<span class="card-title">{h(item["title"])}</span>'
         f"{pdf_badge}</div>"
         f'<div class="card-header-right">'
-        f"{progress} {priority_select} "
+        f"{progress} {invalid_badge}{priority_select} "
         f'<span class="date">{h(item["date"])}</span>'
         f"{card_actions_html}</div></div>"
         f'<div class="card-body">'
