@@ -555,7 +555,7 @@ body:not([data-single-term]) .term-side.is-active-side .term-mount {
 
 /* Tab strip — one chip per open pty. The active chip matches the pane
    background so it visually flows into the mount area below. */
-.term-tabs { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.term-tabs { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; min-height: 22px; min-width: 24px; }
 .term-tab {
     display: inline-flex; align-items: center; gap: 0.35rem;
     padding: 3px 10px; border-radius: 4px 4px 0 0;
@@ -594,6 +594,24 @@ body:not([data-single-term]) .term-side.is-active-side .term-mount {
     color: #f0f0f5; border-color: var(--accent);
     background: #1a1b20;
 }
+/* Launcher button carries a subtle accent so it's distinguishable from
+   the plain "+" without being loud. */
+.term-new-launcher {
+    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 50%, #3a3a44);
+}
+.term-new-launcher:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* Drag affordances for tab chips. A chip being dragged goes translucent;
+   the chip under the pointer draws a 2px accent line on the side where
+   the drop would insert, mirroring how VS Code / browsers signal tab
+   reorder drop zones. */
+.term-tab { cursor: grab; }
+.term-tab.is-dragging { opacity: 0.45; cursor: grabbing; }
+.term-tab-ghost { box-shadow: 0 4px 12px rgba(0,0,0,0.35); cursor: grabbing; }
+.term-tab.is-drop-before { box-shadow: inset 2px 0 0 0 var(--accent); }
+.term-tab.is-drop-after { box-shadow: inset -2px 0 0 0 var(--accent); }
+.term-tabs.is-drop-target { background: color-mix(in oklab, var(--accent) 15%, transparent); border-radius: 4px 4px 0 0; }
 
 /* Each session has its own full-sized mount inside .term-mount. Hidden
    sessions stop layout-contributing so the visible one gets the full
@@ -1445,9 +1463,11 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     <div class="term-top-row">
         <div class="term-tabs term-tabs-left" id="term-tabs-left"></div>
         <button class="term-new-tab" onclick="termNewTab('left')" title="New tab (left)" aria-label="New tab (left)">+</button>
+        <button class="term-new-tab term-new-launcher" id="term-launcher-left" onclick="termNewLauncherTab('left')" hidden>+λ</button>
         <span class="term-spacer"></span>
         <div class="term-tabs term-tabs-right" id="term-tabs-right"></div>
         <button class="term-new-tab" onclick="termNewTab('right')" title="New tab (right)" aria-label="New tab (right)">+</button>
+        <button class="term-new-tab term-new-launcher" id="term-launcher-right" onclick="termNewLauncherTab('right')" hidden>+λ</button>
     </div>
     <div class="term-body">
         <div class="term-side" data-side="left">
@@ -3944,12 +3964,17 @@ function _termSetActive(id) {
 function _termRenderTabChip(tab) {
     var btn = document.createElement('div');
     btn.className = 'term-tab';
+    btn.dataset.tabId = String(tab.id);
     btn.onclick = function() { _termSetActive(tab.id); };
     btn.ondblclick = function(ev) {
         // Don't start rename if the user double-clicked the close button.
         if (ev.target && ev.target.classList.contains('term-tab-close')) return;
         _termStartRename(tab);
     };
+    // Pointer-event drag: implemented entirely in JS to avoid QtWebEngine's
+    // native HTML5 drag-image path, which segfaults pywebview on dragstart
+    // of a DOM element this complex.
+    btn.addEventListener('pointerdown', function(ev) { _termChipPointerDown(ev, tab); });
     var label = document.createElement('span');
     label.className = 'term-tab-label';
     label.textContent = _termDefaultLabel(tab);
@@ -3963,6 +3988,254 @@ function _termRenderTabChip(tab) {
     tab.button = btn;
     tab.labelEl = label;
     _termSideEl(tab.side, 'tabs').appendChild(btn);
+}
+
+/* --- Tab drag (pointer-event based) -----------------------------------
+   The HTML5 drag-and-drop API crashes pywebview: QtWebEngine tries to
+   snapshot the dragged element for the native drag image and segfaults
+   the whole process on dragstart. We do drag ourselves with pointer
+   events, which stays entirely in the page — no native Qt involvement.
+
+   Flow:
+     - pointerdown on chip → arm a pending drag (don't start yet, so we
+       don't steal clicks / dblclicks). Capture the pointer.
+     - pointermove past a small pixel threshold → actually start the
+       drag: clone the chip into a floating "ghost" that follows the
+       cursor, dim the original, add drop markers based on
+       elementFromPoint.
+     - pointerup → drop. If dragging: reparent via _termMoveTabTo. If
+       not dragging (just a click): let the normal onclick run.
+     - pointercancel / escape → abort cleanly.
+
+   Cross-pane moves reparent both the chip button and the xterm mount
+   DOM nodes; the pty session keeps running since it's bound to the ws,
+   not the DOM. No reconnect, no scrollback loss. */
+
+var _termDrag = null;  // {tab, pointerId, startX, startY, active, ghost, lastDrop}
+var _TERM_DRAG_THRESHOLD_PX = 5;
+
+function _termChipPointerDown(ev, tab) {
+    // Only left mouse / primary pointer. Ignore clicks on the close × so
+    // it still dismisses via its own onclick.
+    if (ev.button !== undefined && ev.button !== 0) return;
+    if (ev.target && ev.target.classList && ev.target.classList.contains('term-tab-close')) return;
+    // Don't start a drag over the rename input.
+    if (ev.target && ev.target.tagName === 'INPUT') return;
+    _termDrag = {
+        tab: tab,
+        pointerId: ev.pointerId,
+        startX: ev.clientX,
+        startY: ev.clientY,
+        active: false,
+        ghost: null,
+        lastDrop: null,
+    };
+    try { tab.button.setPointerCapture(ev.pointerId); } catch (e) {}
+    tab.button.addEventListener('pointermove', _termChipPointerMove);
+    tab.button.addEventListener('pointerup', _termChipPointerUp);
+    tab.button.addEventListener('pointercancel', _termChipPointerCancel);
+}
+
+function _termChipPointerMove(ev) {
+    if (!_termDrag || ev.pointerId !== _termDrag.pointerId) return;
+    var dx = ev.clientX - _termDrag.startX;
+    var dy = ev.clientY - _termDrag.startY;
+    if (!_termDrag.active) {
+        if (Math.hypot(dx, dy) < _TERM_DRAG_THRESHOLD_PX) return;
+        _termBeginDrag();
+    }
+    _termDrag.ghost.style.left = (ev.clientX - _termDrag.ghostOffX) + 'px';
+    _termDrag.ghost.style.top = (ev.clientY - _termDrag.ghostOffY) + 'px';
+    _termUpdateDropMarkers(ev.clientX, ev.clientY);
+}
+
+function _termChipPointerUp(ev) {
+    if (!_termDrag || ev.pointerId !== _termDrag.pointerId) return;
+    var drag = _termDrag;
+    _termCleanupDrag();
+    if (!drag.active) return;  // Was just a click — onclick already fired.
+    if (!drag.lastDrop) return;
+    var d = drag.lastDrop;
+    if (d.kind === 'chip' && d.target.id === drag.tab.id) return;  // drop on self
+    if (d.kind === 'chip') {
+        var before = d.before;
+        var beforeTab = before ? d.target : _termNextTabOnSide(d.target);
+        _termMoveTabTo(drag.tab, d.target.side, beforeTab);
+    } else if (d.kind === 'strip') {
+        _termMoveTabTo(drag.tab, d.side, null);
+    }
+}
+
+function _termChipPointerCancel(ev) {
+    if (!_termDrag || ev.pointerId !== _termDrag.pointerId) return;
+    _termCleanupDrag();
+}
+
+function _termBeginDrag() {
+    var tab = _termDrag.tab;
+    _termDrag.active = true;
+    // Build a floating clone that follows the cursor. pointer-events:none
+    // on the ghost is critical — without it, elementFromPoint returns the
+    // ghost instead of the chip/strip below the cursor.
+    var rect = tab.button.getBoundingClientRect();
+    var ghost = tab.button.cloneNode(true);
+    ghost.classList.add('term-tab-ghost');
+    ghost.style.position = 'fixed';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    ghost.style.width = rect.width + 'px';
+    ghost.style.height = rect.height + 'px';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '9999';
+    ghost.style.opacity = '0.85';
+    document.body.appendChild(ghost);
+    _termDrag.ghost = ghost;
+    _termDrag.ghostOffX = _termDrag.startX - rect.left;
+    _termDrag.ghostOffY = _termDrag.startY - rect.top;
+    tab.button.classList.add('is-dragging');
+    document.getElementById('term-tabs-left').classList.add('is-drop-target');
+    document.getElementById('term-tabs-right').classList.add('is-drop-target');
+}
+
+function _termUpdateDropMarkers(x, y) {
+    // Clear previous markers on every chip.
+    document.querySelectorAll('.term-tab.is-drop-before, .term-tab.is-drop-after').forEach(function(el) {
+        el.classList.remove('is-drop-before');
+        el.classList.remove('is-drop-after');
+    });
+    _termDrag.lastDrop = null;
+    var el = document.elementFromPoint(x, y);
+    if (!el) return;
+    var chipEl = el.closest ? el.closest('.term-tab') : null;
+    if (chipEl && chipEl.classList.contains('term-tab-ghost')) chipEl = null;
+    if (chipEl) {
+        var id = parseInt(chipEl.dataset.tabId, 10);
+        var target = _termTabs.find(function(t) { return t.id === id; });
+        if (target && target.id !== _termDrag.tab.id) {
+            var rect = chipEl.getBoundingClientRect();
+            var before = x < rect.left + rect.width / 2;
+            chipEl.classList.toggle('is-drop-before', before);
+            chipEl.classList.toggle('is-drop-after', !before);
+            _termDrag.lastDrop = {kind: 'chip', target: target, before: before};
+            return;
+        }
+    }
+    var stripEl = el.closest ? el.closest('.term-tabs') : null;
+    if (stripEl) {
+        var side = stripEl.id === 'term-tabs-right' ? 'right' : 'left';
+        _termDrag.lastDrop = {kind: 'strip', side: side};
+    }
+}
+
+function _termCleanupDrag() {
+    if (!_termDrag) return;
+    var tab = _termDrag.tab;
+    try { tab.button.releasePointerCapture(_termDrag.pointerId); } catch (e) {}
+    tab.button.removeEventListener('pointermove', _termChipPointerMove);
+    tab.button.removeEventListener('pointerup', _termChipPointerUp);
+    tab.button.removeEventListener('pointercancel', _termChipPointerCancel);
+    if (_termDrag.ghost && _termDrag.ghost.parentNode) {
+        _termDrag.ghost.parentNode.removeChild(_termDrag.ghost);
+    }
+    tab.button.classList.remove('is-dragging');
+    document.querySelectorAll('.term-tab.is-drop-before, .term-tab.is-drop-after').forEach(function(el) {
+        el.classList.remove('is-drop-before');
+        el.classList.remove('is-drop-after');
+    });
+    document.querySelectorAll('.term-tabs.is-drop-target').forEach(function(el) {
+        el.classList.remove('is-drop-target');
+    });
+    _termDrag = null;
+}
+
+function _termNextTabOnSide(tab) {
+    var sideTabs = _termTabsOn(tab.side);
+    var idx = sideTabs.findIndex(function(t) { return t.id === tab.id; });
+    if (idx < 0 || idx === sideTabs.length - 1) return null;
+    return sideTabs[idx + 1];
+}
+
+/* Reparent ``tab`` into ``targetSide`` at the position before ``beforeTab``
+   (null = append to end). Keeps the pty session alive, updates active/
+   last-focused state, refits the xterm, and persists. */
+function _termMoveTabTo(tab, targetSide, beforeTab) {
+    if (!tab || !tab.button || !tab.mount) return;
+    targetSide = targetSide === 'right' ? 'right' : 'left';
+    var sourceSide = tab.side;
+    var wasActiveOnSource = _termActive[sourceSide] === tab.id;
+
+    // Reparent DOM: chip into target strip; mount into target mount area.
+    var targetStrip = _termSideEl(targetSide, 'tabs');
+    var targetMount = _termSideEl(targetSide, 'mount');
+    if (!targetStrip || !targetMount) return;
+    if (beforeTab && beforeTab.button && beforeTab.button.parentNode === targetStrip) {
+        targetStrip.insertBefore(tab.button, beforeTab.button);
+    } else {
+        targetStrip.appendChild(tab.button);
+    }
+    if (tab.mount.parentNode !== targetMount) {
+        targetMount.appendChild(tab.mount);
+    }
+    tab.side = targetSide;
+
+    // Keep _termTabs in visual order so _termPersistTabs records the new
+    // layout. Remove the dragged tab, then reinsert it at its new index
+    // derived from DOM sibling order within the target strip.
+    var i = _termTabs.indexOf(tab);
+    if (i >= 0) _termTabs.splice(i, 1);
+    var stripChildren = Array.prototype.slice.call(targetStrip.children);
+    var domIdx = stripChildren.indexOf(tab.button);
+    // Map the DOM position back to an insertion index in _termTabs: walk
+    // earlier siblings, count how many are in _termTabs (some — e.g. the
+    // tab we just moved — are not in the array yet).
+    var priorArrayIdx = 0;
+    for (var k = 0; k < domIdx; k++) {
+        var siblingId = parseInt(stripChildren[k].dataset.tabId, 10);
+        var siblingPos = _termTabs.findIndex(function(t) { return t.id === siblingId; });
+        if (siblingPos >= 0) priorArrayIdx = siblingPos + 1;
+    }
+    _termTabs.splice(priorArrayIdx, 0, tab);
+
+    // Same-side reorder: keep the currently active tab selected on both
+    // sides. Cross-pane move: the moved tab becomes active on its new
+    // side; the source side's active slot falls back to the last
+    // remaining tab (or null if empty).
+    if (sourceSide !== targetSide) {
+        if (wasActiveOnSource) {
+            var remaining = _termTabsOn(sourceSide);
+            _termActive[sourceSide] = remaining.length ? remaining[remaining.length - 1].id : null;
+            if (_termActive[sourceSide] !== null) {
+                var stillActive = _termTabs.find(function(t) { return t.id === _termActive[sourceSide]; });
+                if (stillActive) {
+                    stillActive.mount.classList.add('active');
+                    stillActive.button.classList.add('active');
+                }
+            }
+        }
+        // Clear any stale active classes on the moved tab, then activate
+        // it on its new side.
+        tab.mount.classList.remove('active');
+        tab.button.classList.remove('active');
+        _termSetActive(tab.id);
+    }
+
+    _termShowSide(sourceSide, _termTabsOn(sourceSide).length > 0);
+    _termShowSide(targetSide, true);
+    _termPersistTabs();
+    // The moved xterm was laid out against the source side's dimensions;
+    // the target side is usually a different width. Refit after the DOM
+    // move settles.
+    setTimeout(_termSendResizeAll, 0);
+}
+
+/* Move the currently active tab to ``targetSide`` via the Ctrl+Left /
+   Ctrl+Right shortcut. No-op if no active tab or if the tab is already
+   on that side (leaves within-pane ordering alone). */
+function _termMoveActiveTabToSide(targetSide) {
+    var tab = _termActiveTab();
+    if (!tab) return;
+    if (tab.side === targetSide) return;
+    _termMoveTabTo(tab, targetSide, null);
 }
 
 function _termDefaultLabel(tab) {
@@ -4112,6 +4385,20 @@ function _termCreateTab(side, opts) {
             pasteRecentScreenshot();
             return false;
         }
+        // Move-active-tab shortcuts — arrow keys are otherwise consumed by
+        // xterm and never bubble to the document handler.
+        if (_termMoveLeftShortcut && _matchShortcut(ev, _termMoveLeftShortcut)) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            _termMoveActiveTabToSide('left');
+            return false;
+        }
+        if (_termMoveRightShortcut && _matchShortcut(ev, _termMoveRightShortcut)) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            _termMoveActiveTabToSide('right');
+            return false;
+        }
         // Ctrl+C: copy the current selection if there is one, otherwise
         // let xterm send ^C (SIGINT) as normal. Ctrl+Shift+C: always copy
         // (no-op without a selection) — matches GNOME Terminal / Ghostty.
@@ -4151,8 +4438,14 @@ function _termCreateTab(side, opts) {
     // the new shell in that directory; it's sandbox-validated server-side
     // and silently ignored if invalid. The two are mutually exclusive —
     // cwd has no meaning when reattaching.
-    if (opts.session_id) wsUrl += '?session_id=' + encodeURIComponent(opts.session_id);
-    else if (opts.cwd) wsUrl += '?cwd=' + encodeURIComponent(opts.cwd);
+    if (opts.session_id) {
+        wsUrl += '?session_id=' + encodeURIComponent(opts.session_id);
+    } else {
+        var q = [];
+        if (opts.cwd) q.push('cwd=' + encodeURIComponent(opts.cwd));
+        if (opts.launcher) q.push('launcher=1');
+        if (q.length) wsUrl += '?' + q.join('&');
+    }
     var ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     var tab = {
@@ -4258,6 +4551,21 @@ function termNewTab(side) {
         localStorage.setItem('term-open', '1');
     }
     _termCreateTab(side || 'left');
+}
+
+/* Spawn a pty tab that runs the configured terminal.launcher_command
+   (default "claude"). The server forks straight into the launcher argv
+   instead of a login shell; when the process exits, the tab closes. */
+function termNewLauncherTab(side) {
+    if (!_termLauncherCommand) return;
+    var pane = document.getElementById('term-pane');
+    if (pane.hasAttribute('hidden')) {
+        pane.removeAttribute('hidden');
+        _termSyncOpenFlag(true);
+        localStorage.setItem('term-open', '1');
+    }
+    var label = _termLauncherCommand.split(/\s+/)[0] || 'launcher';
+    _termCreateTab(side || 'left', {launcher: true, customName: label});
 }
 
 function _termSyncOpenFlag(open) {
@@ -4396,6 +4704,9 @@ function _matchShortcut(ev, spec) {
 
 var _termShortcut = null;
 var _screenshotPasteShortcut = null;
+var _termMoveLeftShortcut = null;
+var _termMoveRightShortcut = null;
+var _termLauncherCommand = '';
 
 async function _loadTermShortcuts() {
     try {
@@ -4405,7 +4716,30 @@ async function _loadTermShortcuts() {
         var term = cfg.terminal || {};
         _termShortcut = _parseShortcut(term.shortcut || 'Ctrl+`');
         _screenshotPasteShortcut = _parseShortcut(term.screenshot_paste_shortcut || 'Ctrl+Shift+V');
+        _termMoveLeftShortcut = _parseShortcut(term.move_tab_left_shortcut || 'Ctrl+Left');
+        _termMoveRightShortcut = _parseShortcut(term.move_tab_right_shortcut || 'Ctrl+Right');
+        _termLauncherCommand = (term.launcher_command || '').trim();
+        _termSyncLauncherButtons();
     } catch (e) {}
+}
+
+/* Show or hide the per-side launcher "+" buttons based on whether the
+   config has a non-empty launcher_command. Runs on config load and on
+   every /config POST that goes through this page. */
+function _termSyncLauncherButtons() {
+    var show = !!_termLauncherCommand;
+    ['left', 'right'].forEach(function(side) {
+        var btn = document.getElementById('term-launcher-' + side);
+        if (!btn) return;
+        if (show) {
+            btn.removeAttribute('hidden');
+            var label = _termLauncherCommand.split(/\s+/)[0] || 'launcher';
+            btn.title = 'New ' + label + ' tab (' + side + ')';
+            btn.setAttribute('aria-label', btn.title);
+        } else {
+            btn.setAttribute('hidden', '');
+        }
+    });
 }
 
 /* Lightweight transient banner shown by keyboard-shortcut actions that
@@ -4502,6 +4836,20 @@ document.addEventListener('keydown', function(ev) {
         if (!(inEditable && !hasMod) && _matchShortcut(ev, _screenshotPasteShortcut)) {
             ev.preventDefault();
             pasteRecentScreenshot();
+            return;
+        }
+    }
+    if (_termMoveLeftShortcut && _matchShortcut(ev, _termMoveLeftShortcut)) {
+        if (!inEditable || _termMoveLeftShortcut.ctrl || _termMoveLeftShortcut.alt || _termMoveLeftShortcut.meta) {
+            ev.preventDefault();
+            _termMoveActiveTabToSide('left');
+            return;
+        }
+    }
+    if (_termMoveRightShortcut && _matchShortcut(ev, _termMoveRightShortcut)) {
+        if (!inEditable || _termMoveRightShortcut.ctrl || _termMoveRightShortcut.alt || _termMoveRightShortcut.meta) {
+            ev.preventDefault();
+            _termMoveActiveTabToSide('right');
             return;
         }
     }

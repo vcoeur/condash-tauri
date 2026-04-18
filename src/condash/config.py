@@ -137,10 +137,21 @@ DEFAULT_CONFIG_TEMPLATE = """\
 #                                screenshot_dir into the active terminal
 #                                tab (no Enter — user confirms). Same
 #                                format as `shortcut`. Default Ctrl+Shift+V.
+#   - launcher_command: shell-style command spawned by the secondary "+"
+#                       button next to each side's new-tab button. Parsed
+#                       with `shlex`; when the process exits, the tab
+#                       closes. Empty string hides the launcher button.
+#                       Default "claude".
+#   - move_tab_left_shortcut / move_tab_right_shortcut: keyboard combos
+#                       that move the active terminal tab to the left or
+#                       right pane. Defaults Ctrl+Left / Ctrl+Right.
 # shell                     = "/bin/zsh"
 # shortcut                  = "Ctrl+`"
 # screenshot_dir            = "/home/me/Pictures/Screenshots"
 # screenshot_paste_shortcut = "Ctrl+Shift+V"
+# launcher_command          = "claude"
+# move_tab_left_shortcut    = "Ctrl+Left"
+# move_tab_right_shortcut   = "Ctrl+Right"
 
 # [open_with.<slot>]
 # Three vendor-neutral launcher slots: `main_ide`, `secondary_ide`, `terminal`.
@@ -236,6 +247,9 @@ class OpenWithSlot:
 
 DEFAULT_TERMINAL_SHORTCUT = "Ctrl+`"
 DEFAULT_SCREENSHOT_PASTE_SHORTCUT = "Ctrl+Shift+V"
+DEFAULT_LAUNCHER_COMMAND = "claude"
+DEFAULT_MOVE_TAB_LEFT_SHORTCUT = "Ctrl+Left"
+DEFAULT_MOVE_TAB_RIGHT_SHORTCUT = "Ctrl+Right"
 SCREENSHOT_IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp")
 
 
@@ -273,6 +287,9 @@ class TerminalConfig:
     shortcut: str = DEFAULT_TERMINAL_SHORTCUT
     screenshot_dir: str | None = None
     screenshot_paste_shortcut: str = DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+    launcher_command: str = DEFAULT_LAUNCHER_COMMAND
+    move_tab_left_shortcut: str = DEFAULT_MOVE_TAB_LEFT_SHORTCUT
+    move_tab_right_shortcut: str = DEFAULT_MOVE_TAB_RIGHT_SHORTCUT
 
     def resolved_screenshot_dir(self) -> Path:
         """Return the effective screenshot directory (configured or default)."""
@@ -395,6 +412,15 @@ def save(cfg: CondashConfig, path: Path | None = None) -> Path:
         del term_table["screenshot_dir"]
     term_table["screenshot_paste_shortcut"] = (
         cfg.terminal.screenshot_paste_shortcut or DEFAULT_SCREENSHOT_PASTE_SHORTCUT
+    )
+    term_table["launcher_command"] = (
+        cfg.terminal.launcher_command if cfg.terminal.launcher_command is not None else ""
+    )
+    term_table["move_tab_left_shortcut"] = (
+        cfg.terminal.move_tab_left_shortcut or DEFAULT_MOVE_TAB_LEFT_SHORTCUT
+    )
+    term_table["move_tab_right_shortcut"] = (
+        cfg.terminal.move_tab_right_shortcut or DEFAULT_MOVE_TAB_RIGHT_SHORTCUT
     )
 
     # [open_with.<slot>]
@@ -560,11 +586,27 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         raise ConfigIncompleteError(
             f"{source}: 'terminal.screenshot_paste_shortcut' must be a non-empty string"
         )
+    launcher_command_raw = terminal_raw.get("launcher_command", DEFAULT_LAUNCHER_COMMAND)
+    if not isinstance(launcher_command_raw, str):
+        raise ConfigIncompleteError(f"{source}: 'terminal.launcher_command' must be a string")
+    move_left_raw = terminal_raw.get("move_tab_left_shortcut", DEFAULT_MOVE_TAB_LEFT_SHORTCUT)
+    if not isinstance(move_left_raw, str) or not move_left_raw.strip():
+        raise ConfigIncompleteError(
+            f"{source}: 'terminal.move_tab_left_shortcut' must be a non-empty string"
+        )
+    move_right_raw = terminal_raw.get("move_tab_right_shortcut", DEFAULT_MOVE_TAB_RIGHT_SHORTCUT)
+    if not isinstance(move_right_raw, str) or not move_right_raw.strip():
+        raise ConfigIncompleteError(
+            f"{source}: 'terminal.move_tab_right_shortcut' must be a non-empty string"
+        )
     terminal = TerminalConfig(
         shell=(term_shell.strip() or None) if term_shell else None,
         shortcut=term_shortcut.strip(),
         screenshot_dir=(screenshot_dir.strip() or None) if screenshot_dir else None,
         screenshot_paste_shortcut=paste_shortcut.strip(),
+        launcher_command=launcher_command_raw.strip(),
+        move_tab_left_shortcut=move_left_raw.strip(),
+        move_tab_right_shortcut=move_right_raw.strip(),
     )
 
     return CondashConfig(
