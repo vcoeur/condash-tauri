@@ -29,9 +29,11 @@ _VALID_DOWNLOAD_RE = re.compile(_VALID_ITEM_PREFIX + r"[\w./-]+\.pdf$")
 _VALID_NOTE_RE = re.compile(_VALID_ITEM_PREFIX + r"[\w./-]+\.md$")
 
 # Knowledge pages live outside the date-prefixed item structure. Match
-# `knowledge/<file>.md` at the root (apps.md, conventions.md) and
-# `knowledge/<subdir>/<file>.md` (topics/, external/, internal/, …).
-_VALID_KNOWLEDGE_NOTE_RE = re.compile(r"^knowledge/(?:[\w.-]+/)?[\w.-]+\.md$")
+# `knowledge/<file>.md` at the root (conventions.md) and any depth of
+# subdir under it (`topics/index.md`, `topics/ops/dev-ports.md`, …).
+# `_safe_resolve` still rejects traversal (`..`, `\x00`) and enforces
+# `relative_to(base)`, so allowing arbitrary depth here stays safe.
+_VALID_KNOWLEDGE_NOTE_RE = re.compile(r"^knowledge/(?:[\w.-]+/)*[\w.-]+\.md$")
 
 _VALID_ASSET_RE = re.compile(
     _VALID_ITEM_PREFIX + r"[\w./-]+\.(?:png|jpg|jpeg|gif|svg|webp)$",

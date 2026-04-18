@@ -152,3 +152,30 @@ def test_pdf_note_emits_mount_point_not_iframe(cfg: CondashConfig):
     assert 'data-pdf-src="/file/' in body
     assert 'data-pdf-filename="sample.pdf"' in body
     assert "<iframe" not in body
+
+
+def test_note_serves_knowledge_files_at_any_subdir_depth(cfg: CondashConfig):
+    """Knowledge files live at variable depth (root, one subdir, two subdirs after
+    the 2026-04 topics/ restructure). ``validate_note_path`` must accept all of
+    them — the previous regex capped depth at one subdir and 403'd everything
+    under ``topics/ops/``, ``topics/security/``, ``topics/testing/``."""
+    base = cfg.conception_path / "knowledge"
+    (base / "topics" / "ops").mkdir(parents=True)
+    (base / "conventions.md").write_text("# conventions\n\nroot body\n", encoding="utf-8")
+    (base / "topics" / "index.md").write_text("# topics\n\nindex body\n", encoding="utf-8")
+    (base / "topics" / "ops" / "dev-ports.md").write_text(
+        "# dev-ports\n\nnested body\n", encoding="utf-8"
+    )
+
+    client = _client(cfg)
+    for rel in (
+        "knowledge/conventions.md",
+        "knowledge/topics/index.md",
+        "knowledge/topics/ops/dev-ports.md",
+    ):
+        res = client.get(f"/note?path={rel}")
+        assert res.status_code == 200, f"{rel} → {res.status_code}: {res.text[:200]}"
+        res_raw = client.get(f"/note-raw?path={rel}")
+        assert res_raw.status_code == 200, (
+            f"{rel} raw → {res_raw.status_code}: {res_raw.text[:200]}"
+        )
