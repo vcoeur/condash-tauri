@@ -6,7 +6,7 @@ if set). Schema:
     conception_path = "/path/to/conception"
     workspace_path  = "/path/to/code/workspace"   # optional; enables repo strip
     worktrees_path  = "/path/to/git/worktrees"    # optional; "open in IDE" sandbox
-    port            = 0                           # 0 = OS picks a free port
+    port            = 0                           # 0 = pick a free port in 11111-12111
     native          = true                        # false = serve in browser
 
     [repositories]
@@ -87,9 +87,10 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # tree (e.g. ~/src/worktrees/). Optional.
 # worktrees_path = "/path/to/git/worktrees"
 
-# port: TCP port the embedded HTTP server binds to. 0 means "let the OS
-# pick a free port" (default). Set a fixed port if you want to reach the
-# dashboard from your browser at http://127.0.0.1:<port>.
+# port: TCP port the embedded HTTP server binds to. 0 (default) picks a
+# free port in the range 11111-12111, chosen to avoid the 8000/8080 dev
+# server cluster. Set a fixed port if you want to reach the dashboard
+# from your browser at http://127.0.0.1:<port>.
 # port = 0
 
 # native: true (default) opens a native desktop window via pywebview.

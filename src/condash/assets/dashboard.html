@@ -594,13 +594,6 @@ body:not([data-single-term]) .term-side.is-active-side .term-mount {
     color: #f0f0f5; border-color: var(--accent);
     background: #1a1b20;
 }
-/* Launcher button carries a subtle accent so it's distinguishable from
-   the plain "+" without being loud. */
-.term-new-launcher {
-    color: var(--accent);
-    border-color: color-mix(in oklab, var(--accent) 50%, #3a3a44);
-}
-.term-new-launcher:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 /* Drag affordances for tab chips. A chip being dragged goes translucent;
    the chip under the pointer draws a 2px accent line on the side where
@@ -1463,11 +1456,11 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     <div class="term-top-row">
         <div class="term-tabs term-tabs-left" id="term-tabs-left"></div>
         <button class="term-new-tab" onclick="termNewTab('left')" title="New tab (left)" aria-label="New tab (left)">+</button>
-        <button class="term-new-tab term-new-launcher" id="term-launcher-left" onclick="termNewLauncherTab('left')" hidden>+λ</button>
+        <button class="term-new-tab" id="term-launcher-left" onclick="termNewLauncherTab('left')" hidden>λ</button>
         <span class="term-spacer"></span>
         <div class="term-tabs term-tabs-right" id="term-tabs-right"></div>
         <button class="term-new-tab" onclick="termNewTab('right')" title="New tab (right)" aria-label="New tab (right)">+</button>
-        <button class="term-new-tab term-new-launcher" id="term-launcher-right" onclick="termNewLauncherTab('right')" hidden>+λ</button>
+        <button class="term-new-tab" id="term-launcher-right" onclick="termNewLauncherTab('right')" hidden>λ</button>
     </div>
     <div class="term-body">
         <div class="term-side" data-side="left">
@@ -1537,7 +1530,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                     <legend>Server <span class="config-restart-hint">— restart required after change</span></legend>
                     <label>port
                         <input type="number" name="port" min="0" max="65535">
-                        <small>0 lets the OS pick a free port.</small>
+                        <small>0 picks a free port in 11111–12111.</small>
                     </label>
                     <label class="config-checkbox">
                         <input type="checkbox" name="native">
