@@ -683,7 +683,8 @@ def _register_routes() -> None:
                     override_cwd = str(validated)
                 else:
                     log.warning("term: rejecting out-of-sandbox cwd: %r", requested_cwd)
-            session = await _spawn_pty_session(override_cwd=override_cwd)
+            use_launcher = ws.query_params.get("launcher") == "1"
+            session = await _spawn_pty_session(override_cwd=override_cwd, use_launcher=use_launcher)
             if session is None:
                 try:
                     await ws.close()
@@ -720,7 +721,9 @@ def _register_routes() -> None:
         await _attach_ws(session, ws)
 
 
-async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | None:
+async def _spawn_pty_session(
+    override_cwd: str | None = None, use_launcher: bool = False
+) -> PtySession | None:
     """Fork a new shell in a pty, register it, and start its reader pump.
 
     The child starts cwd'd at ``override_cwd`` (when supplied and the
@@ -731,14 +734,44 @@ async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | No
     is independent of any WebSocket; the reader pump keeps draining
     ``fd`` into ``session.buffer`` (and to ``session.attached_ws`` if one
     is bound) until the shell exits.
+
+    When ``use_launcher`` is set, the child execs ``terminal.launcher_command``
+    (shlex-parsed) directly instead of a login shell. ``session.shell`` is
+    reported as the launcher's argv[0] so the client-side chip label still
+    has something meaningful. When the process exits the ws closes and the
+    tab disappears — matching what happens when the user types ``exit`` in
+    a regular shell.
     """
     import pty
+    import shlex
 
-    shell = (
-        _resolve_terminal_shell(_RUNTIME_CFG)
-        if _RUNTIME_CFG is not None
-        else os.environ.get("SHELL") or "/bin/bash"
-    )
+    argv: list[str]
+    shell_label: str
+    if use_launcher:
+        raw_command = (
+            _RUNTIME_CFG.terminal.launcher_command
+            if _RUNTIME_CFG is not None and _RUNTIME_CFG.terminal.launcher_command
+            else ""
+        )
+        if not raw_command.strip():
+            log.warning("term: launcher requested but terminal.launcher_command is empty")
+            return None
+        try:
+            argv = shlex.split(raw_command)
+        except ValueError as exc:
+            log.warning("term: malformed launcher_command %r: %s", raw_command, exc)
+            return None
+        if not argv:
+            return None
+        shell_label = argv[0]
+    else:
+        shell_label = (
+            _resolve_terminal_shell(_RUNTIME_CFG)
+            if _RUNTIME_CFG is not None
+            else os.environ.get("SHELL") or "/bin/bash"
+        )
+        argv = [shell_label, "-l"]
+
     if override_cwd and os.path.isdir(override_cwd):
         cwd = override_cwd
     else:
@@ -754,7 +787,7 @@ async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | No
             pass
         os.environ["TERM"] = "xterm-256color"
         try:
-            os.execvp(shell, [shell, "-l"])
+            os.execvp(argv[0], argv)
         except OSError:
             os._exit(127)
 
@@ -766,7 +799,7 @@ async def _spawn_pty_session(override_cwd: str | None = None) -> PtySession | No
         session_id=secrets.token_urlsafe(8),
         pid=pid,
         fd=fd,
-        shell=shell,
+        shell=shell_label,
         cwd=cwd,
     )
 
@@ -1002,6 +1035,9 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
             "screenshot_dir": cfg.terminal.screenshot_dir or "",
             "resolved_screenshot_dir": str(cfg.terminal.resolved_screenshot_dir()),
             "screenshot_paste_shortcut": cfg.terminal.screenshot_paste_shortcut,
+            "launcher_command": cfg.terminal.launcher_command,
+            "move_tab_left_shortcut": cfg.terminal.move_tab_left_shortcut,
+            "move_tab_right_shortcut": cfg.terminal.move_tab_right_shortcut,
         },
         "open_with": {
             slot_key: {
@@ -1230,11 +1266,23 @@ def _payload_to_config(data: dict) -> CondashConfig:
         str(term_raw.get("screenshot_paste_shortcut") or "").strip()
         or config_mod.DEFAULT_SCREENSHOT_PASTE_SHORTCUT
     )
+    launcher_command_in = str(term_raw.get("launcher_command", config_mod.DEFAULT_LAUNCHER_COMMAND))
+    move_left_in = (
+        str(term_raw.get("move_tab_left_shortcut") or "").strip()
+        or config_mod.DEFAULT_MOVE_TAB_LEFT_SHORTCUT
+    )
+    move_right_in = (
+        str(term_raw.get("move_tab_right_shortcut") or "").strip()
+        or config_mod.DEFAULT_MOVE_TAB_RIGHT_SHORTCUT
+    )
     terminal = config_mod.TerminalConfig(
         shell=shell_in,
         shortcut=shortcut_in,
         screenshot_dir=screenshot_dir_in,
         screenshot_paste_shortcut=paste_shortcut_in,
+        launcher_command=launcher_command_in.strip(),
+        move_tab_left_shortcut=move_left_in,
+        move_tab_right_shortcut=move_right_in,
     )
 
     return CondashConfig(
