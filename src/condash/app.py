@@ -14,6 +14,7 @@ import logging
 import os
 import secrets
 import signal
+import socket
 import struct
 import sys
 import termios
@@ -1319,18 +1320,40 @@ def _payload_to_config(data: dict) -> CondashConfig:
     )
 
 
+# NiceGUI's own find_open_port scans 8000-8999, which regularly collides
+# with Django/uvicorn/http.server defaults. Scan a less-contested window
+# instead. 11111-12111 is in the IANA registered range but near-empty in
+# practice; memcached (11211) and OpenPGP HKP (11371) are skipped
+# naturally by the bind-and-try.
+_FREE_PORT_RANGE = (11111, 12111)
+
+
+def _pick_free_port() -> int:
+    """Return a free TCP port in ``_FREE_PORT_RANGE`` (inclusive)."""
+    start, end = _FREE_PORT_RANGE
+    for port in range(start, end + 1):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("localhost", port))
+                return port
+        except OSError:
+            continue
+    raise OSError(f"No open port found in {start}-{end}")
+
+
 def run(cfg: CondashConfig) -> None:
     """Launch the condash dashboard (native window or browser, per config)."""
     global _RUNTIME_CFG, _RUNTIME_CTX
     _RUNTIME_CFG = cfg
     _RUNTIME_CTX = build_ctx(cfg)
     _register_routes()
+    port = _pick_free_port() if cfg.port == 0 else cfg.port
     kwargs: dict = {
         "native": cfg.native,
         "title": "Conception Dashboard",
         "reload": False,
         "show": not cfg.native,
-        "port": cfg.port,
+        "port": port,
     }
     if cfg.native:
         kwargs["window_size"] = (1400, 900)
