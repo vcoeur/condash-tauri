@@ -90,10 +90,17 @@ def _render_note(ctx: RenderCtx, full_path: Path) -> str:
         return _render_markdown(ctx, full_path, note_dir_rel)
 
     if kind == "pdf":
+        # Mount point for the custom PDF.js viewer defined in dashboard.html.
+        # We don't rely on the webview's built-in PDF handler: QtWebEngine
+        # ships with PdfViewerEnabled=false and pywebview doesn't flip it,
+        # so the native-window modal would otherwise just show Chromium's
+        # "Open file externally" card. The dashboard JS picks up any
+        # .note-pdf-host element that appears in the view pane and wires
+        # the vendored pdf.mjs against /file/... for rendering.
         return (
-            f'<iframe class="note-preview-embed" '
-            f'src="/file/{h(file_rel)}" '
-            f'title="{h(full_path.name)}"></iframe>'
+            f'<div class="note-pdf-host" '
+            f'data-pdf-src="/file/{h(file_rel)}" '
+            f'data-pdf-filename="{h(full_path.name)}"></div>'
         )
 
     if kind == "image":

@@ -34,6 +34,7 @@ condash/
   openers.py   <- External launchers (IDE, PDF viewer, OS default, web browser)
   desktop.py   <- XDG .desktop entry writer for `condash install-desktop` (Linux only)
   assets/      <- dashboard.html (served verbatim at /), favicon.svg, favicon.ico
+    vendor/pdfjs/  <- Mozilla PDF.js library (pdfjs-dist legacy build) used by the in-modal PDF viewer; bump via `make update-pdfjs`
 ```
 
 Import direction: `cli` → `app` → {`context`, `render`, `mutations`, `git_scan`, `openers`} → {`parser`, `wikilinks`, `paths`} → `context`. No module globals populated by `init`; every helper that needs config takes a `RenderCtx` parameter. `git_scan._git_cache` is a module-level cache (not config-derived).
@@ -53,6 +54,12 @@ Config file lives at `~/.config/condash/config.toml` (or `$XDG_CONFIG_HOME/conda
 ## Dashboard HTML
 
 `assets/dashboard.html` is served verbatim at `/`. It is a single-file SPA that polls `/check-updates` for a fingerprint and re-fetches on change. The HTML template's JS calls back into the FastAPI routes registered in `app.py`; `render.render_page(ctx, items)` produces the item-list HTML that the template embeds. Do not refactor `dashboard.html` into a JS framework — the single-file contract is deliberate (zero build step, ships in the wheel via `importlib.resources`).
+
+## PDF preview
+
+PDFs in project notes render inside the modal via a custom viewer built on `pdfjs-dist` (library, not the prebuilt stock `web/viewer.html`). The library is vendored under `assets/vendor/pdfjs/` and served by the `/vendor/pdfjs/{rel_path:path}` route in `app.py`. `render.py::_render_note` emits `<div class="note-pdf-host" data-pdf-src="/file/…" data-pdf-filename="…">` for `.pdf` files; the ES module at the bottom of `dashboard.html` imports `/vendor/pdfjs/build/pdf.mjs`, exposes `window.__pdfjs`, and mounts toolbar + lazy-rendered canvases on each host. To bump the vendored version, edit `PDFJS_VERSION` in the Makefile and run `make update-pdfjs`.
+
+We deliberately do **not** use `<iframe src="*.pdf">` with Chromium's built-in PDF viewer: QtWebEngine ships with `PdfViewerEnabled=false` and `pywebview` doesn't flip it, so the native-window modal would just show an "Open externally" card for PDFs.
 
 ## Commands
 

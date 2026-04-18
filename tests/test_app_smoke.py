@@ -107,3 +107,48 @@ def test_download_rejects_traversal(cfg: CondashConfig):
     # plausible-looking prefix to reach the handler.
     response = client.get("/download/projects/2026-01/2026-01-01-hello/../../../etc/passwd")
     assert response.status_code == 403
+
+
+def test_pdfjs_asset_serves_bundled_library(cfg: CondashConfig):
+    """The vendored PDF.js library is reachable at /vendor/pdfjs/..."""
+    client = _client(cfg)
+    response = client.get("/vendor/pdfjs/build/pdf.mjs")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    # Non-empty JS payload — we shipped the real file, not an empty stub.
+    assert len(response.content) > 1000
+
+
+def test_pdfjs_asset_rejects_traversal(cfg: CondashConfig):
+    client = _client(cfg)
+    # URL-encode the dot-dot so the client doesn't normalise it away before
+    # the request reaches the route — the handler's own `..` guard is what
+    # we're asserting here.
+    response = client.get("/vendor/pdfjs/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
+    assert response.status_code == 403
+
+
+def test_pdfjs_asset_404_for_missing_file(cfg: CondashConfig):
+    client = _client(cfg)
+    response = client.get("/vendor/pdfjs/build/does-not-exist.mjs")
+    assert response.status_code == 404
+
+
+def test_pdf_note_emits_mount_point_not_iframe(cfg: CondashConfig):
+    """`.pdf` notes render as a .note-pdf-host div so the in-dashboard
+    PDF.js viewer can pick them up — not an <iframe> (that used to rely
+    on Chromium's built-in PDF viewer, which is disabled in QtWebEngine)."""
+    pdf_path = (
+        cfg.conception_path / "projects" / "2026-01" / "2026-01-01-hello" / "notes" / "sample.pdf"
+    )
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4\n%fake-pdf\n%%EOF\n")
+
+    client = _client(cfg)
+    response = client.get("/note?path=projects/2026-01/2026-01-01-hello/notes/sample.pdf")
+    assert response.status_code == 200
+    body = response.text
+    assert "note-pdf-host" in body
+    assert 'data-pdf-src="/file/' in body
+    assert 'data-pdf-filename="sample.pdf"' in body
+    assert "<iframe" not in body

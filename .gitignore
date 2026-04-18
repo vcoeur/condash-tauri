@@ -12,6 +12,10 @@ build/
 dist/
 wheels/
 .wheels/
+# …but the vendored PDF.js has a build/ subdir that is real source, not a
+# dist artefact — re-include it explicitly.
+!src/condash/assets/vendor/pdfjs/build/
+!src/condash/assets/vendor/pdfjs/build/**
 
 # Virtual environments
 .venv/

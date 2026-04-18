@@ -1070,6 +1070,13 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     display: block; overflow: auto;
     padding: 1.2rem 1.6rem;
 }
+/* When the view pane hosts the PDF viewer, it fills the pane edge-to-edge
+   and owns its own scrolling — strip the pane's padding + outer scrollbar
+   so we don't end up with two nested scroll areas. (:has() is supported
+   on every Chromium ≥ 105, which includes every Qt 6 we care about.) */
+.note-modal[data-mode="view"] .note-pane-view:has(.note-pdf-host) {
+    padding: 0; overflow: hidden;
+}
 .note-modal[data-mode="cm"] .note-pane-cm {
     display: flex; flex-direction: column;
     padding: 0.5rem 0.8rem 0.8rem;
@@ -1402,6 +1409,81 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 .card-actions {
     display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle;
 }
+
+/* --- PDF.js custom viewer ---
+   Mount point is emitted by render.py for .pdf files. We use pdfjs-dist
+   as a library (see the ES module at the bottom) rather than Chromium's
+   built-in PDF handling — QtWebEngine ships with PdfViewerEnabled=false
+   and pywebview doesn't flip it, so the native-window modal would
+   otherwise show Chromium's "Open externally" card instead of the PDF. */
+.note-pdf-host {
+    display: flex; flex-direction: column;
+    width: 100%; min-height: 70vh; height: 100%;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    overflow: hidden; position: relative;
+}
+.pdf-toolbar {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem; flex: 0 0 auto;
+    color: var(--text-secondary);
+}
+.pdf-toolbar button, .pdf-toolbar a.pdf-dl {
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.2rem 0.55rem; cursor: pointer;
+    font: inherit; line-height: 1.2; text-decoration: none;
+}
+.pdf-toolbar button:hover:not(:disabled),
+.pdf-toolbar a.pdf-dl:hover {
+    background: var(--accent-bg); color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.pdf-toolbar button:disabled { opacity: 0.4; cursor: default; }
+.pdf-toolbar-spacer { flex: 1; }
+.pdf-pageinfo { display: inline-flex; align-items: center; gap: 0.3rem; }
+.pdf-page-input {
+    width: 3rem; text-align: right;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 0.15rem 0.3rem; font: inherit;
+    -moz-appearance: textfield;
+}
+.pdf-page-input::-webkit-outer-spin-button,
+.pdf-page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pdf-page-input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+.pdf-total { color: var(--text-muted); }
+.pdf-zoom-label { min-width: 3rem; text-align: center; color: var(--text-muted); }
+.pdf-pages {
+    flex: 1 1 auto; overflow: auto;
+    padding: 1rem 0; text-align: center;
+    background: color-mix(in srgb, var(--bg) 70%, black 30%);
+    outline: none;
+}
+.pdf-page {
+    display: inline-block; margin: 0 auto 0.75rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+    background: white; position: relative; vertical-align: top;
+}
+.pdf-page canvas { display: block; }
+.pdf-page .textLayer {
+    position: absolute; inset: 0;
+    overflow: hidden; line-height: 1;
+    opacity: 0.25;
+}
+.pdf-page .textLayer > span {
+    color: transparent; position: absolute;
+    white-space: pre; cursor: text;
+    transform-origin: 0 0;
+}
+.pdf-loading, .pdf-error {
+    padding: 2rem; text-align: center;
+    color: var(--text-muted);
+}
+.pdf-error { color: #f87171; }
 
 </style>
 </head>
@@ -2681,6 +2763,27 @@ function _renderMermaidIn(container) {
     } catch (e) {}
 }
 
+/* Mount the vendored PDF.js viewer on every .note-pdf-host inside the
+   view pane. If the PDF.js ES module (at the bottom of this file) hasn't
+   resolved yet, mark hosts pending — the module's ready-hook will flush
+   them. Safe to call repeatedly; mount() no-ops on already-mounted hosts. */
+function _mountPdfsIn(container) {
+    if (!container) return;
+    var hosts = container.querySelectorAll('.note-pdf-host');
+    for (var i = 0; i < hosts.length; i++) {
+        var host = hosts[i];
+        if (host.dataset.mounted === '1') continue;
+        if (window.__pdfjs && window.__pdfjs.ready) {
+            window.__pdfjs.mount(host);
+        } else if (window.__pdfjs && window.__pdfjs.error) {
+            host.innerHTML = '<div class="pdf-error">PDF viewer failed to load.</div>';
+        } else {
+            host.dataset.pdfPending = '1';
+            host.innerHTML = '<div class="pdf-loading">Loading PDF viewer\u2026</div>';
+        }
+    }
+}
+
 /* Notes open in three modes. The modal carries `data-mode` on its inner
    element (#note-modal-inner); three sibling panes inside #note-modal-body
    are hidden/shown by CSS. `_noteModal` tracks the state shared across
@@ -2745,6 +2848,7 @@ async function openNotePreview(path, name) {
         _noteModal.renderedHtml = html;
         _renderMermaidIn(viewPane);
         _wireNoteLinks(viewPane, path);
+        _mountPdfsIn(viewPane);
     } catch (e) {
         if (_noteModal.path !== path) return;
         viewPane.innerHTML = '<p class="note-error">Failed to load note.</p>';
@@ -3330,6 +3434,7 @@ async function _reloadNotePreview(path, name) {
     _noteModal.renderedHtml = html;
     _renderMermaidIn(pane);
     _wireNoteLinks(pane, path);
+    _mountPdfsIn(pane);
     pane.scrollTop = 0;
 }
 
@@ -5000,6 +5105,279 @@ setInterval(checkUpdates, 5000);
 new MutationObserver(function() {
     if (typeof _cmRetheme === 'function') _cmRetheme();
 }).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+</script>
+
+<script type="module">
+/* PDF.js viewer bootstrap.
+   Loads the vendored pdfjs-dist library (under /vendor/pdfjs/ — served
+   by app.py:pdfjs_asset) and exposes window.__pdfjs = { mount, ready }.
+   The classic script above calls _mountPdfsIn() on any .note-pdf-host
+   after it renders a note, which either mounts immediately or marks
+   the host pending so this module can flush it once ready.
+
+   Why a custom viewer instead of stock pdfjs-dist web/viewer.html:
+   * condash theme (toolbar uses --bg-card, --border, --accent, …);
+   * no 10 MB of unused viewer assets (locale strings, thumbnail panel,
+     annotation editor UI, print preview);
+   * direct access to the rendering loop for future integration with
+     the modal's note-search-bar (Find in PDF). */
+(async function() {
+    const COMMON = {
+        cMapUrl: '/vendor/pdfjs/cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
+        wasmUrl: '/vendor/pdfjs/wasm/',
+        iccUrl: '/vendor/pdfjs/iccs/',
+    };
+    const ZOOM_STOPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+    const FIT_WIDTH = 'fit-width';
+
+    let pdfjsLib;
+    try {
+        pdfjsLib = await import('/vendor/pdfjs/build/pdf.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.mjs';
+    } catch (err) {
+        console.warn('[condash] PDF.js failed to load:', err);
+        window.__pdfjs = { ready: false, error: err };
+        const pending = document.querySelectorAll('.note-pdf-host[data-pdf-pending="1"]');
+        pending.forEach(function(h) {
+            delete h.dataset.pdfPending;
+            h.innerHTML = '<div class="pdf-error">PDF viewer failed to load.</div>';
+        });
+        return;
+    }
+
+    /* Render the toolbar + lazy-rendered pages into `host`. Idempotent —
+       guarded by host.dataset.mounted. Pages are sized up-front so
+       scrolling works immediately; each page's canvas + text layer are
+       drawn on first intersection with the viewport. */
+    async function mount(host) {
+        if (host.dataset.mounted === '1') return;
+        host.dataset.mounted = '1';
+        const src = host.dataset.pdfSrc;
+        const filename = host.dataset.pdfFilename || 'document.pdf';
+        host.innerHTML = '';
+
+        // --- Toolbar ---
+        const tb = document.createElement('div');
+        tb.className = 'pdf-toolbar';
+        const safeName = filename.replace(/"/g, '&quot;');
+        tb.innerHTML = [
+            '<button class="pdf-prev" title="Previous page (\u2191)" aria-label="Previous page">\u2190</button>',
+            '<span class="pdf-pageinfo">',
+            '  <input class="pdf-page-input" type="number" min="1" value="1" aria-label="Page number">',
+            '  <span class="pdf-total">/ ?</span>',
+            '</span>',
+            '<button class="pdf-next" title="Next page (\u2193)" aria-label="Next page">\u2192</button>',
+            '<div class="pdf-toolbar-spacer"></div>',
+            '<button class="pdf-zoom-out" title="Zoom out (\u2212)" aria-label="Zoom out">\u2212</button>',
+            '<button class="pdf-fit" title="Fit width (0)" aria-label="Fit width">Fit</button>',
+            '<span class="pdf-zoom-label">\u2014</span>',
+            '<button class="pdf-zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>',
+            '<div class="pdf-toolbar-spacer" style="flex:0 0 0.5rem"></div>',
+            '<a class="pdf-dl" href="' + src + '" download="' + safeName + '" title="Download" aria-label="Download">\u2193</a>',
+        ].join('');
+        host.appendChild(tb);
+
+        const pagesEl = document.createElement('div');
+        pagesEl.className = 'pdf-pages';
+        pagesEl.tabIndex = 0;
+        pagesEl.innerHTML = '<div class="pdf-loading">Loading PDF\u2026</div>';
+        host.appendChild(pagesEl);
+
+        let pdf;
+        try {
+            pdf = await pdfjsLib.getDocument(Object.assign({ url: src }, COMMON)).promise;
+        } catch (e) {
+            pagesEl.innerHTML = '<div class="pdf-error">Failed to load PDF: '
+                + (e && e.message ? e.message : String(e)) + '</div>';
+            return;
+        }
+
+        let currentScale = FIT_WIDTH;
+        let pageWrappers = [];
+        let renderSeq = 0;           // cancels stale renders when scale changes
+        let pageIo = null;
+        let lazyIo = null;
+
+        function destroyObservers() {
+            if (lazyIo) lazyIo.disconnect();
+            if (pageIo) pageIo.disconnect();
+            lazyIo = null; pageIo = null;
+        }
+
+        /* Resolve a scale mode to a concrete number using page 1's natural
+           width at scale=1. fit-width fits the first page's width to the
+           pages container minus some padding. */
+        function resolveScale(mode, vp1) {
+            if (typeof mode === 'number') return mode;
+            const avail = Math.max(200, pagesEl.clientWidth - 32);
+            return avail / vp1.width;
+        }
+
+        async function renderAll() {
+            const seq = ++renderSeq;
+            destroyObservers();
+            const p1 = await pdf.getPage(1);
+            const vp1 = p1.getViewport({ scale: 1 });
+            const scale = resolveScale(currentScale, vp1);
+            tb.querySelector('.pdf-zoom-label').textContent = Math.round(scale * 100) + '%';
+            tb.querySelector('.pdf-total').textContent = '/ ' + pdf.numPages;
+            tb.querySelector('.pdf-page-input').max = String(pdf.numPages);
+
+            pagesEl.innerHTML = '';
+            pageWrappers = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const wrap = document.createElement('div');
+                wrap.className = 'pdf-page';
+                wrap.dataset.page = String(i);
+                pagesEl.appendChild(wrap);
+                pageWrappers.push(wrap);
+            }
+
+            // Pre-size every wrapper so the scrollbar reflects the full doc.
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const p = await pdf.getPage(i);
+                if (seq !== renderSeq) return;
+                const vp = p.getViewport({ scale });
+                const w = pageWrappers[i - 1];
+                w.style.width = vp.width + 'px';
+                w.style.height = vp.height + 'px';
+            }
+
+            // Lazy-render canvases on first intersection.
+            lazyIo = new IntersectionObserver(function(entries) {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const w = entry.target;
+                    if (w.dataset.rendered === '1' || w.dataset.rendering === '1') continue;
+                    w.dataset.rendering = '1';
+                    const i = Number(w.dataset.page);
+                    renderPage(seq, i, w, scale).catch(function(err) {
+                        console.warn('[pdfjs] page', i, 'render failed:', err);
+                    });
+                }
+            }, { root: pagesEl, rootMargin: '400px' });
+            pageWrappers.forEach(function(w) { lazyIo.observe(w); });
+
+            // Track which page is most visible to drive the page input.
+            const inp = tb.querySelector('.pdf-page-input');
+            pageIo = new IntersectionObserver(function(entries) {
+                let best = null, bestRatio = 0;
+                for (const e of entries) {
+                    if (e.intersectionRatio > bestRatio) {
+                        bestRatio = e.intersectionRatio;
+                        best = e.target;
+                    }
+                }
+                if (best && document.activeElement !== inp) {
+                    inp.value = String(Number(best.dataset.page));
+                }
+            }, { root: pagesEl, threshold: [0.25, 0.5, 0.75] });
+            pageWrappers.forEach(function(w) { pageIo.observe(w); });
+        }
+
+        async function renderPage(seq, i, wrap, scale) {
+            const page = await pdf.getPage(i);
+            if (seq !== renderSeq) return;
+            const vp = page.getViewport({ scale });
+            const canvas = document.createElement('canvas');
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.floor(vp.width * dpr);
+            canvas.height = Math.floor(vp.height * dpr);
+            canvas.style.width = vp.width + 'px';
+            canvas.style.height = vp.height + 'px';
+            wrap.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            await page.render({ canvasContext: ctx, viewport: vp }).promise;
+            if (seq !== renderSeq) return;
+            // Text layer — enables selection + browser Find within the page.
+            try {
+                const txt = await page.getTextContent();
+                if (seq !== renderSeq) return;
+                const layer = document.createElement('div');
+                layer.className = 'textLayer';
+                layer.style.width = vp.width + 'px';
+                layer.style.height = vp.height + 'px';
+                wrap.appendChild(layer);
+                if (pdfjsLib.TextLayer) {
+                    const tl = new pdfjsLib.TextLayer({
+                        textContentSource: txt, container: layer, viewport: vp,
+                    });
+                    await tl.render();
+                }
+            } catch (e) { /* text layer is best-effort */ }
+            wrap.dataset.rendered = '1';
+            delete wrap.dataset.rendering;
+        }
+
+        await renderAll();
+
+        // --- Controls ---
+        const inp = tb.querySelector('.pdf-page-input');
+        function gotoPage(n) {
+            n = Math.max(1, Math.min(pdf.numPages, n | 0));
+            inp.value = String(n);
+            pageWrappers[n - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        inp.addEventListener('change', function() { gotoPage(Number(inp.value) || 1); });
+        tb.querySelector('.pdf-prev').addEventListener('click', function() {
+            gotoPage((Number(inp.value) || 1) - 1);
+        });
+        tb.querySelector('.pdf-next').addEventListener('click', function() {
+            gotoPage((Number(inp.value) || 1) + 1);
+        });
+        tb.querySelector('.pdf-zoom-in').addEventListener('click', function() {
+            const cur = parseFloat(tb.querySelector('.pdf-zoom-label').textContent) / 100;
+            const next = ZOOM_STOPS.find(function(s) { return s > cur + 0.001; })
+                       || ZOOM_STOPS[ZOOM_STOPS.length - 1];
+            currentScale = next; renderAll();
+        });
+        tb.querySelector('.pdf-zoom-out').addEventListener('click', function() {
+            const cur = parseFloat(tb.querySelector('.pdf-zoom-label').textContent) / 100;
+            let next = ZOOM_STOPS[0];
+            for (const s of ZOOM_STOPS) { if (s < cur - 0.001) next = s; }
+            currentScale = next; renderAll();
+        });
+        tb.querySelector('.pdf-fit').addEventListener('click', function() {
+            currentScale = FIT_WIDTH; renderAll();
+        });
+
+        // Keyboard shortcuts while the pages container is focused.
+        pagesEl.addEventListener('keydown', function(ev) {
+            if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+            if (ev.key === '+' || ev.key === '=') {
+                ev.preventDefault(); tb.querySelector('.pdf-zoom-in').click();
+            } else if (ev.key === '-' || ev.key === '_') {
+                ev.preventDefault(); tb.querySelector('.pdf-zoom-out').click();
+            } else if (ev.key === '0') {
+                ev.preventDefault(); tb.querySelector('.pdf-fit').click();
+            }
+        });
+
+        // Re-fit when the viewport resizes (only relevant in fit-width mode).
+        if (typeof ResizeObserver !== 'undefined') {
+            let t;
+            const ro = new ResizeObserver(function() {
+                if (currentScale !== FIT_WIDTH) return;
+                clearTimeout(t);
+                t = setTimeout(function() { renderAll(); }, 150);
+            });
+            ro.observe(pagesEl);
+        }
+    }
+
+    window.__pdfjs = { lib: pdfjsLib, mount: mount, ready: true };
+
+    // Flush any hosts that were marked pending before we finished loading.
+    const pending = document.querySelectorAll('.note-pdf-host[data-pdf-pending="1"]');
+    pending.forEach(function(h) {
+        delete h.dataset.pdfPending;
+        h.innerHTML = '';
+        mount(h);
+    });
+})();
 </script>
 
 <script type="module">

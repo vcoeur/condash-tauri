@@ -87,6 +87,21 @@ log = logging.getLogger(__name__)
 _RUNTIME_CFG: CondashConfig | None = None
 _RUNTIME_CTX: RenderCtx | None = None
 
+# Vendored Mozilla PDF.js. Served as-is from inside the package under
+# /vendor/pdfjs/... — the in-modal viewer loads pdf.mjs + pdf.worker.mjs
+# from here so we never rely on the webview's built-in PDF handling
+# (QtWebEngine ships with PdfViewerEnabled=false).
+_PDFJS_MIME = {
+    ".mjs": "text/javascript",
+    ".js": "text/javascript",
+    ".json": "application/json",
+    ".wasm": "application/wasm",
+    ".bcmap": "application/octet-stream",
+    ".pfb": "application/octet-stream",
+    ".icc": "application/octet-stream",
+    ".css": "text/css",
+}
+
 
 def _ctx() -> RenderCtx:
     """Return the live RenderCtx or raise if uninitialised."""
@@ -192,6 +207,29 @@ def _register_routes() -> None:
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/svg+xml")
+
+    @_ng_app.get("/vendor/pdfjs/{rel_path:path}")
+    def pdfjs_asset(rel_path: str):
+        """Serve the vendored Mozilla PDF.js library to the in-modal viewer."""
+        if not rel_path or "\x00" in rel_path:
+            return Response(status_code=403)
+        parts = rel_path.split("/")
+        if any(p in ("", "..") for p in parts):
+            return Response(status_code=403)
+        base = Path(str(_package_files("condash") / "assets" / "vendor" / "pdfjs"))
+        try:
+            full = (base / rel_path).resolve()
+            full.relative_to(base.resolve())
+        except (OSError, ValueError):
+            return Response(status_code=403)
+        if not full.is_file():
+            return Response(status_code=404)
+        ctype = _PDFJS_MIME.get(full.suffix.lower(), "application/octet-stream")
+        return Response(
+            content=full.read_bytes(),
+            media_type=ctype,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @_ng_app.get("/check-updates")
     def check_updates():
