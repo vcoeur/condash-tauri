@@ -23,15 +23,9 @@
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.14.0/dist/mermaid.min.js"
         integrity="sha384-1CMXl090wj8Dd6YfnzSQUOgWbE6suWCaenYG7pox5AX7apTpY3PmJMeS2oPql4Gk"
         crossorigin="anonymous" defer></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css"
-      integrity="sha384-9ftsg11+LSxVUaknegCfeKvlkO9EdIPI2op725RqY87IvhyGjElmpjZlP3LhTQjn"
-      crossorigin="anonymous">
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"
-        integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH"
-        crossorigin="anonymous" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"
-        integrity="sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn"
-        crossorigin="anonymous" defer></script>
+<link rel="stylesheet" href="/vendor/xterm/css/xterm.min.css">
+<script src="/vendor/xterm/lib/xterm.min.js" defer></script>
+<script src="/vendor/xterm/lib/xterm-addon-fit.min.js" defer></script>
 <style>
 :root, [data-theme="light"] {
     --bg: #f4f4f5;
@@ -4383,7 +4377,7 @@ function _termWarnAssets() {
     if (_termAssetsWarned) return;
     _termAssetsWarned = true;
     document.getElementById('term-mount-left').innerHTML =
-        '<p style="color:#faa; padding: 1rem;">Terminal assets failed to load — xterm.js CDN unreachable?</p>';
+        '<p style="color:#faa; padding: 1rem;">Terminal assets failed to load — vendored xterm.js missing from /vendor/xterm/. Reinstall condash.</p>';
 }
 
 function _termSideEl(side, which) {

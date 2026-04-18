@@ -103,6 +103,15 @@ _PDFJS_MIME = {
     ".css": "text/css",
 }
 
+# Vendored xterm.js + xterm-addon-fit (MIT). Served under /vendor/xterm/ so
+# the dashboard never depends on a runtime CDN fetch for the terminal pane —
+# offline / air-gapped / restrictive-sandbox installs would otherwise see
+# "Terminal assets failed to load".
+_XTERM_MIME = {
+    ".js": "text/javascript",
+    ".css": "text/css",
+}
+
 
 def _ctx() -> RenderCtx:
     """Return the live RenderCtx or raise if uninitialised."""
@@ -226,6 +235,29 @@ def _register_routes() -> None:
         if not full.is_file():
             return Response(status_code=404)
         ctype = _PDFJS_MIME.get(full.suffix.lower(), "application/octet-stream")
+        return Response(
+            content=full.read_bytes(),
+            media_type=ctype,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @_ng_app.get("/vendor/xterm/{rel_path:path}")
+    def xterm_asset(rel_path: str):
+        """Serve the vendored xterm.js bundle (lib + CSS + fit addon)."""
+        if not rel_path or "\x00" in rel_path:
+            return Response(status_code=403)
+        parts = rel_path.split("/")
+        if any(p in ("", "..") for p in parts):
+            return Response(status_code=403)
+        base = Path(str(_package_files("condash") / "assets" / "vendor" / "xterm"))
+        try:
+            full = (base / rel_path).resolve()
+            full.relative_to(base.resolve())
+        except (OSError, ValueError):
+            return Response(status_code=403)
+        if not full.is_file():
+            return Response(status_code=404)
+        ctype = _XTERM_MIME.get(full.suffix.lower(), "application/octet-stream")
         return Response(
             content=full.read_bytes(),
             media_type=ctype,

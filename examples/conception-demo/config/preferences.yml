@@ -1,0 +1,18 @@
+# Demo user preferences for the conception-demo fixture.
+#
+# Mirrors the real conception tree's preferences.yml. Values here are
+# plausible defaults — edit via condash's gear modal or by hand.
+
+pdf_viewer:
+- xdg-open {path}
+- evince {path}
+- okular {path}
+- zathura {path}
+terminal:
+  shell: ''
+  shortcut: Ctrl+T
+  screenshot_dir: /home/alice/Pictures/Screenshots
+  screenshot_paste_shortcut: Ctrl+Shift+V
+  launcher_command: claude
+  move_tab_left_shortcut: Ctrl+Left
+  move_tab_right_shortcut: Ctrl+Right

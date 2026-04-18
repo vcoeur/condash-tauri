@@ -1,0 +1,36 @@
+# Demo workspace config for the conception-demo fixture.
+#
+# Pointed at a fake workspace under /tmp so nothing here affects real repos.
+# See the parent README.md for how to pre-create the repo directories if
+# you want the repo strip to render with real entries.
+
+workspace_path: /tmp/conception-demo-workspace
+worktrees_path: /tmp/conception-demo-worktrees
+repositories:
+  primary:
+  - helio
+  - helio-web
+  - helio-docs
+  secondary: []
+open_with:
+  main_ide:
+    label: Open in main IDE
+    commands:
+    - idea {path}
+    - idea.sh {path}
+    - intellij-idea-ultimate {path}
+    - intellij-idea-community {path}
+  secondary_ide:
+    label: Open in secondary IDE
+    commands:
+    - code {path}
+    - codium {path}
+  terminal:
+    label: Open terminal here
+    commands:
+    - ghostty --working-directory={path}
+    - gnome-terminal --working-directory {path}
+    - konsole --workdir {path}
+    - xfce4-terminal --working-directory={path}
+    - x-terminal-emulator --working-directory {path}
+    - xterm -e bash -c 'cd "{path}" && exec bash'
