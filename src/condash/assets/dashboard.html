@@ -1739,7 +1739,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
             <div class="note-pane note-pane-view" id="note-pane-view"></div>
             <div class="note-pane note-pane-cm" id="note-pane-cm"></div>
             <div class="note-pane note-pane-plain" id="note-pane-plain">
-                <textarea class="note-edit-textarea" id="note-edit-textarea" spellcheck="false"></textarea>
+                <textarea class="note-edit-textarea" id="note-edit-textarea" spellcheck="false" oninput="_setDirty(true)"></textarea>
                 <div class="note-edit-error" id="note-edit-error"></div>
             </div>
         </div>
@@ -3071,7 +3071,34 @@ var _noteModal = {
     text: '',
     /* Which edit mode was last active. Ctrl-E from view returns here. */
     lastEditMode: 'cm',
+    /* Unsaved-changes flag. Set on every CM6/textarea edit, cleared on
+       open and successful save. Drives the Save button's disabled state
+       and the close/beforeunload confirms. */
+    dirty: false,
 };
+
+/* Flip the dirty flag and refresh the Save button. Safe to call on every
+   keystroke — the button toggle is the only DOM work. */
+function _setDirty(value) {
+    var next = !!value;
+    if (_noteModal.dirty === next) return;
+    _noteModal.dirty = next;
+    _syncSaveButton();
+}
+
+/* Save button is enabled only when there are unsaved edits, so after a
+   successful save the user gets a clear "saved" signal and can't click
+   again redundantly. Disabled when clean, non-editable, or viewing. */
+function _syncSaveButton() {
+    var btn = document.getElementById('note-save-btn');
+    if (!btn) return;
+    var inner = document.getElementById('note-modal-inner');
+    var mode = inner ? inner.getAttribute('data-mode') : 'view';
+    var editing = mode === 'cm' || mode === 'plain';
+    btn.disabled = !editing || !_noteModal.editable || !_noteModal.dirty;
+    btn.title = btn.disabled && editing && _noteModal.editable
+        ? 'No unsaved changes' : 'Save (Ctrl+S)';
+}
 
 async function openNotePreview(path, name) {
     var modal = document.getElementById('note-modal');
@@ -3090,6 +3117,7 @@ async function openNotePreview(path, name) {
     _noteModal.mtime = null;
     _noteModal.text = '';
     _noteModal.renderedHtml = '';
+    _noteModal.dirty = false;
     ta.value = '';
     viewPane.innerHTML = '<p class="note-loading">Loading\u2026</p>';
     _setNoteModeAttr(inner, 'view');
@@ -3258,10 +3286,17 @@ function _wireNoteLinks(body, notePath) {
 }
 
 function closeNotePreview() {
+    // Capture the active buffer so dirty reflects the latest keystrokes
+    // even if the user never switched modes before closing.
+    if (_noteModal.editable) _captureActiveBuffer();
+    if (_noteModal.dirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) return;
+    }
     document.getElementById('note-modal').classList.remove('open');
     _destroyCm();
     _hideSaveError();
     _noteModal.path = null;
+    _noteModal.dirty = false;
     _noteNavStack = [];
     _syncNoteBack();
     noteSearchClose();
@@ -3505,7 +3540,10 @@ function _mountCm() {
         cm6.EditorView.updateListener.of(function(u) {
             // Reflect edits into the canonical buffer live so a mode
             // switch doesn't need a separate capture path.
-            if (u.docChanged) _noteModal.text = u.state.doc.toString();
+            if (u.docChanged) {
+                _noteModal.text = u.state.doc.toString();
+                _setDirty(true);
+            }
         }),
     ];
     _cm.view = new cm6.EditorView({
@@ -3584,6 +3622,7 @@ function _syncModeControls() {
         }
     }
     if (saveBtn) saveBtn.style.display = (mode === 'cm' || mode === 'plain') ? '' : 'none';
+    _syncSaveButton();
 }
 
 /* Pull the active pane's buffer back into _noteModal.text so a mode
@@ -3668,6 +3707,7 @@ async function saveEdit() {
             return;
         }
         if (data.mtime != null) _noteModal.mtime = Number(data.mtime);
+        _setDirty(false);
         // Refresh the view pane from the server render so it stays
         // aligned with what's now on disk.
         var name = document.getElementById('note-modal-title').textContent;
@@ -3809,6 +3849,20 @@ document.addEventListener('keydown', function(e) {
     if (cfgModal && cfgModal.style.display && cfgModal.style.display !== 'none') {
         closeConfigModal();
     }
+});
+
+/* Guard window-level navigation (tab close, reload, external nav) while
+   a note modal has unsaved edits. The `returnValue` dance is required
+   for legacy cross-browser support; modern browsers ignore the string
+   and show their own generic confirm. */
+window.addEventListener('beforeunload', function(e) {
+    var modal = document.getElementById('note-modal');
+    if (!modal || !modal.classList.contains('open')) return;
+    if (_noteModal.editable) _captureActiveBuffer();
+    if (!_noteModal.dirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
 });
 
 async function cycle(file, line, el) {
