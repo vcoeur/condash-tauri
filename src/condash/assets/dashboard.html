@@ -289,6 +289,21 @@ body {
 .theme-toggle .icon { font-size: 1rem; line-height: 1; }
 .config-toggle { padding: 4px 8px; }
 .config-toggle svg { display: block; }
+.about-toggle { padding: 4px 8px; }
+.about-toggle svg { display: block; }
+
+/* --- About modal --- */
+.about-modal { width: min(420px, 96vw); height: auto; max-height: min(640px, 90vh); }
+.about-modal .note-modal-body { padding: 1.4rem 1.6rem; }
+.about-header { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.9rem; }
+.about-header img { width: 44px; height: 44px; flex-shrink: 0; }
+.about-header .about-name { font-size: 1.25rem; font-weight: 600; line-height: 1.1; }
+.about-header .about-version { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.15rem; font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; }
+.about-tagline { color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 1.1rem; line-height: 1.45; }
+.about-links { list-style: none; padding: 0; margin: 0 0 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.about-links a { color: var(--accent); text-decoration: none; font-size: 0.88rem; }
+.about-links a:hover { text-decoration: underline; }
+.about-footer { color: var(--text-muted); font-size: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.8rem; line-height: 1.5; }
 
 /* --- Config modal form --- */
 .config-modal { max-width: 720px; }
@@ -1826,6 +1841,13 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                 <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
         </button>
+        <button class="theme-toggle about-toggle" onclick="openAboutModal()" title="About condash" aria-label="About condash">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+        </button>
         <button class="theme-toggle config-toggle" onclick="openConfigModal()" title="Edit configuration" aria-label="Edit configuration">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="3"/>
@@ -1916,6 +1938,33 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
             <div class="note-pane note-pane-plain" id="note-pane-plain">
                 <textarea class="note-edit-textarea" id="note-edit-textarea" spellcheck="false" oninput="_setDirty(true)"></textarea>
                 <div class="note-edit-error" id="note-edit-error"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="about-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeAboutModal()">
+    <div class="note-modal about-modal">
+        <div class="note-modal-header">
+            <span class="note-modal-title">About</span>
+            <button class="note-modal-close" onclick="closeAboutModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="note-modal-body">
+            <div class="about-header">
+                <img src="/favicon.svg" alt="">
+                <div>
+                    <div class="about-name">condash</div>
+                    <div class="about-version">v{{VERSION}}</div>
+                </div>
+            </div>
+            <p class="about-tagline">Standalone desktop dashboard for markdown-based conception items (projects, incidents, documents).</p>
+            <ul class="about-links">
+                <li><a href="https://condash.vcoeur.com/" data-about-link>Homepage</a></li>
+                <li><a href="https://vcoeur.github.io/condash/" data-about-link>Documentation</a></li>
+                <li><a href="https://github.com/vcoeur/condash" data-about-link>Source (GitHub)</a></li>
+                <li><a href="https://github.com/vcoeur/condash/issues" data-about-link>Report an issue</a></li>
+            </ul>
+            <div class="about-footer">
+                MIT License &middot; &copy; Alice Voland
             </div>
         </div>
     </div>
@@ -2302,6 +2351,26 @@ async function openConfigModal() {
 function closeConfigModal() {
     document.getElementById('config-modal').style.display = 'none';
 }
+
+/* --- About modal ---
+   Static content (version baked in at render time, links hit the host
+   browser via /open-external because pywebview swallows target=_blank). */
+function openAboutModal() {
+    document.getElementById('about-modal').style.display = 'flex';
+}
+function closeAboutModal() {
+    document.getElementById('about-modal').style.display = 'none';
+}
+document.addEventListener('click', function(ev) {
+    var a = ev.target.closest && ev.target.closest('#about-modal a[data-about-link]');
+    if (!a) return;
+    ev.preventDefault();
+    fetch('/open-external', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: a.getAttribute('href')}),
+    });
+});
 
 /* --- New-item modal ---
    Lives next to the gear button. Collects the minimal fields the
@@ -4236,6 +4305,11 @@ document.addEventListener('keydown', function(e) {
     var cfgModal = document.getElementById('config-modal');
     if (cfgModal && cfgModal.style.display && cfgModal.style.display !== 'none') {
         closeConfigModal();
+        return;
+    }
+    var aboutModal = document.getElementById('about-modal');
+    if (aboutModal && aboutModal.style.display && aboutModal.style.display !== 'none') {
+        closeAboutModal();
     }
 });
 

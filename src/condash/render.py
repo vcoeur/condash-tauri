@@ -18,6 +18,7 @@ from datetime import datetime
 from itertools import groupby
 from pathlib import Path
 
+from . import __version__
 from . import runners as runners_mod
 from .context import RenderCtx
 from .git_scan import _collect_git_repos
@@ -775,7 +776,7 @@ def _render_runner_mount(key: str, checkout_key: str) -> str:
         f'<button class="runner-control runner-collapse" '
         f'aria-label="Collapse terminal" tabindex="-1" '
         f'onclick="event.stopPropagation();runnerToggleCollapse(this)">'
-        f'{_ICON_SVGS["runner_collapse"]}</button>'
+        f"{_ICON_SVGS['runner_collapse']}</button>"
         f'<button class="runner-control runner-popout" '
         f'title="Pop out" aria-label="Pop out" '
         f'onclick="event.stopPropagation();runnerPopout(this)">{_ICON_SVGS["runner_popout"]}</button>'
@@ -1033,4 +1034,5 @@ def render_page(ctx: RenderCtx, items):
         .replace("{{COUNT_PROJECTS}}", str(count_projects))
         .replace("{{COUNT_REPOS}}", str(count_repos))
         .replace("{{COUNT_KNOWLEDGE}}", str(count_knowledge))
+        .replace("{{VERSION}}", __version__)
     )

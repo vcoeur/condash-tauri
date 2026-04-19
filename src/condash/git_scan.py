@@ -371,9 +371,7 @@ def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
             # Family hash mixes each member's hash so a runner start/exit
             # (or any leaf-state edit) on a member bubbles to the family —
             # the /fragment endpoint reloads at the family level.
-            out[family_id] = _hash(
-                ("family", tuple((mid, out[mid]) for mid in member_ids))
-            )
+            out[family_id] = _hash(("family", tuple((mid, out[mid]) for mid in member_ids)))
             family_ids.append(family_id)
         out[group_id] = _hash(("group", label, tuple(sorted(family_ids))))
         top_child_ids.append(group_id)
