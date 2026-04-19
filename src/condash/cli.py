@@ -242,6 +242,7 @@ def _full_payload(target: Path, cfg: CondashConfig) -> dict[str, Any]:
         "repositories_primary": cfg.repositories_primary,
         "repositories_secondary": cfg.repositories_secondary,
         "repo_submodules": dict(cfg.repo_submodules),
+        "repo_run": {key: cmd.template for key, cmd in cfg.repo_run.items()},
         "open_with": {
             slot_key: {
                 "label": slot.label,

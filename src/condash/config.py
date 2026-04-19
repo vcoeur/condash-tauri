@@ -291,6 +291,21 @@ class OpenWithSlot:
         return out
 
 
+@dataclass
+class RepoRunCommand:
+    """Inline dev-server command template for a repo or sub-repo row.
+
+    ``template`` is a single shell-style string; the runner executes it
+    via ``shell -lc`` (so ``make dev``, piping, and shell builtins all
+    work) with ``{path}`` substituted to the absolute checkout path.
+    """
+
+    template: str
+
+    def resolve(self, path: str) -> str:
+        return self.template.replace("{path}", path)
+
+
 DEFAULT_TERMINAL_SHORTCUT = "Ctrl+`"
 DEFAULT_SCREENSHOT_PASTE_SHORTCUT = "Ctrl+Shift+V"
 DEFAULT_LAUNCHER_COMMAND = "claude"
@@ -375,6 +390,7 @@ class CondashConfig:
     native: bool = True
     open_with: dict[str, OpenWithSlot] = field(default_factory=dict)
     pdf_viewer: list[str] = field(default_factory=list)
+    repo_run: dict[str, RepoRunCommand] = field(default_factory=dict)
     yaml_source: Path | None = None
     preferences_source: Path | None = None
 
@@ -547,26 +563,37 @@ def write_default_template(target: Path) -> None:
     tmp.replace(target)
 
 
-def _parse_repo_list(raw: object, source: Path, key: str) -> tuple[list[str], dict[str, list[str]]]:
-    """Split a ``primary`` / ``secondary`` list into (names, submodules map).
+def _parse_repo_list(
+    raw: object, source: Path, key: str
+) -> tuple[list[str], dict[str, list[str]], dict[str, RepoRunCommand]]:
+    """Split a ``primary`` / ``secondary`` list into (names, submodules, runs).
 
     Each entry is either a bare string (name only) or an inline table with
-    ``{name = "...", submodules = [...]}`` — ``name`` is required,
-    ``submodules`` optional. Name may be bare (``"condash"``, for a flat
-    workspace) or slashed (``"myorg/repo-x"``, for a depth-2 workspace
-    where ``workspace_path`` is a parent of org folders). Submodule paths
-    are plain subdirectories relative to the repo root, not real git
-    submodules.
+    ``{name = "...", submodules = [...], run = "..."}`` — ``name`` is
+    required; ``submodules`` and ``run`` are optional. Name may be bare
+    (``"condash"``, for a flat workspace) or slashed (``"myorg/repo-x"``,
+    for a depth-2 workspace where ``workspace_path`` is a parent of org
+    folders). Submodule paths are plain subdirectories relative to the
+    repo root, not real git submodules.
+
+    Submodule entries may also be dicts of the form
+    ``{name = "...", run = "..."}`` to carry their own inline-runner
+    command. Plain strings keep working and simply have no runner.
+
+    Run commands are returned keyed by ``"<repo>"`` for top-level entries
+    and ``"<repo>--<sub>"`` for sub-repo entries — the same key shape the
+    runner registry uses at runtime.
 
     The PR base branch is **not** carried here — ``/pr`` resolves it from
     ``origin/HEAD`` on the main checkout at call time.
     """
     if raw is None:
-        return [], {}
+        return [], {}, {}
     if not isinstance(raw, list):
         raise ConfigIncompleteError(f"{source}: 'repositories.{key}' must be a list")
     names: list[str] = []
     subs: dict[str, list[str]] = {}
+    runs: dict[str, RepoRunCommand] = {}
     for i, entry in enumerate(raw):
         if isinstance(entry, str):
             name = entry.strip()
@@ -580,21 +607,56 @@ def _parse_repo_list(raw: object, source: Path, key: str) -> tuple[list[str], di
                     f"{source}: 'repositories.{key}[{i}].name' must be a non-empty string"
                 )
             name = name_raw.strip()
-            sub_raw = entry.get("submodules") or []
-            if not isinstance(sub_raw, list) or not all(isinstance(s, str) for s in sub_raw):
-                raise ConfigIncompleteError(
-                    f"{source}: 'repositories.{key}[{i}].submodules' must be a list of strings"
-                )
             names.append(name)
-            cleaned = [s.strip() for s in sub_raw if s.strip()]
+            sub_raw = entry.get("submodules") or []
+            if not isinstance(sub_raw, list):
+                raise ConfigIncompleteError(
+                    f"{source}: 'repositories.{key}[{i}].submodules' must be a list"
+                )
+            cleaned: list[str] = []
+            for j, sub_entry in enumerate(sub_raw):
+                if isinstance(sub_entry, str):
+                    s = sub_entry.strip()
+                    if s:
+                        cleaned.append(s)
+                    continue
+                if isinstance(sub_entry, dict):
+                    sub_name_raw = sub_entry.get("name")
+                    if not isinstance(sub_name_raw, str) or not sub_name_raw.strip():
+                        raise ConfigIncompleteError(
+                            f"{source}: 'repositories.{key}[{i}].submodules[{j}].name' "
+                            f"must be a non-empty string"
+                        )
+                    sub_name = sub_name_raw.strip()
+                    cleaned.append(sub_name)
+                    sub_run_raw = sub_entry.get("run")
+                    if sub_run_raw is not None:
+                        if not isinstance(sub_run_raw, str) or not sub_run_raw.strip():
+                            raise ConfigIncompleteError(
+                                f"{source}: 'repositories.{key}[{i}].submodules[{j}].run' "
+                                f"must be a non-empty string"
+                            )
+                        runs[f"{name}--{sub_name}"] = RepoRunCommand(template=sub_run_raw.strip())
+                    continue
+                raise ConfigIncompleteError(
+                    f"{source}: 'repositories.{key}[{i}].submodules[{j}]' must be a "
+                    f"string or a table with 'name' (and optional 'run')"
+                )
             if cleaned:
                 subs[name] = cleaned
+            run_raw = entry.get("run")
+            if run_raw is not None:
+                if not isinstance(run_raw, str) or not run_raw.strip():
+                    raise ConfigIncompleteError(
+                        f"{source}: 'repositories.{key}[{i}].run' must be a non-empty string"
+                    )
+                runs[name] = RepoRunCommand(template=run_raw.strip())
         else:
             raise ConfigIncompleteError(
                 f"{source}: 'repositories.{key}[{i}]' must be a string or a "
-                f"table with 'name' and optional 'submodules'"
+                f"table with 'name' and optional 'submodules' / 'run'"
             )
-    return names, subs
+    return names, subs, runs
 
 
 def _parse(data: dict, source: Path) -> CondashConfig:
@@ -623,9 +685,12 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         worktrees_path = None
 
     repos = data.get("repositories") or {}
-    primary, primary_subs = _parse_repo_list(repos.get("primary"), source, "primary")
-    secondary, secondary_subs = _parse_repo_list(repos.get("secondary"), source, "secondary")
+    primary, primary_subs, primary_runs = _parse_repo_list(repos.get("primary"), source, "primary")
+    secondary, secondary_subs, secondary_runs = _parse_repo_list(
+        repos.get("secondary"), source, "secondary"
+    )
     repo_submodules: dict[str, list[str]] = {**primary_subs, **secondary_subs}
+    repo_run: dict[str, RepoRunCommand] = {**primary_runs, **secondary_runs}
 
     port_raw = data.get("port", 0)
     if not isinstance(port_raw, int) or not 0 <= port_raw <= 65535:
@@ -713,6 +778,7 @@ def _parse(data: dict, source: Path) -> CondashConfig:
         native=native_raw,
         open_with=open_with,
         pdf_viewer=pdf_viewer,
+        repo_run=repo_run,
     )
 
 
@@ -867,11 +933,14 @@ def _apply_repositories_yaml(cfg: CondashConfig, data: dict, source: Path) -> No
     repos = data.get("repositories") or {}
     if not isinstance(repos, dict):
         raise ConfigIncompleteError(f"{source}: 'repositories' must be a mapping")
-    primary, primary_subs = _parse_repo_list(repos.get("primary"), source, "primary")
-    secondary, secondary_subs = _parse_repo_list(repos.get("secondary"), source, "secondary")
+    primary, primary_subs, primary_runs = _parse_repo_list(repos.get("primary"), source, "primary")
+    secondary, secondary_subs, secondary_runs = _parse_repo_list(
+        repos.get("secondary"), source, "secondary"
+    )
     cfg.repositories_primary = primary
     cfg.repositories_secondary = secondary
     cfg.repo_submodules = {**primary_subs, **secondary_subs}
+    cfg.repo_run = {**primary_runs, **secondary_runs}
 
     open_with_raw = data.get("open_with") or {}
     if not isinstance(open_with_raw, dict):
@@ -898,18 +967,35 @@ def _apply_repositories_yaml(cfg: CondashConfig, data: dict, source: Path) -> No
 def _render_yaml_repo_list(
     names: list[str],
     repo_submodules: dict[str, list[str]],
+    repo_run: dict[str, RepoRunCommand] | None = None,
 ) -> list:
-    """Serialise a repo-name list for YAML. Entries with submodules become
-    mappings (``{name: ..., submodules: [...]}``); bare-name entries stay
-    as strings. Order preserved.
+    """Serialise a repo-name list for YAML. Entries with submodules or an
+    inline-runner command become mappings (``{name, submodules?, run?}``);
+    bare-name entries without extras stay as strings. Submodules promote
+    to a mapping when they carry their own ``run:``. Order preserved.
     """
+    runs = repo_run or {}
     out: list = []
     for name in names:
         subs = repo_submodules.get(name) or []
-        if subs:
-            out.append({"name": name, "submodules": list(subs)})
-        else:
+        top_run = runs.get(name)
+        needs_mapping = bool(subs) or top_run is not None
+        if not needs_mapping:
             out.append(name)
+            continue
+        entry: dict = {"name": name}
+        if top_run is not None:
+            entry["run"] = top_run.template
+        if subs:
+            sub_entries: list = []
+            for sub in subs:
+                sub_run = runs.get(f"{name}--{sub}")
+                if sub_run is None:
+                    sub_entries.append(sub)
+                else:
+                    sub_entries.append({"name": sub, "run": sub_run.template})
+            entry["submodules"] = sub_entries
+        out.append(entry)
     return out
 
 
@@ -930,8 +1016,12 @@ def save_repositories_yaml(cfg: CondashConfig, path: Path | None = None) -> Path
         "workspace_path": str(cfg.workspace_path) if cfg.workspace_path else "",
         "worktrees_path": str(cfg.worktrees_path) if cfg.worktrees_path else "",
         "repositories": {
-            "primary": _render_yaml_repo_list(cfg.repositories_primary, cfg.repo_submodules),
-            "secondary": _render_yaml_repo_list(cfg.repositories_secondary, cfg.repo_submodules),
+            "primary": _render_yaml_repo_list(
+                cfg.repositories_primary, cfg.repo_submodules, cfg.repo_run
+            ),
+            "secondary": _render_yaml_repo_list(
+                cfg.repositories_secondary, cfg.repo_submodules, cfg.repo_run
+            ),
         },
         "open_with": {
             slot_key: {

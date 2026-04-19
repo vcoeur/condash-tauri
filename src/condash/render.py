@@ -18,6 +18,7 @@ from datetime import datetime
 from itertools import groupby
 from pathlib import Path
 
+from . import runners as runners_mod
 from .context import RenderCtx
 from .git_scan import _collect_git_repos
 from .parser import (
@@ -603,6 +604,34 @@ _ICON_SVGS = {
         '<rect x="3" y="4" width="18" height="16" rx="2"/>'
         '<polygon points="10 9 16 12 10 15" fill="currentColor" stroke="none"/></svg>'
     ),
+    # Filled play triangle — "start inline dev-server runner".
+    "runner_run": (
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" '
+        'aria-hidden="true">'
+        '<polygon points="7 5 19 12 7 19"/></svg>'
+    ),
+    # Filled square — "stop inline dev-server runner".
+    "runner_stop": (
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" '
+        'aria-hidden="true">'
+        '<rect x="6" y="6" width="12" height="12" rx="1"/></svg>'
+    ),
+    # Down arrow — "a runner is active below, jump to it".
+    "runner_jump": (
+        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" '
+        'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<polyline points="6 9 12 15 18 9"/></svg>'
+    ),
+    # Diagonal arrow out of a box — "pop the inline terminal into a modal".
+    "runner_popout": (
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+        'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M14 4h6v6"/>'
+        '<line x1="10" y1="14" x2="20" y2="4"/>'
+        '<path d="M20 14v6H4V4h6"/></svg>'
+    ),
     # Folder outline — opens the item directory in the OS file manager.
     "folder": (
         '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" '
@@ -658,7 +687,110 @@ def _render_git_actions(ctx: RenderCtx, path):
     return f'<div class="git-actions">{"".join(items_html)}</div>'
 
 
-def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False, parent_node_id: str = ""):
+def _runner_key(repo_name: str, sub_name: str | None = None) -> str:
+    """Canonical runner-registry key. Mirrors ``config._parse_repo_list``."""
+    if sub_name is None:
+        return repo_name
+    return f"{repo_name}--{sub_name}"
+
+
+def _render_runner_button(
+    key: str,
+    checkout_key: str,
+    checkout_path: str,
+) -> str:
+    """Render the per-checkout Run / Stop / Switch affordance.
+
+    Button state is resolved by looking up the live session in
+    ``runners_mod.registry()``:
+
+    - no session           → green Run button
+    - session on this row  → red Stop button
+    - session elsewhere    → amber Switch button (triggers confirm dialog)
+    """
+    session = runners_mod.get(key)
+    js_key = json.dumps(key)
+    js_checkout = json.dumps(checkout_key)
+    js_path = json.dumps(checkout_path)
+    if session is None or session.exit_code is not None:
+        # Off or exited — exited gets the same Run affordance; clicking
+        # starts a fresh session (replacing the stale record).
+        title = "Start dev runner"
+        cls = "git-action-runner-run"
+        icon = _ICON_SVGS["runner_run"]
+        onclick = f"runnerStart(event,{js_key},{js_checkout},{js_path})"
+    elif session.checkout_key == checkout_key:
+        title = "Stop dev runner"
+        cls = "git-action-runner-stop"
+        icon = _ICON_SVGS["runner_stop"]
+        onclick = f"runnerStop(event,{js_key})"
+    else:
+        title = f"Switch runner from {session.checkout_key} to this checkout"
+        cls = "git-action-runner-switch"
+        icon = _ICON_SVGS["runner_run"]
+        onclick = f"runnerSwitch(event,{js_key},{js_checkout},{js_path})"
+    return (
+        f'<button class="git-action-btn git-action-runner {cls}" '
+        f'title="{h(title)}" aria-label="{h(title)}" '
+        f'onclick="{onclick}">{icon}</button>'
+    )
+
+
+def _render_runner_mount(key: str, checkout_key: str) -> str:
+    """Inline terminal mount point, rendered under the checkout that owns
+    the live session. The JS side picks this up on DOM insertion and
+    opens a WebSocket to ``/ws/runner/<key>``.
+    """
+    session = runners_mod.get(key)
+    if session is None or session.checkout_key != checkout_key:
+        return ""
+    exited_attr = (
+        f' data-exit-code="{session.exit_code}"' if session.exit_code is not None else ""
+    )
+    js_label = h(f"{key} @ {checkout_key}")
+    return (
+        f'<div class="runner-term-mount" '
+        f'data-runner-key="{h(key)}" '
+        f'data-runner-checkout="{h(checkout_key)}"{exited_attr}>'
+        f'<div class="runner-term-header">'
+        f'<span class="runner-term-label">{js_label}</span>'
+        f'<span class="runner-term-status" aria-live="polite"></span>'
+        f'<button class="runner-control runner-popout" '
+        f'title="Pop out" aria-label="Pop out" '
+        f'onclick="runnerPopout(this)">{_ICON_SVGS["runner_popout"]}</button>'
+        f'<button class="runner-control runner-stop-inline" '
+        f'title="Stop" aria-label="Stop" '
+        f'onclick="runnerStopInline(this)">{_ICON_SVGS["runner_stop"]}</button>'
+        f'</div>'
+        f'<div class="runner-term-host"></div>'
+        f'</div>'
+    )
+
+
+def _repo_has_live_runner(ctx: RenderCtx, repo: dict) -> bool:
+    """True if any configured runner key anchored at this repo is live."""
+    name = repo["name"]
+    keys = [name]
+    keys.extend(
+        f"{name}--{sub}"
+        for sub in (s["name"] for s in repo.get("submodules") or [])
+    )
+    for key in keys:
+        if key in ctx.repo_run:
+            session = runners_mod.get(key)
+            if session is not None and session.exit_code is None:
+                return True
+    return False
+
+
+def _render_submodule_rows(
+    ctx: RenderCtx,
+    submodules,
+    worktree=False,
+    parent_node_id: str = "",
+    parent_repo_name: str = "",
+    checkout_key: str = "",
+):
     """Render subrepo rows at the same visual size as parent repos."""
     if not submodules:
         return ""
@@ -675,14 +807,23 @@ def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False, parent_no
         node_attr = (
             f' data-node-id="{parent_node_id}/sub:{h(sub["name"])}"' if parent_node_id else ""
         )
+        runner_btn = ""
+        runner_mount = ""
+        if parent_repo_name and checkout_key:
+            sub_key = _runner_key(parent_repo_name, sub["name"])
+            if sub_key in ctx.repo_run:
+                runner_btn = _render_runner_button(sub_key, checkout_key, sub["path"])
+                runner_mount = _render_runner_mount(sub_key, checkout_key)
         rows.append(
             f'<div class="git-row{dirty_cls}"{node_attr} title="{h(sub["path"])}">'
-            f"{sub_actions}"
+            f"{sub_actions}{runner_btn}"
             f'<span class="git-name">{h(sub["name"])}</span>'
             f'<span class="git-branch"></span>'
             f'<span class="git-status">{badge}</span>'
             f'<span class="git-spacer"></span></div>'
         )
+        if runner_mount:
+            rows.append(runner_mount)
     inner = "\n".join(rows)
     scope = "worktree" if worktree else "repo"
     return (
@@ -693,72 +834,152 @@ def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False, parent_no
     )
 
 
+_GIT_CHEVRON = '<span class="git-chevron">\u25b6</span>'
+
+
+def _render_git_repo_block(ctx: RenderCtx, repo: dict, group_id: str) -> str:
+    """Render one ``.git-repo`` block (main row + subrepos + worktrees).
+
+    Factored out so ``/fragment`` can return a single repo's HTML for
+    localized reloads when runner state changes — otherwise a Run/Stop
+    click would force a full dash refresh.
+    """
+    parts: list[str] = []
+    r = repo
+    repo_id = f"{group_id}/{r['name']}"
+    repo_live = _repo_has_live_runner(ctx, r)
+    live_cls = " git-repo-runner-live" if repo_live else ""
+    parts.append(f'<div class="git-repo{live_cls}" data-node-id="{h(repo_id)}">')
+    dirty_cls = " git-dirty" if r["dirty"] else ""
+    badge = (
+        f'<span class="git-changes">{r["changed"]} changed</span>'
+        if r["dirty"]
+        else '<span class="git-clean">\u2713</span>'
+    )
+    actions = _render_git_actions(ctx, r["path"])
+    repo_name = r["name"]
+    top_key = _runner_key(repo_name)
+    top_runner_btn = (
+        _render_runner_button(top_key, "main", r["path"])
+        if top_key in ctx.repo_run
+        else ""
+    )
+    top_runner_mount = (
+        _render_runner_mount(top_key, "main") if top_key in ctx.repo_run else ""
+    )
+    jump_arrow = (
+        f'<button class="git-runner-jump" title="Jump to runner terminal" '
+        f'aria-label="Jump to runner terminal" '
+        f'onclick="runnerJump(event,this)">{_ICON_SVGS["runner_jump"]}</button>'
+        if repo_live
+        else ""
+    )
+    has_subs = bool(r.get("submodules"))
+    toggle_cls = " git-row-collapsible" if has_subs else ""
+    toggle_attr = ' onclick="toggleSubmodules(this)"' if has_subs else ""
+    chev = _GIT_CHEVRON if has_subs else ""
+    parts.append(
+        f'<div class="git-row{dirty_cls}{toggle_cls}"{toggle_attr}>'
+        f"{actions}{top_runner_btn}"
+        f'<span class="git-name">{chev}{jump_arrow}{h(repo_name)}</span>'
+        f'<span class="git-branch">{h(r["branch"])}</span>'
+        f'<span class="git-status">{badge}</span>'
+        f'<span class="git-spacer"></span></div>'
+    )
+    if top_runner_mount:
+        parts.append(top_runner_mount)
+    sub_html = _render_submodule_rows(
+        ctx,
+        r.get("submodules") or [],
+        parent_node_id=repo_id,
+        parent_repo_name=repo_name,
+        checkout_key="main",
+    )
+    if sub_html:
+        parts.append(sub_html)
+    for wt in r.get("worktrees", []):
+        wt_id = f"{repo_id}/wt:{wt['key']}"
+        wt_dirty_cls = " git-dirty" if wt["dirty"] else ""
+        wt_badge = (
+            f'<span class="git-changes">{wt["changed"]} changed</span>'
+            if wt["dirty"]
+            else '<span class="git-clean">\u2713</span>'
+        )
+        wt_actions = _render_git_actions(ctx, wt["path"])
+        wt_runner_btn = (
+            _render_runner_button(top_key, wt["key"], wt["path"])
+            if top_key in ctx.repo_run
+            else ""
+        )
+        wt_runner_mount = (
+            _render_runner_mount(top_key, wt["key"])
+            if top_key in ctx.repo_run
+            else ""
+        )
+        wt_has_subs = bool(wt.get("submodules"))
+        wt_toggle_cls = " git-row-collapsible" if wt_has_subs else ""
+        wt_toggle_attr = ' onclick="toggleSubmodules(this)"' if wt_has_subs else ""
+        wt_chev = _GIT_CHEVRON if wt_has_subs else ""
+        parts.append(
+            f'<div class="git-row git-worktree{wt_dirty_cls}{wt_toggle_cls}" '
+            f'data-node-id="{h(wt_id)}" '
+            f'title="{h(wt["path"])}"{wt_toggle_attr}>'
+            f"{wt_actions}{wt_runner_btn}"
+            f'<span class="git-name">{wt_chev}\u21b3 {h(wt["key"])}</span>'
+            f'<span class="git-branch">{h(wt["branch"])}</span>'
+            f'<span class="git-status">{wt_badge}</span>'
+            f'<span class="git-spacer"></span></div>'
+        )
+        if wt_runner_mount:
+            parts.append(wt_runner_mount)
+        wt_sub_html = _render_submodule_rows(
+            ctx,
+            wt.get("submodules") or [],
+            worktree=True,
+            parent_node_id=wt_id,
+            parent_repo_name=repo_name,
+            checkout_key=wt["key"],
+        )
+        if wt_sub_html:
+            parts.append(wt_sub_html)
+    parts.append("</div>")  # /git-repo
+    return "\n".join(parts)
+
+
+def render_git_repo_fragment(ctx: RenderCtx, node_id: str) -> str | None:
+    """Return the HTML for the ``.git-repo`` block matching ``node_id``.
+
+    ``node_id`` shape: ``code/<group-label>/<repo-name>``. Returns
+    ``None`` when the id doesn't match a known repo — the /fragment
+    caller then falls back to the global reload.
+    """
+    prefix = "code/"
+    if not node_id.startswith(prefix):
+        return None
+    rest = node_id[len(prefix):]
+    if "/" not in rest:
+        return None
+    group_label, repo_name = rest.split("/", 1)
+    for label, repos in _collect_git_repos(ctx):
+        if label != group_label:
+            continue
+        for repo in repos:
+            if repo["name"] == repo_name:
+                return _render_git_repo_block(ctx, repo, f"code/{label}")
+    return None
+
+
 def _render_git_repos(ctx: RenderCtx, groups):
     if not groups:
         return ""
     out = []
-    chevron = '<span class="git-chevron">\u25b6</span>'
     for label, repos in groups:
         group_id = f"code/{label}"
         out.append(f'<div class="git-group" data-node-id="{h(group_id)}">')
         out.append(f'<div class="git-group-header">{h(label)}</div>')
         out.append('<div class="git-group-body">')
         for r in repos:
-            repo_id = f"{group_id}/{r['name']}"
-            out.append(f'<div class="git-repo" data-node-id="{h(repo_id)}">')
-            dirty_cls = " git-dirty" if r["dirty"] else ""
-            badge = (
-                f'<span class="git-changes">{r["changed"]} changed</span>'
-                if r["dirty"]
-                else '<span class="git-clean">\u2713</span>'
-            )
-            actions = _render_git_actions(ctx, r["path"])
-            has_subs = bool(r.get("submodules"))
-            toggle_cls = " git-row-collapsible" if has_subs else ""
-            toggle_attr = ' onclick="toggleSubmodules(this)"' if has_subs else ""
-            chev = chevron if has_subs else ""
-            out.append(
-                f'<div class="git-row{dirty_cls}{toggle_cls}"{toggle_attr}>'
-                f"{actions}"
-                f'<span class="git-name">{chev}{h(r["name"])}</span>'
-                f'<span class="git-branch">{h(r["branch"])}</span>'
-                f'<span class="git-status">{badge}</span>'
-                f'<span class="git-spacer"></span></div>'
-            )
-            sub_html = _render_submodule_rows(
-                ctx, r.get("submodules") or [], parent_node_id=repo_id
-            )
-            if sub_html:
-                out.append(sub_html)
-            for wt in r.get("worktrees", []):
-                wt_id = f"{repo_id}/wt:{wt['key']}"
-                wt_dirty_cls = " git-dirty" if wt["dirty"] else ""
-                wt_badge = (
-                    f'<span class="git-changes">{wt["changed"]} changed</span>'
-                    if wt["dirty"]
-                    else '<span class="git-clean">\u2713</span>'
-                )
-                wt_actions = _render_git_actions(ctx, wt["path"])
-                wt_has_subs = bool(wt.get("submodules"))
-                wt_toggle_cls = " git-row-collapsible" if wt_has_subs else ""
-                wt_toggle_attr = ' onclick="toggleSubmodules(this)"' if wt_has_subs else ""
-                wt_chev = chevron if wt_has_subs else ""
-                out.append(
-                    f'<div class="git-row git-worktree{wt_dirty_cls}{wt_toggle_cls}" '
-                    f'data-node-id="{h(wt_id)}" '
-                    f'title="{h(wt["path"])}"{wt_toggle_attr}>'
-                    f"{wt_actions}"
-                    f'<span class="git-name">{wt_chev}\u21b3 {h(wt["key"])}</span>'
-                    f'<span class="git-branch">{h(wt["branch"])}</span>'
-                    f'<span class="git-status">{wt_badge}</span>'
-                    f'<span class="git-spacer"></span></div>'
-                )
-                wt_sub_html = _render_submodule_rows(
-                    ctx, wt.get("submodules") or [], worktree=True, parent_node_id=wt_id
-                )
-                if wt_sub_html:
-                    out.append(wt_sub_html)
-            out.append("</div>")  # /git-repo
+            out.append(_render_git_repo_block(ctx, r, group_id))
         out.append("</div>")  # /git-group-body
         out.append("</div>")  # /git-group
     return "\n".join(out)

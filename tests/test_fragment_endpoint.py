@@ -108,11 +108,51 @@ def test_fragment_knowledge_dir_not_found(cfg: CondashConfig, tmp_conception: Pa
     assert res.status_code == 404
 
 
-def test_fragment_code_node_returns_404(cfg: CondashConfig):
-    # Code tab: local fragment reload isn't supported yet; must fall back.
+def test_fragment_code_tab_returns_404(cfg: CondashConfig):
+    # Whole-tab / group ids still fall back to the global reload.
     client = _client(cfg)
-    res = client.get("/fragment", params={"id": "code/Primary/alicepeintures"})
+    assert client.get("/fragment", params={"id": "code"}).status_code == 404
+    assert client.get("/fragment", params={"id": "code/Primary"}).status_code == 404
+
+
+def test_fragment_code_repo_unknown_returns_404(cfg: CondashConfig):
+    client = _client(cfg)
+    res = client.get("/fragment", params={"id": "code/Primary/missing-repo"})
     assert res.status_code == 404
+
+
+def test_fragment_code_repo_returns_block(tmp_path: Path, tmp_conception: Path):
+    """A workspace containing a repo surfaces a ``.git-repo`` fragment."""
+    import subprocess as sp
+
+    workspace = tmp_path / "workspace"
+    repo = workspace / "demo"
+    repo.mkdir(parents=True)
+    sp.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    sp.run(
+        ["git", "-C", str(repo), "commit", "--allow-empty", "-q", "-m", "init"],
+        check=True,
+        env={
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "HOME": str(tmp_path),
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+    cfg_with_ws = CondashConfig(
+        conception_path=tmp_conception,
+        workspace_path=workspace,
+        port=0,
+        native=False,
+        repositories_primary=["demo"],
+    )
+    client = _client(cfg_with_ws)
+    res = client.get("/fragment", params={"id": "code/Primary/demo"})
+    assert res.status_code == 200, res.text
+    assert 'data-node-id="code/Primary/demo"' in res.text
+    assert 'class="git-repo' in res.text
 
 
 def test_check_updates_returns_nodes_map(cfg: CondashConfig):

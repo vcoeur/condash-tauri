@@ -28,11 +28,13 @@ from nicegui import app as _ng_app
 from nicegui import ui
 
 from . import config as config_mod
+from . import runners as runners_mod
 from .config import (
     OPEN_WITH_SLOT_KEYS,
     SCREENSHOT_IMAGE_EXTENSIONS,
     CondashConfig,
     OpenWithSlot,
+    RepoRunCommand,
 )
 from .context import RenderCtx, build_ctx, favicon_bytes
 from .git_scan import _git_fingerprint, compute_git_node_fingerprints
@@ -74,6 +76,7 @@ from .paths import (
 from .render import (
     _render_note,
     render_card_fragment,
+    render_git_repo_fragment,
     render_knowledge_card_fragment,
     render_knowledge_group_fragment,
     render_page,
@@ -194,6 +197,7 @@ def _register_routes() -> None:
     """Attach all API routes to NiceGUI's FastAPI instance."""
 
     _ng_app.on_shutdown(_reap_all_pty_sessions)
+    _ng_app.on_shutdown(runners_mod.reap_all)
 
     @_ng_app.get("/", response_class=HTMLResponse)
     def index():
@@ -306,6 +310,16 @@ def _register_routes() -> None:
             # Root pane uses a different wrapper than a subdirectory group;
             # falling back to global reload is simpler than special-casing it.
             return _error(404, "use global reload")
+        if id.startswith("code/"):
+            # Only whole-repo nodes are fragmentable — groups and the
+            # bare 'code' root still fall through to the global reload.
+            rest = id[len("code/"):]
+            if "/" not in rest:
+                return _error(404, "use global reload")
+            html = render_git_repo_fragment(ctx, id)
+            if html is None:
+                return _error(404, "repo not found")
+            return HTMLResponse(content=html)
         if id.startswith("knowledge/"):
             tree = collect_knowledge(ctx)
             # File cards have an extension (e.g. ".md"); directories do not.
@@ -703,6 +717,168 @@ def _register_routes() -> None:
             "config": _config_to_payload(new_cfg),
         }
 
+    @_ng_app.post("/api/runner/start")
+    async def runner_start(req: Request):
+        """Spawn a dev-server runner for ``{key, checkout_key, path}``.
+
+        ``key`` is the repo key (``"<repo>"`` or ``"<repo>--<sub>"``).
+        ``checkout_key`` identifies which checkout — ``"main"`` or the
+        worktree short key — is hosting this run. ``path`` is the
+        absolute checkout directory; sandbox-validated against the
+        workspace / worktrees roots before we touch it.
+
+        409 if a non-exited runner already owns the key — the UI shows
+        a confirm dialog and re-issues start after stop.
+        """
+        try:
+            data = await req.json()
+        except ValueError:
+            return _error(400, "bad JSON")
+        if not isinstance(data, dict):
+            return _error(400, "payload must be an object")
+        key = str(data.get("key") or "").strip()
+        checkout_key = str(data.get("checkout_key") or "").strip()
+        path_raw = str(data.get("path") or "").strip()
+        if not key or not checkout_key or not path_raw:
+            return _error(400, "key, checkout_key, path required")
+        if _RUNTIME_CFG is None:
+            return _error(500, "runtime config not initialised")
+        cmd = _RUNTIME_CFG.repo_run.get(key)
+        if cmd is None:
+            return _error(404, f"no run command configured for {key}")
+        validated = _validate_open_path(_ctx(), path_raw)
+        if validated is None:
+            return _error(400, f"path out of sandbox: {path_raw}")
+        existing = runners_mod.get(key)
+        if existing is not None and existing.exit_code is None:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "runner already active",
+                    "key": key,
+                    "checkout_key": existing.checkout_key,
+                },
+            )
+        shell = _resolve_terminal_shell(_RUNTIME_CFG)
+        try:
+            session = await runners_mod.start(
+                key=key,
+                checkout_key=checkout_key,
+                path=str(validated),
+                template=cmd.template,
+                shell=shell,
+            )
+        except (OSError, RuntimeError) as exc:
+            log.warning("runner start %s failed: %s", key, exc)
+            return _error(500, f"spawn failed: {exc}")
+        return {
+            "ok": True,
+            "key": key,
+            "checkout_key": session.checkout_key,
+            "pid": session.pid,
+            "template": session.template,
+        }
+
+    @_ng_app.post("/api/runner/stop")
+    async def runner_stop(req: Request):
+        """Stop the runner for ``{key}`` (SIGTERM + SIGKILL after grace).
+
+        Idempotent: returns ``{ok: true, cleared: false}`` when the key
+        is already gone. An exited session is cleared synchronously.
+        """
+        try:
+            data = await req.json()
+        except ValueError:
+            return _error(400, "bad JSON")
+        if not isinstance(data, dict):
+            return _error(400, "payload must be an object")
+        key = str(data.get("key") or "").strip()
+        if not key:
+            return _error(400, "key required")
+        session = runners_mod.get(key)
+        if session is None:
+            return {"ok": True, "cleared": False}
+        if session.exit_code is not None:
+            runners_mod.clear_exited(key)
+            return {"ok": True, "cleared": True, "exited": True}
+        await runners_mod.stop(key)
+        runners_mod.clear_exited(key)
+        return {"ok": True, "cleared": True}
+
+    @_ng_app.websocket("/ws/runner/{key}")
+    async def runner_ws(ws: WebSocket, key: str):
+        """Attach a WebSocket to an existing runner's PTY stream.
+
+        Attach/detach does not kill. On connect we send an ``info``
+        frame and replay the ring buffer; thereafter every PTY read is
+        forwarded as a binary frame. Input and resize frames travel
+        the other way. On EOF the pump sends an ``exit`` frame with the
+        final exit code and closes.
+        """
+        await ws.accept()
+        if sys.platform not in ("linux", "darwin"):
+            try:
+                await ws.send_text(
+                    json.dumps(
+                        {"type": "error", "message": "Runner only supported on Linux/macOS."}
+                    )
+                )
+                await ws.close()
+            except (WebSocketDisconnect, RuntimeError, OSError):
+                pass
+            return
+        session = runners_mod.get(key)
+        if session is None:
+            try:
+                await ws.send_text(json.dumps({"type": "session-missing", "key": key}))
+                await ws.close()
+            except (WebSocketDisconnect, RuntimeError, OSError):
+                pass
+            return
+        # Displace any stale viewer — one attached ws per session.
+        if session.attached_ws is not None:
+            old = session.attached_ws
+            session.attached_ws = None
+            try:
+                await old.close()
+            except (WebSocketDisconnect, RuntimeError, OSError):
+                pass
+        session.attached_ws = ws
+        try:
+            await ws.send_text(
+                json.dumps(
+                    {
+                        "type": "info",
+                        "key": key,
+                        "checkout_key": session.checkout_key,
+                        "path": session.path,
+                        "template": session.template,
+                        "exit_code": session.exit_code,
+                    }
+                )
+            )
+        except (WebSocketDisconnect, RuntimeError, OSError):
+            session.attached_ws = None
+            return
+        if session.buffer:
+            try:
+                await ws.send_bytes(bytes(session.buffer))
+            except (WebSocketDisconnect, RuntimeError, OSError):
+                session.attached_ws = None
+                return
+        if session.exit_code is not None:
+            # Already dead — emit the exit frame so the client renders the
+            # greyed status line, then stay attached for ring-buffer replay
+            # until the client detaches.
+            try:
+                await ws.send_text(
+                    json.dumps({"type": "exit", "exit_code": session.exit_code})
+                )
+            except (WebSocketDisconnect, RuntimeError, OSError):
+                session.attached_ws = None
+                return
+        await _attach_runner_ws(session, ws)
+
     @_ng_app.websocket("/ws/term")
     async def terminal_ws(ws: WebSocket):
         """View a pty session over a WebSocket.
@@ -1092,11 +1268,80 @@ def _reap_all_pty_sessions() -> None:
     _PTY_SESSIONS.clear()
 
 
-def _repo_entries(names: list[str], submodules: dict[str, list[str]]) -> list[dict]:
-    """Shape a repo-name list for the /config JSON payload: one object per
-    repo with its submodule paths attached.
+async def _attach_runner_ws(session, ws: WebSocket) -> None:
+    """Receive loop for a ws viewing a :class:`RunnerSession`.
+
+    Same shape as :func:`_attach_ws` — input bytes go to the PTY, resize
+    frames relay TIOCSWINSZ — but backed by ``runners.RunnerSession``
+    instead of ``PtySession``. Disconnect only detaches; the child keeps
+    running (or stays in exited state) until the user hits Stop.
     """
-    return [{"name": name, "submodules": list(submodules.get(name) or [])} for name in names]
+    try:
+        while True:
+            try:
+                msg = await ws.receive()
+            except WebSocketDisconnect:
+                break
+            mtype = msg.get("type")
+            if mtype == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                if session.exit_code is not None:
+                    continue  # No pty to write to — swallow post-exit typing.
+                ok = await runners_mod.write_input(session, msg["bytes"])
+                if not ok:
+                    break
+                continue
+            text = msg.get("text")
+            if not text:
+                continue
+            try:
+                obj = json.loads(text)
+            except ValueError:
+                continue
+            if obj.get("type") == "resize":
+                cols = max(2, int(obj.get("cols") or 80))
+                rows = max(2, int(obj.get("rows") or 24))
+                if session.exit_code is None:
+                    runners_mod.resize(session, cols, rows)
+                else:
+                    session.cols, session.rows = cols, rows
+    except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+        log.debug("attach_runner_ws: receive loop ended: %s", exc)
+    finally:
+        if session.attached_ws is ws:
+            session.attached_ws = None
+
+
+def _repo_entries(
+    names: list[str],
+    submodules: dict[str, list[str]],
+    repo_run: dict[str, RepoRunCommand] | None = None,
+) -> list[dict]:
+    """Shape a repo-name list for the /config JSON payload: one object per
+    repo with its submodule paths attached and — when configured — the
+    inline-runner template for the repo and for each sub-repo.
+    """
+    runs = repo_run or {}
+    out: list[dict] = []
+    for name in names:
+        subs = list(submodules.get(name) or [])
+        sub_objs = [
+            {"name": sub, "run": runs[f"{name}--{sub}"].template}
+            if f"{name}--{sub}" in runs
+            else {"name": sub}
+            for sub in subs
+        ]
+        entry: dict = {
+            "name": name,
+            "submodules": subs,
+            "submodule_entries": sub_objs,
+        }
+        top_run = runs.get(name)
+        if top_run is not None:
+            entry["run"] = top_run.template
+        out.append(entry)
+    return out
 
 
 def _config_to_payload(cfg: CondashConfig) -> dict:
@@ -1114,8 +1359,12 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
         "worktrees_path": str(cfg.worktrees_path) if cfg.worktrees_path else "",
         "port": int(cfg.port),
         "native": bool(cfg.native),
-        "repositories_primary": _repo_entries(cfg.repositories_primary, cfg.repo_submodules),
-        "repositories_secondary": _repo_entries(cfg.repositories_secondary, cfg.repo_submodules),
+        "repositories_primary": _repo_entries(
+            cfg.repositories_primary, cfg.repo_submodules, cfg.repo_run
+        ),
+        "repositories_secondary": _repo_entries(
+            cfg.repositories_secondary, cfg.repo_submodules, cfg.repo_run
+        ),
         "repositories_yaml_source": str(cfg.yaml_source) if cfg.yaml_source else "",
         "repositories_yaml_expected_path": (
             str(config_mod.repositories_yaml_path(cfg.conception_path))
@@ -1263,38 +1512,74 @@ def _clipboard_write(text: str) -> bool:
     return False
 
 
-def _parse_repo_entries(raw: object, key: str) -> tuple[list[str], dict[str, list[str]]]:
+def _parse_repo_entries(
+    raw: object, key: str
+) -> tuple[list[str], dict[str, list[str]], dict[str, RepoRunCommand]]:
     """Parse a `repositories_primary` / `_secondary` payload entry.
 
     Accepts either a list of strings (legacy) or a list of
-    ``{name, submodules}`` objects. Returns the ordered name list plus a
-    submodule map keyed by name.
+    ``{name, submodules, run, submodule_entries}`` objects. Returns the
+    ordered name list, a submodule-path map, and a ``repo_run`` map keyed
+    by ``"<repo>"`` / ``"<repo>--<sub>"``. ``submodule_entries`` is
+    preferred over the plain ``submodules`` list when present — it carries
+    per-sub-repo ``run`` templates the editor round-trips back.
     """
     if raw is None:
-        return [], {}
+        return [], {}, {}
     if not isinstance(raw, list):
         raise ValueError(f"{key} must be a list")
     names: list[str] = []
     subs: dict[str, list[str]] = {}
+    runs: dict[str, RepoRunCommand] = {}
     for entry in raw:
         if isinstance(entry, str):
             name = entry.strip()
             if name:
                 names.append(name)
-        elif isinstance(entry, dict):
-            name = str(entry.get("name") or "").strip()
-            if not name:
-                continue
+            continue
+        if not isinstance(entry, dict):
+            raise ValueError(f"{key} entries must be strings or objects")
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        names.append(name)
+        sub_entries_raw = entry.get("submodule_entries")
+        if isinstance(sub_entries_raw, list):
+            cleaned: list[str] = []
+            for sub_entry in sub_entries_raw:
+                if isinstance(sub_entry, str):
+                    s = sub_entry.strip()
+                    if s:
+                        cleaned.append(s)
+                    continue
+                if not isinstance(sub_entry, dict):
+                    raise ValueError(f"{key}[].submodule_entries must be strings or objects")
+                sub_name = str(sub_entry.get("name") or "").strip()
+                if not sub_name:
+                    continue
+                cleaned.append(sub_name)
+                sub_run_raw = sub_entry.get("run")
+                if sub_run_raw is None:
+                    continue
+                sub_run = str(sub_run_raw).strip()
+                if sub_run:
+                    runs[f"{name}--{sub_name}"] = RepoRunCommand(template=sub_run)
+            if cleaned:
+                subs[name] = cleaned
+        else:
             sub_raw = entry.get("submodules") or []
             if not isinstance(sub_raw, list):
                 raise ValueError(f"{key}[].submodules must be a list")
             cleaned = [str(s).strip() for s in sub_raw if str(s).strip()]
-            names.append(name)
             if cleaned:
                 subs[name] = cleaned
-        else:
-            raise ValueError(f"{key} entries must be strings or objects")
-    return names, subs
+        run_raw = entry.get("run")
+        if run_raw is None:
+            continue
+        run_str = str(run_raw).strip()
+        if run_str:
+            runs[name] = RepoRunCommand(template=run_str)
+    return names, subs, runs
 
 
 def _payload_to_config(data: dict) -> CondashConfig:
@@ -1319,13 +1604,14 @@ def _payload_to_config(data: dict) -> CondashConfig:
     if not isinstance(native_raw, bool):
         raise ValueError("native must be a boolean")
 
-    primary, primary_subs = _parse_repo_entries(
+    primary, primary_subs, primary_runs = _parse_repo_entries(
         data.get("repositories_primary"), "repositories_primary"
     )
-    secondary, secondary_subs = _parse_repo_entries(
+    secondary, secondary_subs, secondary_runs = _parse_repo_entries(
         data.get("repositories_secondary"), "repositories_secondary"
     )
     repo_submodules: dict[str, list[str]] = {**primary_subs, **secondary_subs}
+    repo_run: dict[str, RepoRunCommand] = {**primary_runs, **secondary_runs}
 
     open_with_raw = data.get("open_with") or {}
     if not isinstance(open_with_raw, dict):
@@ -1397,6 +1683,7 @@ def _payload_to_config(data: dict) -> CondashConfig:
         native=native_raw,
         open_with=open_with,
         pdf_viewer=pdf_viewer,
+        repo_run=repo_run,
     )
 
 

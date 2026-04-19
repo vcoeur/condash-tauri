@@ -271,6 +271,129 @@ launcher_command = "claude"
     assert "pdf_viewer" in body
 
 
+def test_run_field_parses_on_repo_and_submodule(tmp_path: Path) -> None:
+    """``run:`` on top-level and sub-repo entries populates ``cfg.repo_run``."""
+    conception = tmp_path / "conception"
+    (conception / "config").mkdir(parents=True)
+    (conception / "config" / "repositories.yml").write_text(
+        """workspace_path: /tmp/work
+worktrees_path: /tmp/wt
+repositories:
+  primary:
+    - name: notes.vcoeur.com
+      run: make dev
+    - name: alicepeintures.com
+      run: make dev
+      submodules:
+        - name: PaintingManager
+          run: uv run python -m painting_manager
+        - docs
+    - plain-repo
+  secondary: []
+open_with:
+  main_ide:
+    label: M
+    commands: ['idea {path}']
+  secondary_ide:
+    label: S
+    commands: ['code {path}']
+  terminal:
+    label: T
+    commands: [xterm]
+""",
+        encoding="utf-8",
+    )
+    toml = tmp_path / "config.toml"
+    toml.write_text(
+        f'conception_path = "{conception}"\nport = 0\nnative = true\n', encoding="utf-8"
+    )
+
+    cfg = cfg_mod.load(toml)
+    assert cfg.repositories_primary == ["notes.vcoeur.com", "alicepeintures.com", "plain-repo"]
+    assert cfg.repo_submodules == {"alicepeintures.com": ["PaintingManager", "docs"]}
+    assert set(cfg.repo_run.keys()) == {
+        "notes.vcoeur.com",
+        "alicepeintures.com",
+        "alicepeintures.com--PaintingManager",
+    }
+    assert cfg.repo_run["notes.vcoeur.com"].template == "make dev"
+    assert (
+        cfg.repo_run["alicepeintures.com--PaintingManager"].template
+        == "uv run python -m painting_manager"
+    )
+    # {path} substitution is identity without a {path} token.
+    assert cfg.repo_run["notes.vcoeur.com"].resolve("/tmp/work/notes.vcoeur.com") == "make dev"
+
+
+def test_run_field_round_trips_through_save(tmp_path: Path) -> None:
+    """A save → reload cycle keeps ``run:`` on both repo and sub-repo entries."""
+    conception = tmp_path / "conception"
+    (conception / "config").mkdir(parents=True)
+    (conception / "config" / "repositories.yml").write_text(
+        """workspace_path: /tmp/work
+worktrees_path: /tmp/wt
+repositories:
+  primary:
+    - name: app
+      run: make dev
+      submodules:
+        - name: worker
+          run: python -m worker
+        - static
+  secondary: []
+open_with:
+  main_ide: {label: M, commands: ['idea {path}']}
+  secondary_ide: {label: S, commands: ['code {path}']}
+  terminal: {label: T, commands: [xterm]}
+""",
+        encoding="utf-8",
+    )
+    toml = tmp_path / "config.toml"
+    toml.write_text(
+        f'conception_path = "{conception}"\nport = 0\nnative = true\n', encoding="utf-8"
+    )
+
+    cfg = cfg_mod.load(toml)
+    cfg_mod.save(cfg, toml)
+
+    body = (conception / "config" / "repositories.yml").read_text(encoding="utf-8")
+    assert "run: make dev" in body
+    assert "run: python -m worker" in body
+
+    reloaded = cfg_mod.load(toml)
+    assert reloaded.repo_run["app"].template == "make dev"
+    assert reloaded.repo_run["app--worker"].template == "python -m worker"
+    assert reloaded.repo_submodules["app"] == ["worker", "static"]
+
+
+def test_run_field_rejects_empty_string(tmp_path: Path) -> None:
+    """Explicit empty ``run:`` is a schema error so typos surface loudly."""
+    conception = tmp_path / "conception"
+    (conception / "config").mkdir(parents=True)
+    (conception / "config" / "repositories.yml").write_text(
+        """workspace_path: /tmp/work
+worktrees_path: /tmp/wt
+repositories:
+  primary:
+    - name: app
+      run: '   '
+  secondary: []
+open_with:
+  main_ide: {label: M, commands: ['idea {path}']}
+  secondary_ide: {label: S, commands: ['code {path}']}
+  terminal: {label: T, commands: [xterm]}
+""",
+        encoding="utf-8",
+    )
+    toml = tmp_path / "config.toml"
+    toml.write_text(
+        f'conception_path = "{conception}"\nport = 0\nnative = true\n', encoding="utf-8"
+    )
+
+    with pytest.raises(cfg_mod.ConfigIncompleteError):
+        cfg_mod.load(toml)
+
+
 def test_malformed_repositories_yaml_raises(tmp_path: Path) -> None:
     conception = tmp_path / "conception"
     (conception / "config").mkdir(parents=True)

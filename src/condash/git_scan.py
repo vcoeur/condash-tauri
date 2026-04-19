@@ -239,6 +239,23 @@ def _collect_git_repos(ctx: RenderCtx):
     return groups
 
 
+def _runner_tokens_for(ctx: RenderCtx, repo_name: str, sub_name: str | None = None) -> str:
+    """Return a fingerprint fragment for the runner keys anchored at a row.
+
+    Late-imports :mod:`condash.runners` to avoid import cycles at module
+    load (render/git_scan are loaded before the FastAPI routes run).
+    """
+    from . import runners as runners_mod
+
+    if sub_name is None:
+        key = repo_name
+    else:
+        key = f"{repo_name}--{sub_name}"
+    if key not in ctx.repo_run:
+        return ""
+    return f"|run:{runners_mod.fingerprint_token(key)}"
+
+
 def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
     """Return ``{node_id: hash}`` for the Code tab hierarchy.
 
@@ -281,7 +298,8 @@ def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
 
             for sub in repo.get("submodules") or []:
                 sub_id = f"{repo_id}/sub:{sub['name']}"
-                out[sub_id] = leaf_hash(sub)
+                sub_runner = _runner_tokens_for(ctx, repo["name"], sub["name"])
+                out[sub_id] = leaf_hash(sub) + sub_runner
                 repo_child_ids.append(sub_id)
 
             for wt in repo.get("worktrees", []) or []:
@@ -289,16 +307,31 @@ def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
                 wt_child_ids: list[str] = []
                 for sub in wt.get("submodules") or []:
                     sub_id = f"{wt_id}/sub:{sub['name']}"
-                    out[sub_id] = leaf_hash(sub)
+                    sub_runner = _runner_tokens_for(ctx, repo["name"], sub["name"])
+                    out[sub_id] = leaf_hash(sub) + sub_runner
                     wt_child_ids.append(sub_id)
                 # Worktree hash mixes its own state with its children — it's
                 # still a leaf-ish node (has branch/dirty of its own) but we
                 # track its children so adds/removes are detectable.
-                out[wt_id] = _hash(("wt", leaf_hash(wt), tuple(sorted(wt_child_ids))))
+                out[wt_id] = _hash(
+                    ("wt", leaf_hash(wt), tuple(sorted(wt_child_ids)))
+                )
                 repo_child_ids.append(wt_id)
 
-            # Repo hash mixes leaf state + direct children membership.
-            out[repo_id] = _hash(("repo", leaf_hash(repo), tuple(sorted(repo_child_ids))))
+            # Repo hash mixes leaf state + direct children membership. The
+            # top-level runner key is mixed in here (not per-row) so a
+            # runner start/exit repaints the whole repo block — the inline
+            # terminal mount may live on main or on a worktree row, and
+            # both repaths need to see the change.
+            top_runner = _runner_tokens_for(ctx, repo["name"])
+            out[repo_id] = _hash(
+                (
+                    "repo",
+                    leaf_hash(repo),
+                    tuple(sorted(repo_child_ids)),
+                    top_runner,
+                )
+            )
             repo_ids.append(repo_id)
 
         out[group_id] = _hash(("group", label, tuple(sorted(repo_ids))))

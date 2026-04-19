@@ -34,6 +34,7 @@ class RenderCtx:
     repo_structure: list[tuple[str, list[tuple[str, list[str]]]]]
     open_with: dict[str, Any] = field(default_factory=dict)
     pdf_viewer: list[str] = field(default_factory=list)
+    repo_run: dict[str, Any] = field(default_factory=dict)
     template: str = ""
 
 
@@ -69,6 +70,7 @@ def build_ctx(cfg) -> RenderCtx:
         repo_structure=repo_structure,
         open_with=dict(cfg.open_with or {}),
         pdf_viewer=list(getattr(cfg, "pdf_viewer", None) or []),
+        repo_run=dict(getattr(cfg, "repo_run", None) or {}),
         template=_load_template(),
     )
 

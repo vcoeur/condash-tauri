@@ -1485,6 +1485,109 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 }
 .git-action-btn.is-err { color: var(--git-changes); }
 
+/* --- Inline dev-server runner ---
+   One Run/Stop button per checkout row. Button colour carries the
+   signal: green to start, red to stop, amber to switch (another
+   checkout is already live). Inline terminal mounts as a sibling
+   immediately below the checkout row. */
+.git-action-btn.git-action-runner-run { color: #41a83a; }
+.git-action-btn.git-action-runner-stop { color: #d64545; }
+.git-action-btn.git-action-runner-switch { color: #c68b1f; }
+.git-action-btn.git-action-runner:hover { background: var(--accent-bg); }
+
+.git-runner-jump {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; padding: 0; margin: 0 4px 0 -2px;
+    background: transparent; border: none; color: #41a83a; cursor: pointer;
+    vertical-align: middle;
+}
+.git-runner-jump:hover { filter: brightness(1.15); }
+
+.runner-term-mount {
+    --runner-term-rows: 18;
+    margin: 0.25rem 0 0.5rem;
+    border: 1px solid var(--border);
+    border-left: 2px solid #41a83a;
+    border-radius: 6px;
+    background: #0b0b0e;
+    color: #e6e6e6;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    transition: box-shadow 0.8s;
+}
+.runner-term-mount.runner-term-highlight {
+    box-shadow: 0 0 0 2px color-mix(in srgb, #41a83a 50%, transparent);
+}
+.runner-term-mount.runner-exited {
+    border-left-color: var(--text-muted);
+    opacity: 0.85;
+}
+.runner-term-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.2rem 0.5rem;
+    background: color-mix(in srgb, var(--bg-card) 85%, black 15%);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.72rem;
+}
+.runner-term-label {
+    font-weight: 600; color: var(--text-secondary);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.runner-term-status {
+    flex: 1; color: var(--text-muted); font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+}
+.runner-term-mount.runner-exited .runner-term-status {
+    color: var(--git-changes);
+}
+.runner-control {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 20px; padding: 0;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 4px;
+    cursor: pointer;
+}
+.runner-control:hover { background: var(--accent-bg); color: var(--accent); }
+.runner-term-host {
+    position: relative; height: calc(var(--runner-term-rows) * 1.2em);
+    min-height: 180px;
+    padding: 2px 4px;
+    overflow: hidden;
+}
+.runner-term-host .xterm { height: 100%; width: 100%; }
+.runner-term-host .xterm-viewport { overflow-y: auto; }
+
+/* Pop-out modal — full-size terminal; close returns to inline. */
+.runner-modal {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: center; justify-content: center;
+}
+.runner-modal-dialog {
+    width: 92vw; height: 86vh; max-width: 1400px;
+    background: #0b0b0e; color: #e6e6e6;
+    border-radius: 10px; overflow: hidden;
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border);
+    box-shadow: 0 16px 60px rgba(0, 0, 0, 0.5);
+}
+.runner-modal-header {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.45rem 0.8rem;
+    background: color-mix(in srgb, var(--bg-card) 85%, black 15%);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+.runner-modal-close {
+    font-size: 1.1rem; line-height: 1;
+    width: 28px; height: 24px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+}
+.runner-modal-dialog .runner-term-host {
+    flex: 1 1 auto; height: auto;
+}
+
 /* Per-card quick actions (work-on + open folder) — sit to the right of
    the date in the card header, use the same icon-button styling as the
    git-row slots so the visual language stays consistent. */
@@ -4274,6 +4377,9 @@ function _supportsFragmentFetch(nodeId) {
     // Knowledge directories and cards (not the root).
     if (nodeId === 'knowledge') return false;
     if (/^knowledge\//.test(nodeId)) return true;
+    // Repo blocks: code/<group>/<repo>. Group and tab ids still fall
+    // back to global reload.
+    if (/^code\/[^/]+\/[^/]+$/.test(nodeId)) return true;
     return false;
 }
 
@@ -5522,6 +5628,370 @@ setInterval(checkUpdates, 5000);
 new MutationObserver(function() {
     if (typeof _cmRetheme === 'function') _cmRetheme();
 }).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+
+/* --- Inline dev-server runner viewers ---
+   Each `.runner-term-mount` element rendered by the repo strip gets its
+   own xterm instance + WebSocket to `/ws/runner/<key>`. Attach and
+   detach do not kill the server-side pty; reloadNode / _reloadInPlace
+   swaps the mount DOM, and runnerReattachAll() closes orphaned viewers
+   and creates fresh ones for any newly-inserted mounts. Pop-out mode
+   detaches the inline ws in favour of a modal-hosted viewer, then
+   re-attaches inline when the modal closes. */
+var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
+var _runnerActiveModal = null;
+function _runnerDomKey(key, checkout) { return key + '|' + checkout; }
+
+function _runnerCreateViewer(mount, key, checkout, opts) {
+    if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') return;
+    opts = opts || {};
+    var host = mount.querySelector('.runner-term-host');
+    if (!host) return;
+    var term = new Terminal({
+        convertEol: false,
+        cursorBlink: false,
+        fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+        fontSize: 12,
+        theme: {background: '#0b0b0e', foreground: '#e6e6e6'},
+    });
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(host);
+    try { fit.fit(); } catch (e) {}
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var wsUrl = proto + '//' + location.host + '/ws/runner/' + encodeURIComponent(key);
+    var ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
+    var viewer = {
+        ws: ws, term: term, fit: fit, mount: mount,
+        key: key, checkout: checkout,
+        exited: mount.hasAttribute('data-exit-code'),
+        isModal: !!opts.isModal,
+    };
+    _runnerViewers[_runnerDomKey(key, checkout)] = viewer;
+
+    ws.onopen = function() {
+        try {
+            ws.send(JSON.stringify({type: 'resize', cols: term.cols, rows: term.rows}));
+        } catch (e) {}
+    };
+    ws.onmessage = function(ev) {
+        if (typeof ev.data === 'string') {
+            try {
+                var obj = JSON.parse(ev.data);
+                if (obj.type === 'info') {
+                    var status = obj.exit_code == null
+                        ? 'running · ' + (obj.template || '')
+                        : 'exited: ' + obj.exit_code;
+                    _runnerSetStatus(viewer, status);
+                    if (obj.exit_code != null) {
+                        viewer.exited = true;
+                        mount.setAttribute('data-exit-code', String(obj.exit_code));
+                        mount.classList.add('runner-exited');
+                    }
+                } else if (obj.type === 'exit') {
+                    viewer.exited = true;
+                    mount.setAttribute('data-exit-code', String(obj.exit_code));
+                    mount.classList.add('runner-exited');
+                    _runnerSetStatus(viewer, 'exited: ' + (obj.exit_code == null ? '?' : obj.exit_code));
+                    // Trigger a fragment refresh so the Stop button flips back
+                    // to Run and the repo-strip reflects the end-of-run state.
+                    _runnerScheduleRefresh(key, checkout);
+                } else if (obj.type === 'session-missing') {
+                    _runnerSetStatus(viewer, 'no session');
+                } else if (obj.type === 'error' && obj.message) {
+                    term.write('\r\n\x1b[31m' + obj.message + '\x1b[0m\r\n');
+                }
+            } catch (e) {}
+            return;
+        }
+        term.write(new Uint8Array(ev.data));
+    };
+    ws.onclose = function() {
+        // Left in place — the reattach / stop path takes care of cleanup.
+    };
+    term.onData(function(data) {
+        if (viewer.exited) return;
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(new TextEncoder().encode(data));
+        }
+    });
+    // Defer a second fit pass: the mount may have been inserted with
+    // display:none under a collapsed subgroup; xterm opened with cols=0,
+    // and the first frame after the mount becomes visible needs a retry.
+    requestAnimationFrame(function() {
+        try {
+            fit.fit();
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'resize', cols: term.cols, rows: term.rows}));
+            }
+        } catch (e) {}
+    });
+}
+
+function _runnerSetStatus(viewer, text) {
+    var el = viewer.mount.querySelector('.runner-term-status');
+    if (el) el.textContent = text;
+}
+
+function _runnerDestroyViewer(viewer) {
+    if (!viewer) return;
+    try { viewer.ws.close(); } catch (e) {}
+    try { viewer.term.dispose(); } catch (e) {}
+    delete _runnerViewers[_runnerDomKey(viewer.key, viewer.checkout)];
+}
+
+function runnerReattachAll() {
+    if (typeof Terminal === 'undefined') return;
+    var mounts = document.querySelectorAll('.runner-term-mount');
+    var seen = {};
+    mounts.forEach(function(mount) {
+        if (mount.classList.contains('runner-modal-viewer')) return;  // modal path
+        var key = mount.dataset.runnerKey;
+        var checkout = mount.dataset.runnerCheckout;
+        if (!key || !checkout) return;
+        var domKey = _runnerDomKey(key, checkout);
+        seen[domKey] = true;
+        var existing = _runnerViewers[domKey];
+        if (existing && existing.mount === mount && !existing.isModal) return;
+        // If a modal is hosting this session, leave the inline mount empty.
+        if (existing && existing.isModal) return;
+        if (existing) _runnerDestroyViewer(existing);
+        _runnerCreateViewer(mount, key, checkout);
+    });
+    // Close viewers whose mount is no longer in the DOM.
+    Object.keys(_runnerViewers).forEach(function(domKey) {
+        if (seen[domKey]) return;
+        var viewer = _runnerViewers[domKey];
+        if (viewer.isModal) return;  // modal viewers outlive DOM mounts
+        _runnerDestroyViewer(viewer);
+    });
+}
+
+function _runnerFindMount(key, checkout) {
+    var esc = (window.CSS && CSS.escape) ? CSS.escape : function(s) { return s; };
+    return document.querySelector(
+        '.runner-term-mount[data-runner-key="' + esc(key) + '"]'
+        + '[data-runner-checkout="' + esc(checkout) + '"]'
+    );
+}
+
+function _runnerRepoNodeIdFor(key, checkout) {
+    var mount = _runnerFindMount(key, checkout);
+    if (!mount) return null;
+    var repo = mount.closest('.git-repo');
+    return repo ? repo.getAttribute('data-node-id') : null;
+}
+
+async function _runnerRefreshRepoNode(repoNodeId) {
+    if (!repoNodeId) { await _reloadInPlace(); runnerReattachAll(); return; }
+    await reloadNode(repoNodeId);
+    runnerReattachAll();
+}
+
+var _runnerRefreshPending = null;
+function _runnerScheduleRefresh(key, checkout) {
+    // Debounce rapid state changes — a burst of starts/exits during a
+    // confirm-switch flow shouldn't trigger three fragment fetches.
+    if (_runnerRefreshPending) clearTimeout(_runnerRefreshPending);
+    var repoId = _runnerRepoNodeIdFor(key, checkout)
+        || document.querySelector('.git-repo[data-node-id*="/' + key.split('--')[0] + '"]');
+    if (repoId && repoId.getAttribute) repoId = repoId.getAttribute('data-node-id');
+    _runnerRefreshPending = setTimeout(function() {
+        _runnerRefreshPending = null;
+        _runnerRefreshRepoNode(repoId);
+    }, 120);
+}
+
+async function runnerStart(ev, key, checkout, path) {
+    if (ev) ev.stopPropagation();
+    var res;
+    try {
+        res = await fetch('/api/runner/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: key, checkout_key: checkout, path: path}),
+        });
+    } catch (e) {
+        return;
+    }
+    if (res.status === 409) {
+        var data = {};
+        try { data = await res.json(); } catch (e) {}
+        var other = data.checkout_key || '?';
+        if (!confirm('Stop runner on ' + other + ' and start on ' + checkout + '?')) return;
+        await _runnerStopFetch(key);
+        try {
+            await fetch('/api/runner/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: key, checkout_key: checkout, path: path}),
+            });
+        } catch (e) {}
+    }
+    await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+}
+
+async function runnerSwitch(ev, key, checkout, path) {
+    // Same endpoint as start — server returns 409, client confirms and
+    // stops+restarts. Kept as its own entrypoint so the button's onclick
+    // is unambiguous in the rendered HTML.
+    return runnerStart(ev, key, checkout, path);
+}
+
+async function runnerStop(ev, key) {
+    if (ev) ev.stopPropagation();
+    await _runnerStopFetch(key);
+    await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+}
+
+function runnerStopInline(btn) {
+    var mount = btn.closest('.runner-term-mount');
+    if (!mount) return;
+    runnerStop(null, mount.dataset.runnerKey);
+}
+
+async function _runnerStopFetch(key) {
+    try {
+        await fetch('/api/runner/stop', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: key}),
+        });
+    } catch (e) {}
+}
+
+function _findRepoNodeIdByKey(key) {
+    var repoName = key.indexOf('--') >= 0 ? key.split('--')[0] : key;
+    var esc = (window.CSS && CSS.escape) ? CSS.escape : function(s) { return s; };
+    // The repo node id is "code/<group>/<repo>". We match by suffix.
+    var nodes = document.querySelectorAll('.git-repo[data-node-id]');
+    for (var i = 0; i < nodes.length; i++) {
+        var id = nodes[i].getAttribute('data-node-id');
+        if (id && id.endsWith('/' + repoName)) return id;
+    }
+    return null;
+}
+
+function runnerJump(ev, btn) {
+    if (ev) ev.stopPropagation();
+    var repo = btn.closest('.git-repo');
+    if (!repo) return;
+    var mount = repo.querySelector('.runner-term-mount');
+    if (!mount) return;
+    try { mount.scrollIntoView({behavior: 'smooth', block: 'center'}); }
+    catch (e) { mount.scrollIntoView(); }
+    mount.classList.add('runner-term-highlight');
+    setTimeout(function() {
+        mount.classList.remove('runner-term-highlight');
+    }, 1200);
+}
+
+function runnerPopout(btn) {
+    var mount = btn.closest('.runner-term-mount');
+    if (!mount) return;
+    if (_runnerActiveModal) _runnerCloseModal();
+    var key = mount.dataset.runnerKey;
+    var checkout = mount.dataset.runnerCheckout;
+    var domKey = _runnerDomKey(key, checkout);
+    // Detach inline viewer first — one attached ws per server-side session.
+    _runnerDestroyViewer(_runnerViewers[domKey]);
+
+    var modal = document.createElement('div');
+    modal.className = 'runner-modal';
+    modal.innerHTML = ''
+        + '<div class="runner-modal-dialog">'
+        + '  <div class="runner-modal-header">'
+        + '    <span class="runner-term-label"></span>'
+        + '    <span class="runner-term-status" aria-live="polite"></span>'
+        + '    <button class="runner-modal-close" aria-label="Close">&times;</button>'
+        + '  </div>'
+        + '  <div class="runner-term-mount runner-modal-viewer" data-runner-key="'
+        + key.replace(/"/g, '&quot;') + '" data-runner-checkout="'
+        + checkout.replace(/"/g, '&quot;') + '">'
+        + '    <div class="runner-term-host"></div>'
+        + '  </div>'
+        + '</div>';
+    modal.querySelector('.runner-term-label').textContent = key + ' @ ' + checkout;
+    document.body.appendChild(modal);
+    modal.querySelector('.runner-modal-close').onclick = _runnerCloseModal;
+    modal.addEventListener('click', function(ev) {
+        if (ev.target === modal) _runnerCloseModal();
+    });
+    var viewerMount = modal.querySelector('.runner-term-mount');
+    _runnerCreateViewer(viewerMount, key, checkout, {isModal: true});
+    _runnerActiveModal = {
+        modal: modal, key: key, checkout: checkout,
+    };
+    // Nudge a fit once the modal has laid out.
+    requestAnimationFrame(function() {
+        var viewer = _runnerViewers[_runnerDomKey(key, checkout)];
+        if (!viewer) return;
+        try {
+            viewer.fit.fit();
+            if (viewer.ws.readyState === WebSocket.OPEN) {
+                viewer.ws.send(JSON.stringify({
+                    type: 'resize', cols: viewer.term.cols, rows: viewer.term.rows,
+                }));
+            }
+        } catch (e) {}
+    });
+}
+
+function _runnerCloseModal() {
+    var active = _runnerActiveModal;
+    if (!active) return;
+    _runnerActiveModal = null;
+    var viewer = _runnerViewers[_runnerDomKey(active.key, active.checkout)];
+    _runnerDestroyViewer(viewer);
+    if (active.modal && active.modal.parentNode) {
+        active.modal.parentNode.removeChild(active.modal);
+    }
+    // Re-attach inline if the mount still exists.
+    var inlineMount = _runnerFindMount(active.key, active.checkout);
+    if (inlineMount) _runnerCreateViewer(inlineMount, active.key, active.checkout);
+}
+
+// Hook runner reattachment into the existing refresh paths. Patch
+// _reloadInPlace and reloadNode just after their definitions so every
+// DOM swap leads into a viewer sweep without scattering calls across
+// call sites.
+(function() {
+    var origReloadInPlace = window._reloadInPlace;
+    if (typeof origReloadInPlace === 'function') {
+        window._reloadInPlace = async function() {
+            var ret = await origReloadInPlace.apply(this, arguments);
+            try { runnerReattachAll(); } catch (e) {}
+            return ret;
+        };
+    }
+    var origReloadNode = window.reloadNode;
+    if (typeof origReloadNode === 'function') {
+        window.reloadNode = async function() {
+            var ret = await origReloadNode.apply(this, arguments);
+            try { runnerReattachAll(); } catch (e) {}
+            return ret;
+        };
+    }
+})();
+
+// Initial attach — runs once xterm assets have loaded.
+document.addEventListener('DOMContentLoaded', function() {
+    window.addEventListener('load', function() {
+        try { runnerReattachAll(); } catch (e) {}
+    }, {once: true});
+});
+// Also resize on window resize so the inline xterm tracks layout changes.
+window.addEventListener('resize', function() {
+    Object.keys(_runnerViewers).forEach(function(domKey) {
+        var v = _runnerViewers[domKey];
+        try {
+            v.fit.fit();
+            if (v.ws.readyState === WebSocket.OPEN) {
+                v.ws.send(JSON.stringify({type: 'resize', cols: v.term.cols, rows: v.term.rows}));
+            }
+        } catch (e) {}
+    });
+});
 </script>
 
 <script type="module">
