@@ -138,16 +138,6 @@ def _load_repository_structure(ctx: RenderCtx):
     return list(ctx.repo_structure)
 
 
-def _resolve_submodules(base_path, submodule_names):
-    out = []
-    base = Path(base_path)
-    for name in submodule_names:
-        sub = base / name
-        if sub.is_dir():
-            out.append({"name": name, "path": str(sub.resolve())})
-    return out
-
-
 def _scan_repo(found: dict, repo_dir: Path, display_name: str) -> None:
     """Probe ``repo_dir`` and record the result under ``display_name`` in
     ``found``. Caller has already confirmed ``repo_dir/.git`` exists.
@@ -161,7 +151,75 @@ def _scan_repo(found: dict, repo_dir: Path, display_name: str) -> None:
         "changed": changed,
         "changed_files": changed_files,
         "worktrees": _git_worktrees(repo_dir),
-        "submodules": [],
+    }
+
+
+def _subrepo_member(parent: dict, sub_name: str) -> dict:
+    """Build a top-level repo entry for a subrepo declared under ``parent``.
+
+    The subrepo's worktrees mirror the parent's: each parent worktree gets a
+    matching subrepo entry pointing at ``<wt>/<sub_name>``. When the
+    subdirectory is absent in a given worktree, the entry is emitted with
+    ``missing=True`` so the UI can flag it.
+    """
+    parent_path = Path(parent["path"])
+    sub_path = parent_path / sub_name
+    parent_changed = parent.get("changed_files") or []
+    prefix = sub_name.rstrip("/") + "/"
+    sub_changed_files = [f[len(prefix) :] for f in parent_changed if f.startswith(prefix)]
+    member = {
+        "name": sub_name,
+        "is_subrepo": True,
+        "path": str(sub_path.resolve()) if sub_path.is_dir() else str(sub_path),
+        "branch": "",
+        "dirty": bool(sub_changed_files),
+        "changed": len(sub_changed_files),
+        "changed_files": sub_changed_files,
+        "missing": not sub_path.is_dir(),
+        "worktrees": [],
+    }
+    for wt in parent.get("worktrees") or []:
+        wt_sub_path = Path(wt["path"]) / sub_name
+        wt_changed_files = [
+            f[len(prefix) :] for f in (wt.get("changed_files") or []) if f.startswith(prefix)
+        ]
+        member["worktrees"].append(
+            {
+                "key": wt["key"],
+                "path": str(wt_sub_path.resolve()) if wt_sub_path.is_dir() else str(wt_sub_path),
+                "branch": wt.get("branch", "") if wt_sub_path.is_dir() else "",
+                "dirty": bool(wt_changed_files),
+                "changed": len(wt_changed_files),
+                "changed_files": wt_changed_files,
+                "missing": not wt_sub_path.is_dir(),
+            }
+        )
+    return member
+
+
+def _parent_member(repo: dict) -> dict:
+    """Promote a scanned repo into the parent member of a family."""
+    return {
+        "name": repo["name"],
+        "is_subrepo": False,
+        "path": repo["path"],
+        "branch": repo["branch"],
+        "dirty": repo["dirty"],
+        "changed": repo["changed"],
+        "changed_files": repo["changed_files"],
+        "missing": False,
+        "worktrees": [
+            {
+                "key": wt["key"],
+                "path": wt["path"],
+                "branch": wt["branch"],
+                "dirty": wt["dirty"],
+                "changed": wt["changed"],
+                "changed_files": wt.get("changed_files") or [],
+                "missing": False,
+            }
+            for wt in repo.get("worktrees") or []
+        ],
     }
 
 
@@ -208,32 +266,26 @@ def _collect_git_repos(ctx: RenderCtx):
     structure = _load_repository_structure(ctx)
     submodule_map = {name: subs for _, entries in structure for name, subs in entries}
 
-    def _attach_counts(container):
-        changed_files = container.get("changed_files") or []
-        for sub in container.get("submodules") or []:
-            prefix = sub["name"] + "/"
-            sub["changed"] = sum(1 for f in changed_files if f.startswith(prefix))
-            sub["dirty"] = sub["changed"] > 0
-
-    for repo_name, repo in found.items():
-        subs = submodule_map.get(repo_name) or []
-        if not subs:
-            continue
-        repo["submodules"] = _resolve_submodules(repo["path"], subs)
-        _attach_counts(repo)
-        for wt in repo["worktrees"]:
-            wt["submodules"] = _resolve_submodules(wt["path"], subs)
-            _attach_counts(wt)
+    def _build_family(repo_name: str) -> dict:
+        repo = found[repo_name]
+        members = [_parent_member(repo)]
+        for sub_name in submodule_map.get(repo_name) or []:
+            members.append(_subrepo_member(repo, sub_name))
+        return {
+            "name": repo_name,
+            "has_subrepos": len(members) > 1,
+            "members": members,
+        }
 
     groups = []
     placed = set()
     for label, entries in structure:
-        bucket = [found[n] for n, _ in entries if n in found]
+        bucket = [_build_family(n) for n, _ in entries if n in found]
         placed.update(n for n, _ in entries if n in found)
         if bucket:
             groups.append((label, bucket))
 
-    others = [found[n] for n in sorted(found) if n not in placed]
+    others = [_build_family(n) for n in sorted(found) if n not in placed]
     if others:
         groups.append(("Others", others))
     return groups
@@ -246,15 +298,16 @@ def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
 
       - ``code`` — whole Code tab.
       - ``code/<group-label>`` — primary / secondary / Others bucket.
-      - ``code/<group-label>/<repo>`` — a repo.
-      - ``code/<group-label>/<repo>/sub:<name>`` — a submodule under the repo.
-      - ``code/<group-label>/<repo>/wt:<key>`` — a worktree under the repo.
-      - ``code/<group-label>/<repo>/wt:<key>/sub:<name>`` — a submodule
-        inside a worktree.
+      - ``code/<group-label>/<family>`` — a repo family (parent + subrepos).
+      - ``code/<group-label>/<family>/m:<name>`` — a member (parent or
+        subrepo). The parent uses its own name; subrepos use the subrepo
+        name.
+      - ``code/<group-label>/<family>/m:<name>/wt:<key>`` — a worktree of
+        that member.
 
-    Leaf hashes cover branch + dirty count + change-file signature. Group
-    hashes depend only on the set of direct child ids so edits at a repo
-    don't dirty-mark the enclosing group; only add/remove does.
+    Leaf hashes cover branch + dirty count + change-file signature. Group /
+    family / member hashes mix their own state with the set of direct child
+    ids so adds/removes are detectable but in-place edits don't bubble.
     """
     out: dict[str, str] = {}
     groups = _collect_git_repos(ctx)
@@ -267,41 +320,30 @@ def compute_git_node_fingerprints(ctx: RenderCtx) -> dict[str, str]:
                 node.get("branch", ""),
                 node.get("changed", 0),
                 bool(node.get("dirty")),
+                bool(node.get("missing")),
                 files,
             )
         )
 
     top_child_ids: list[str] = []
-    for label, repos in groups:
+    for label, families in groups:
         group_id = f"code/{label}"
-        repo_ids: list[str] = []
-        for repo in repos:
-            repo_id = f"{group_id}/{repo['name']}"
-            repo_child_ids: list[str] = []
-
-            for sub in repo.get("submodules") or []:
-                sub_id = f"{repo_id}/sub:{sub['name']}"
-                out[sub_id] = leaf_hash(sub)
-                repo_child_ids.append(sub_id)
-
-            for wt in repo.get("worktrees", []) or []:
-                wt_id = f"{repo_id}/wt:{wt['key']}"
-                wt_child_ids: list[str] = []
-                for sub in wt.get("submodules") or []:
-                    sub_id = f"{wt_id}/sub:{sub['name']}"
-                    out[sub_id] = leaf_hash(sub)
-                    wt_child_ids.append(sub_id)
-                # Worktree hash mixes its own state with its children — it's
-                # still a leaf-ish node (has branch/dirty of its own) but we
-                # track its children so adds/removes are detectable.
-                out[wt_id] = _hash(("wt", leaf_hash(wt), tuple(sorted(wt_child_ids))))
-                repo_child_ids.append(wt_id)
-
-            # Repo hash mixes leaf state + direct children membership.
-            out[repo_id] = _hash(("repo", leaf_hash(repo), tuple(sorted(repo_child_ids))))
-            repo_ids.append(repo_id)
-
-        out[group_id] = _hash(("group", label, tuple(sorted(repo_ids))))
+        family_ids: list[str] = []
+        for family in families:
+            family_id = f"{group_id}/{family['name']}"
+            member_ids: list[str] = []
+            for member in family["members"]:
+                member_id = f"{family_id}/m:{member['name']}"
+                wt_ids: list[str] = []
+                for wt in member.get("worktrees") or []:
+                    wt_id = f"{member_id}/wt:{wt['key']}"
+                    out[wt_id] = leaf_hash(wt)
+                    wt_ids.append(wt_id)
+                out[member_id] = _hash(("member", leaf_hash(member), tuple(sorted(wt_ids))))
+                member_ids.append(member_id)
+            out[family_id] = _hash(("family", tuple(sorted(member_ids))))
+            family_ids.append(family_id)
+        out[group_id] = _hash(("group", label, tuple(sorted(family_ids))))
         top_child_ids.append(group_id)
 
     out["code"] = _hash(("tab", "code", tuple(sorted(top_child_ids))))

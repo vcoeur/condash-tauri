@@ -1426,37 +1426,27 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 .git-row.git-worktree .git-changes { font-size: 0.7rem; }
 .git-row.git-worktree .git-clean { font-size: 0.82rem; }
 
-/* Collapsible parent rows: assembly-line (and its worktrees) that
-   declare submodules in repositories.yml. A chevron sits at the front
-   of the name column and rotates when the group is expanded. */
-.git-row-collapsible { cursor: pointer; }
-.git-row-collapsible .git-name { user-select: none; }
-.git-chevron {
-    display: inline-block;
-    width: 0.85em;
-    font-size: 0.72em;
-    color: var(--text-secondary);
-    transform: rotate(0deg);
-    transition: transform 0.12s ease;
-    margin-right: 0.35em;
-}
-.git-row-collapsible.is-expanded .git-chevron {
-    transform: rotate(90deg);
-}
-/* Subrepo group container — sits immediately after its parent row and
-   is collapsed by default. Rows inside match the parent repo's size so
-   a subrepo looks first-class; the accent left border + small label are
-   the only visual cues that they belong to the row above. */
-.git-subgroup.collapsed { display: none; }
-.git-subgroup {
+/* Family wrapper — groups a parent repo with the subrepos declared
+   under it in repositories.yml. The accent left border is the only
+   visual cue tying them together; rows themselves render top-level. */
+.git-family { padding: 0; }
+.git-family-with-subs {
     margin: 0.15rem 0 0.3rem;
     border-left: 2px solid var(--accent);
-    padding: 0.2rem 0 0.2rem 0.6rem;
+    padding-left: 0.4rem;
 }
-.git-subgroup-label {
-    font-size: 0.66rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--text-muted);
-    padding: 2px 0 4px;
+/* Missing-row state: subrepo worktree whose subdir doesn't exist in
+   that worktree. Greyed out, no actions, "missing" pill in the status
+   column. */
+.git-row.git-missing-row { opacity: 0.55; }
+.git-actions-empty { width: 136px; flex-shrink: 0; }
+.git-missing {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: var(--btn-bg);
+    border: 1px dashed var(--btn-border);
+    padding: 1px 8px; border-radius: 8px;
+    text-transform: uppercase; letter-spacing: 0.04em;
 }
 
 /* Action buttons — IDEA / VS Code / Terminal, icon-only, left-aligned.
@@ -2240,17 +2230,6 @@ async function openFolder(ev, relPath) {
     } catch (e) {
         flash('is-err', 'err', 1200);
     }
-}
-
-/* --- Collapsible submodule groups ---
-   Toggles the .git-submodules container that sits immediately after a
-   collapsible parent row. Button clicks inside the row stop propagation
-   via openPath, so they don't trigger a toggle. */
-function toggleSubmodules(row) {
-    var next = row.nextElementSibling;
-    if (!next || !next.classList.contains('git-subgroup')) return;
-    var nowCollapsed = next.classList.toggle('collapsed');
-    row.classList.toggle('is-expanded', !nowCollapsed);
 }
 
 /* --- Tabs & Cards --- */

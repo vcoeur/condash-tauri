@@ -658,107 +658,77 @@ def _render_git_actions(ctx: RenderCtx, path):
     return f'<div class="git-actions">{"".join(items_html)}</div>'
 
 
-def _render_submodule_rows(ctx: RenderCtx, submodules, worktree=False, parent_node_id: str = ""):
-    """Render subrepo rows at the same visual size as parent repos."""
-    if not submodules:
-        return ""
-    rows = []
-    for sub in submodules:
-        sub_actions = _render_git_actions(ctx, sub["path"])
-        count = sub.get("changed", 0)
-        dirty_cls = " git-dirty" if count else ""
-        badge = (
-            f'<span class="git-changes">{count} changed</span>'
-            if count
-            else '<span class="git-clean">\u2713</span>'
-        )
-        node_attr = (
-            f' data-node-id="{parent_node_id}/sub:{h(sub["name"])}"' if parent_node_id else ""
-        )
-        rows.append(
-            f'<div class="git-row{dirty_cls}"{node_attr} title="{h(sub["path"])}">'
-            f"{sub_actions}"
-            f'<span class="git-name">{h(sub["name"])}</span>'
-            f'<span class="git-branch"></span>'
-            f'<span class="git-status">{badge}</span>'
-            f'<span class="git-spacer"></span></div>'
-        )
-    inner = "\n".join(rows)
-    scope = "worktree" if worktree else "repo"
+def _status_badge(member_or_wt: dict) -> str:
+    if member_or_wt.get("missing"):
+        return '<span class="git-missing">missing</span>'
+    if member_or_wt.get("dirty"):
+        return f'<span class="git-changes">{member_or_wt["changed"]} changed</span>'
+    return '<span class="git-clean">\u2713</span>'
+
+
+def _render_member_row(ctx: RenderCtx, member: dict, member_id: str) -> str:
+    missing_cls = " git-missing-row" if member.get("missing") else ""
+    dirty_cls = " git-dirty" if member.get("dirty") else ""
+    actions = "" if member.get("missing") else _render_git_actions(ctx, member["path"])
+    if not actions:
+        actions = '<div class="git-actions git-actions-empty"></div>'
     return (
-        f'<div class="git-subgroup git-subgroup-{scope} collapsed">'
-        f'<div class="git-subgroup-label">Subrepos</div>'
-        f"{inner}"
-        f"</div>"
+        f'<div class="git-row{dirty_cls}{missing_cls}" '
+        f'data-node-id="{h(member_id)}" title="{h(member["path"])}">'
+        f"{actions}"
+        f'<span class="git-name">{h(member["name"])}</span>'
+        f'<span class="git-branch">{h(member["branch"])}</span>'
+        f'<span class="git-status">{_status_badge(member)}</span>'
+        f'<span class="git-spacer"></span></div>'
+    )
+
+
+def _render_worktree_row(ctx: RenderCtx, wt: dict, wt_id: str) -> str:
+    missing_cls = " git-missing-row" if wt.get("missing") else ""
+    dirty_cls = " git-dirty" if wt.get("dirty") else ""
+    actions = "" if wt.get("missing") else _render_git_actions(ctx, wt["path"])
+    if not actions:
+        actions = '<div class="git-actions git-actions-empty"></div>'
+    return (
+        f'<div class="git-row git-worktree{dirty_cls}{missing_cls}" '
+        f'data-node-id="{h(wt_id)}" title="{h(wt["path"])}">'
+        f"{actions}"
+        f'<span class="git-name">\u21b3 {h(wt["key"])}</span>'
+        f'<span class="git-branch">{h(wt["branch"])}</span>'
+        f'<span class="git-status">{_status_badge(wt)}</span>'
+        f'<span class="git-spacer"></span></div>'
     )
 
 
 def _render_git_repos(ctx: RenderCtx, groups):
+    """Render the Code-tab repo strip.
+
+    Each ``group`` (primary / secondary / Others) holds families. A family
+    is a parent repo plus the subrepos declared under it in
+    ``repositories.yml``. Members render as top-level rows; each member's
+    worktrees nest directly underneath. When a family carries subrepos a
+    blue accent left-border wraps the whole family so the eye groups them
+    visually.
+    """
     if not groups:
         return ""
     out = []
-    chevron = '<span class="git-chevron">\u25b6</span>'
-    for label, repos in groups:
+    for label, families in groups:
         group_id = f"code/{label}"
         out.append(f'<div class="git-group" data-node-id="{h(group_id)}">')
         out.append(f'<div class="git-group-header">{h(label)}</div>')
         out.append('<div class="git-group-body">')
-        for r in repos:
-            repo_id = f"{group_id}/{r['name']}"
-            out.append(f'<div class="git-repo" data-node-id="{h(repo_id)}">')
-            dirty_cls = " git-dirty" if r["dirty"] else ""
-            badge = (
-                f'<span class="git-changes">{r["changed"]} changed</span>'
-                if r["dirty"]
-                else '<span class="git-clean">\u2713</span>'
-            )
-            actions = _render_git_actions(ctx, r["path"])
-            has_subs = bool(r.get("submodules"))
-            toggle_cls = " git-row-collapsible" if has_subs else ""
-            toggle_attr = ' onclick="toggleSubmodules(this)"' if has_subs else ""
-            chev = chevron if has_subs else ""
-            out.append(
-                f'<div class="git-row{dirty_cls}{toggle_cls}"{toggle_attr}>'
-                f"{actions}"
-                f'<span class="git-name">{chev}{h(r["name"])}</span>'
-                f'<span class="git-branch">{h(r["branch"])}</span>'
-                f'<span class="git-status">{badge}</span>'
-                f'<span class="git-spacer"></span></div>'
-            )
-            sub_html = _render_submodule_rows(
-                ctx, r.get("submodules") or [], parent_node_id=repo_id
-            )
-            if sub_html:
-                out.append(sub_html)
-            for wt in r.get("worktrees", []):
-                wt_id = f"{repo_id}/wt:{wt['key']}"
-                wt_dirty_cls = " git-dirty" if wt["dirty"] else ""
-                wt_badge = (
-                    f'<span class="git-changes">{wt["changed"]} changed</span>'
-                    if wt["dirty"]
-                    else '<span class="git-clean">\u2713</span>'
-                )
-                wt_actions = _render_git_actions(ctx, wt["path"])
-                wt_has_subs = bool(wt.get("submodules"))
-                wt_toggle_cls = " git-row-collapsible" if wt_has_subs else ""
-                wt_toggle_attr = ' onclick="toggleSubmodules(this)"' if wt_has_subs else ""
-                wt_chev = chevron if wt_has_subs else ""
-                out.append(
-                    f'<div class="git-row git-worktree{wt_dirty_cls}{wt_toggle_cls}" '
-                    f'data-node-id="{h(wt_id)}" '
-                    f'title="{h(wt["path"])}"{wt_toggle_attr}>'
-                    f"{wt_actions}"
-                    f'<span class="git-name">{wt_chev}\u21b3 {h(wt["key"])}</span>'
-                    f'<span class="git-branch">{h(wt["branch"])}</span>'
-                    f'<span class="git-status">{wt_badge}</span>'
-                    f'<span class="git-spacer"></span></div>'
-                )
-                wt_sub_html = _render_submodule_rows(
-                    ctx, wt.get("submodules") or [], worktree=True, parent_node_id=wt_id
-                )
-                if wt_sub_html:
-                    out.append(wt_sub_html)
-            out.append("</div>")  # /git-repo
+        for family in families:
+            family_id = f"{group_id}/{family['name']}"
+            family_cls = "git-family" + (" git-family-with-subs" if family["has_subrepos"] else "")
+            out.append(f'<div class="{family_cls}" data-node-id="{h(family_id)}">')
+            for member in family["members"]:
+                member_id = f"{family_id}/m:{member['name']}"
+                out.append(_render_member_row(ctx, member, member_id))
+                for wt in member.get("worktrees") or []:
+                    wt_id = f"{member_id}/wt:{wt['key']}"
+                    out.append(_render_worktree_row(ctx, wt, wt_id))
+            out.append("</div>")  # /git-family
         out.append("</div>")  # /git-group-body
         out.append("</div>")  # /git-group
     return "\n".join(out)
