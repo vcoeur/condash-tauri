@@ -2940,7 +2940,10 @@ async function _reloadInPlace() {
         if (!fresh || !current) { location.reload(); return; }
 
         var result = focusSafeSwap(current, fresh);
-        if (result.skipped) return;
+        if (result.skipped) {
+            _pendingReloadInPlace = true;
+            return;
+        }
         _rebindDashHandlers();
     } catch (e) {
         location.reload();
@@ -3549,12 +3552,16 @@ var _noteModal = {
 };
 
 /* Flip the dirty flag and refresh the Save button. Safe to call on every
-   keystroke — the button toggle is the only DOM work. */
+   keystroke — the button toggle is the only DOM work. Also drains any
+   reload requests that were parked because the modal was dirty. */
 function _setDirty(value) {
     var next = !!value;
     if (_noteModal.dirty === next) return;
     _noteModal.dirty = next;
     _syncSaveButton();
+    if (!next && typeof _flushPendingReloads === 'function') {
+        _flushPendingReloads();
+    }
 }
 
 /* Save button is enabled only when there are unsaved edits, so after a
@@ -3771,6 +3778,7 @@ function closeNotePreview() {
     _noteNavStack = [];
     _syncNoteBack();
     noteSearchClose();
+    if (typeof _flushPendingReloads === 'function') _flushPendingReloads();
 }
 
 /* --- In-note search (Ctrl+F inside the note modal) ---
@@ -4819,6 +4827,67 @@ function _restoreDetailsOpenState(root, map) {
     });
 }
 
+/* --- Reload guards (Phase 2) ---
+   The two production landmines before the overhaul: a fragment swap
+   while a runner's WebSocket is live silently kills the build; a
+   _reloadInPlace while the note modal has unsaved edits silently
+   discards them. Both are now caught by focusSafeSwap's default
+   skipIf — the swap is refused, the dirty state is preserved, and a
+   retry is queued for when the guard clears. */
+function _noteModalDirty() {
+    return !!(window._noteModal && _noteModal.dirty);
+}
+
+function _runnerActiveIn(targetEl) {
+    if (!targetEl || typeof _runnerViewers !== 'object') return false;
+    var mounts = targetEl.querySelectorAll &&
+        targetEl.querySelectorAll('.runner-term-mount');
+    if (!mounts || !mounts.length) return false;
+    var activeKeys = {};
+    for (var dk in _runnerViewers) {
+        var v = _runnerViewers[dk];
+        if (v && !v.exited && v.ws && v.ws.readyState === WebSocket.OPEN) {
+            activeKeys[v.key] = true;
+        }
+    }
+    for (var i = 0; i < mounts.length; i++) {
+        var key = mounts[i].getAttribute('data-runner-key');
+        if (key && activeKeys[key]) return true;
+    }
+    return false;
+}
+
+function _defaultReloadSkipIf(targetEl) {
+    if (_noteModalDirty()) return 'note-dirty';
+    if (_runnerActiveIn(targetEl)) return 'runner-active';
+    return null;
+}
+
+/* Pending-reload bookkeeping. When a swap is refused, we stash the
+   request and retry when the responsible guard clears. Deliberately
+   kept small: one boolean for the global rebuild, a set of node ids
+   for per-subtree reloads. */
+var _pendingReloadNodes = new Set();
+var _pendingReloadInPlace = false;
+
+function _flushPendingReloads() {
+    if (_noteModalDirty()) return;  // still blocked; caller will re-flush
+    if (_pendingReloadInPlace) {
+        _pendingReloadInPlace = false;
+        _pendingReloadNodes.clear();  // superseded by the global rebuild
+        _reloadInPlace();
+        return;
+    }
+    var retry = Array.from(_pendingReloadNodes);
+    _pendingReloadNodes.clear();
+    retry.forEach(function(id) {
+        // Runner-active guard for this specific node is re-checked by
+        // focusSafeSwap's skipIf — any still-blocked entries land back
+        // in _pendingReloadNodes via reloadNode's skipped-branch.
+        reloadNode(id);
+    });
+}
+
 /* --- Focus-safe DOM swap primitive ---
    Shared helper used by _reloadInPlace (tab-level) and reloadNode
    (per-subtree). Captures anything that would be lost by a naive
@@ -4831,10 +4900,9 @@ function _restoreDetailsOpenState(root, map) {
    skipIf; the primitive is pure refactor. */
 function focusSafeSwap(targetEl, freshEl, opts) {
     opts = opts || {};
-    if (opts.skipIf) {
-        var reason = opts.skipIf(targetEl);
-        if (reason) return {skipped: true, reason: reason};
-    }
+    var skipIf = opts.skipIf || _defaultReloadSkipIf;
+    var reason = skipIf(targetEl);
+    if (reason) return {skipped: true, reason: reason};
     var snapshot = _snapshotForSwap(targetEl, opts);
     targetEl.replaceWith(freshEl);
     _restoreFromSnapshot(freshEl, snapshot, opts);
@@ -4950,7 +5018,13 @@ async function reloadNode(nodeId) {
             && !existing.classList.contains('collapsed');
 
         var result = focusSafeSwap(existing, fresh);
-        if (result.skipped) return;
+        if (result.skipped) {
+            // Guard tripped (runner live, or note modal dirty). Park the
+            // request; _flushPendingReloads replays it when the guard
+            // clears. Dirty-set + baseline are intentionally preserved.
+            _pendingReloadNodes.add(nodeId);
+            return;
+        }
         if (wasExpanded && fresh.classList && fresh.classList.contains('card')) {
             fresh.classList.remove('collapsed');
         }
@@ -6251,7 +6325,12 @@ function _runnerCreateViewer(mount, key, checkout, opts) {
                     mount.setAttribute('data-exit-code', String(obj.exit_code));
                     mount.classList.add('runner-exited');
                     _runnerSetStatus(viewer, 'exited: ' + (obj.exit_code == null ? '?' : obj.exit_code));
-                    if (!wasExited) _runnerScheduleRefresh(key, checkout);
+                    if (!wasExited) {
+                        _runnerScheduleRefresh(key, checkout);
+                        if (typeof _flushPendingReloads === 'function') {
+                            _flushPendingReloads();
+                        }
+                    }
                 } else if (obj.type === 'session-missing') {
                     _runnerSetStatus(viewer, 'no session');
                 } else if (obj.type === 'error' && obj.message) {
@@ -6263,7 +6342,9 @@ function _runnerCreateViewer(mount, key, checkout, opts) {
         term.write(new Uint8Array(ev.data));
     };
     ws.onclose = function() {
-        // Left in place — the reattach / stop path takes care of cleanup.
+        // Runner teardown clears the runner-active guard for this node —
+        // drain any reload that was parked while the runner was live.
+        if (typeof _flushPendingReloads === 'function') _flushPendingReloads();
     };
     term.onData(function(data) {
         if (viewer.exited) return;
