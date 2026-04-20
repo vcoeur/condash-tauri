@@ -135,11 +135,10 @@ def _render_step(item, file_path):
         status, ""
     )
     return (
-        f'<div class="step {status}" draggable="true" '
-        f'data-file="{h(file_path)}" data-line="{item["line"]}" '
-        f'ondragstart="stepDragStart(event)" ondragend="stepDragEnd(event)" '
-        f'ondragover="stepDragOver(event)">'
-        f'<span class="drag-handle">\u283f</span>'
+        f'<div class="step {status}" '
+        f'data-file="{h(file_path)}" data-line="{item["line"]}">'
+        f'<span class="drag-handle" '
+        f'onpointerdown="stepPointerDown(event)">\u283f</span>'
         f'<span class="status-dot status-{status}" '
         f'onmousedown="event.stopPropagation();event.preventDefault()" '
         f"onclick=\"var s=this.closest('.step');cycle({js_file},+s.dataset.line,s)\">{dot_char}</span>"
