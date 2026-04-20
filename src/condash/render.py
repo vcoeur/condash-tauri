@@ -313,6 +313,21 @@ def _render_deliverables(deliverables):
     )
 
 
+def _next_step(item):
+    """First pending step across all sections, or None.
+
+    "Pending" means status is ``open`` or ``progress`` — ``abandoned``
+    steps aren't "next", they're intentionally parked. Used on the
+    collapsed card so users can see what the project is blocked on
+    without expanding each one.
+    """
+    for sec in item["sections"]:
+        for step in sec["items"]:
+            if step["status"] in ("open", "progress"):
+                return step
+    return None
+
+
 def _render_card(item):
     from .parser import PRIORITIES
 
@@ -375,6 +390,20 @@ def _render_card(item):
         else ""
     )
 
+    next_step = _next_step(item)
+    if next_step is not None:
+        next_step_html = (
+            f'<div class="card-next-step" '
+            f"onclick=\"toggleCard(this.closest('.card'))\" "
+            f'title="Next pending step">'
+            f'<span class="next-step-marker next-step-{next_step["status"]}" '
+            f'aria-hidden="true"></span>'
+            f'<span class="next-step-text">{h(next_step["text"])}</span>'
+            f"</div>"
+        )
+    else:
+        next_step_html = ""
+
     node_id = f"projects/{pri}/{item['slug']}"
     card_actions_html = _render_card_actions(item)
     return (
@@ -389,6 +418,7 @@ def _render_card(item):
         f"{progress} {invalid_badge}{priority_select} "
         f'<span class="date">{h(item["date"])}</span>'
         f"{card_actions_html}</div></div>"
+        f"{next_step_html}"
         f'<div class="card-body">'
         f'<div class="card-left">'
         f"{apps_div}"
