@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import asyncio
 
-from condash.events import EventBus, _DebouncedHandler, _GitHandler
+from condash.events import EventBus, _ConfigHandler, _DebouncedHandler, _GitHandler
 
 
 class _FakeEvent:
-    def __init__(self, src_path: str):
+    def __init__(self, src_path: str, event_type: str = "modified"):
         self.src_path = src_path
+        self.event_type = event_type
 
 
 def test_eventbus_fanout_to_subscribers():
@@ -62,6 +63,59 @@ def test_git_handler_only_reacts_to_watched_files():
     h.on_any_event(_FakeEvent("/tmp/.git/HEAD"))
     assert len(captured) == 1
     assert captured[0]["tab"] == "code"
+
+
+def test_config_handler_only_reacts_to_known_yaml_files():
+    bus = EventBus()
+    captured: list[dict] = []
+    bus.publish_threadsafe = captured.append  # type: ignore[assignment]
+    h = _ConfigHandler(bus)
+    h.on_any_event(_FakeEvent("/tmp/config/unrelated.yml"))
+    h.on_any_event(_FakeEvent("/tmp/config/repositories.yml.tmp"))
+    assert captured == []
+    h.on_any_event(_FakeEvent("/tmp/config/repositories.yml"))
+    assert len(captured) == 1
+    assert captured[0]["tab"] == "config"
+    assert captured[0]["file"] == "repositories.yml"
+
+
+def test_config_handler_ignores_open_and_close_no_write():
+    """Read-only opens on the YAML (from GET /config) must never fire."""
+    bus = EventBus()
+    captured: list[dict] = []
+    bus.publish_threadsafe = captured.append  # type: ignore[assignment]
+    h = _ConfigHandler(bus)
+    h.on_any_event(_FakeEvent("/tmp/config/repositories.yml", event_type="opened"))
+    h.on_any_event(_FakeEvent("/tmp/config/repositories.yml", event_type="closed_no_write"))
+    assert captured == []
+
+
+def test_config_handler_debounce_is_per_file():
+    """A burst on repositories.yml doesn't suppress preferences.yml."""
+    bus = EventBus()
+    captured: list[dict] = []
+    bus.publish_threadsafe = captured.append  # type: ignore[assignment]
+    h = _ConfigHandler(bus)
+    h.on_any_event(_FakeEvent("/tmp/config/repositories.yml"))
+    h.on_any_event(_FakeEvent("/tmp/config/repositories.yml"))  # debounced
+    h.on_any_event(_FakeEvent("/tmp/config/preferences.yml"))  # independent file
+    files = [event["file"] for event in captured]
+    assert files == ["repositories.yml", "preferences.yml"]
+
+
+def test_config_handler_calls_reload_callback():
+    bus = EventBus()
+    captured: list[dict] = []
+    bus.publish_threadsafe = captured.append  # type: ignore[assignment]
+    # No event loop bound — the threadsafe call short-circuits, but the
+    # handler must still publish the SSE event for other subscribers.
+    reload_calls: list[str] = []
+    h = _ConfigHandler(bus, on_reload=reload_calls.append)
+    h.on_any_event(_FakeEvent("/tmp/config/preferences.yml"))
+    # Without a loop bound the reload callback is skipped defensively —
+    # but the SSE event still fires.
+    assert len(captured) == 1
+    assert captured[0]["file"] == "preferences.yml"
 
 
 def test_events_route_registered(cfg):

@@ -18,6 +18,7 @@ import socket
 import struct
 import sys
 import termios
+import time
 from dataclasses import dataclass, field
 from importlib.resources import files as _package_files
 from pathlib import Path
@@ -93,6 +94,16 @@ log = logging.getLogger(__name__)
 _RUNTIME_CFG: CondashConfig | None = None
 _RUNTIME_CTX: RenderCtx | None = None
 
+# When POST /config writes the YAML, the watchdog observer sees its own
+# write and would emit a redundant config-reload event. We stamp each
+# expected filename here with an expiry timestamp right before saving; the
+# file-watcher callback drops any leaf whose stamp is still in the future.
+# A timestamp-based approach (vs. a one-shot set) handles the case where
+# the handler's 0.75s debounce collapses two rapid self-writes into a
+# single event — a set-based stamp would leak.
+_CONFIG_SELF_WRITE: dict[str, float] = {}
+_CONFIG_SELF_WRITE_TTL = 2.0
+
 # Phase 6: filesystem-driven staleness push. The bus collects events
 # from the watchdog worker thread; ``/events`` fans them out to every
 # connected SSE client. A single observer is spun up in :func:`run`
@@ -144,6 +155,45 @@ def _stop_event_observer() -> None:
         obs.join(timeout=2.0)
     except Exception:
         log.exception("failed to stop watchdog observer")
+
+
+def _reload_runtime_config_from_disk(leaf: str) -> None:
+    """Reload the live :class:`CondashConfig` after an external YAML edit.
+
+    Runs on the asyncio event loop (scheduled by the watchdog worker via
+    ``loop.call_soon_threadsafe``). Drops the event when the write was
+    initiated by this process itself — POST ``/config`` stamps the leaf
+    into :data:`_CONFIG_SELF_WRITE` right before saving so the watcher's
+    echo is suppressed exactly once.
+
+    Rebuilds ``_RUNTIME_CFG`` + ``_RUNTIME_CTX`` atomically (pointer swap)
+    so concurrent readers see either the previous config or the new one,
+    never a half-initialised state. Errors are logged and dropped — a
+    malformed hand edit leaves the running config intact, and the user
+    gets the parse error via the normal log channel.
+    """
+    global _RUNTIME_CFG, _RUNTIME_CTX
+    now = time.time()
+    expiry = _CONFIG_SELF_WRITE.get(leaf)
+    if expiry is not None and now < expiry:
+        return
+    # Reap any long-expired self-write stamps so the dict doesn't grow.
+    for stale_leaf in [k for k, v in _CONFIG_SELF_WRITE.items() if v <= now]:
+        _CONFIG_SELF_WRITE.pop(stale_leaf, None)
+    if _RUNTIME_CFG is None:
+        return
+    try:
+        new_cfg = config_mod.load(
+            port_override=_RUNTIME_CFG.port,
+            native_override=_RUNTIME_CFG.native,
+        )
+    except (config_mod.ConfigNotFoundError, config_mod.ConfigIncompleteError) as exc:
+        log.warning("live config reload failed (%s): %s", leaf, exc)
+        return
+    new_ctx = build_ctx(new_cfg)
+    _RUNTIME_CFG = new_cfg
+    _RUNTIME_CTX = new_ctx
+    log.info("live config reload: %s applied", leaf)
 
 
 # --- Pty session registry --------------------------------------------------
@@ -285,6 +335,29 @@ def _register_routes() -> None:
         if not full.is_file():
             return Response(status_code=404)
         ctype = _XTERM_MIME.get(full.suffix.lower(), "application/octet-stream")
+        return Response(
+            content=full.read_bytes(),
+            media_type=ctype,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @_ng_app.get("/vendor/codemirror/{rel_path:path}")
+    def codemirror_asset(rel_path: str):
+        """Serve the vendored CodeMirror 6 IIFE bundle to the config modal."""
+        if not rel_path or "\x00" in rel_path:
+            return Response(status_code=403)
+        parts = rel_path.split("/")
+        if any(p in ("", "..") for p in parts):
+            return Response(status_code=403)
+        base = Path(str(_package_files("condash") / "assets" / "vendor" / "codemirror"))
+        try:
+            full = (base / rel_path).resolve()
+            full.relative_to(base.resolve())
+        except (OSError, ValueError):
+            return Response(status_code=403)
+        if not full.is_file():
+            return Response(status_code=404)
+        ctype = "text/javascript" if full.suffix == ".js" else "text/plain"
         return Response(
             content=full.read_bytes(),
             media_type=ctype,
@@ -791,6 +864,12 @@ def _register_routes() -> None:
             new_cfg = _payload_to_config(data)
         except (ValueError, KeyError, TypeError) as exc:
             return _error(400, f"invalid config: {exc}")
+        # Stamp self-writes so the filesystem watcher doesn't echo our
+        # own save back as an external reload event. Expiry-based so the
+        # 0.75s handler debounce can't leak a stamp into the next edit.
+        expiry = time.time() + _CONFIG_SELF_WRITE_TTL
+        _CONFIG_SELF_WRITE["repositories.yml"] = expiry
+        _CONFIG_SELF_WRITE["preferences.yml"] = expiry
         config_mod.save(new_cfg)
         # Rebuild the RenderCtx so paths / repos / open-with changes
         # take effect on the next request without needing a process restart.
@@ -809,6 +888,74 @@ def _register_routes() -> None:
             "restart_required": restart_required,
             "config": _config_to_payload(new_cfg),
         }
+
+    @_ng_app.post("/config/yaml")
+    async def post_config_yaml(req: Request):
+        """Save a single YAML file verbatim (split-pane modal write path).
+
+        Payload ``{"file": "repositories" | "preferences", "body": <yaml>}``.
+        Parses the YAML into a dict, overlays it onto the live config,
+        then runs through the same :func:`config_mod.save` + ``build_ctx``
+        path as the form-based ``POST /config`` so the on-disk state and
+        runtime state stay in lockstep.
+
+        Unlike the form path this writes only the matching YAML file
+        (the TOML stays untouched) — but ``config_mod.save`` always writes
+        both YAMLs from the in-memory config, so the sibling YAML is
+        rewritten byte-identically from the current state. That's fine
+        and keeps the data flow uniform.
+        """
+        global _RUNTIME_CFG, _RUNTIME_CTX
+        if _RUNTIME_CFG is None:
+            return _error(500, "config not initialised")
+        try:
+            data = await req.json()
+        except ValueError:
+            return _error(400, "bad JSON")
+        if not isinstance(data, dict):
+            return _error(400, "payload must be an object")
+        which = str(data.get("file") or "").strip()
+        body = data.get("body")
+        if which not in ("repositories", "preferences"):
+            return _error(400, "file must be 'repositories' or 'preferences'")
+        if not isinstance(body, str):
+            return _error(400, "body must be a string")
+        if _RUNTIME_CFG.conception_path is None:
+            return _error(400, "conception_path is unset — set it in General first")
+        # Parse + validate before touching disk. Reuse the loader helpers
+        # so we get the same shape errors the file-based path reports.
+        import yaml
+
+        try:
+            parsed = yaml.safe_load(body)
+        except yaml.YAMLError as exc:
+            return _error(400, f"malformed YAML: {exc}")
+        if parsed is None:
+            parsed = {}
+        if not isinstance(parsed, dict):
+            return _error(400, "top-level YAML must be a mapping")
+        # Clone the current config so a bad payload can't leave it
+        # half-applied if _apply_* raises deep into the parse.
+        import copy
+
+        draft = copy.deepcopy(_RUNTIME_CFG)
+        try:
+            if which == "repositories":
+                target = config_mod.repositories_yaml_path(draft.conception_path)
+                config_mod._apply_repositories_yaml(draft, parsed, target)  # noqa: SLF001
+            else:
+                target = config_mod.preferences_yaml_path(draft.conception_path)
+                config_mod._apply_preferences_yaml(draft, parsed, target)  # noqa: SLF001
+        except config_mod.ConfigIncompleteError as exc:
+            return _error(400, str(exc))
+        # Stamp self-writes so the file watcher doesn't echo back.
+        expiry = time.time() + _CONFIG_SELF_WRITE_TTL
+        _CONFIG_SELF_WRITE["repositories.yml"] = expiry
+        _CONFIG_SELF_WRITE["preferences.yml"] = expiry
+        config_mod.save(draft)
+        _RUNTIME_CTX = build_ctx(draft)
+        _RUNTIME_CFG = draft
+        return {"ok": True, "config": _config_to_payload(draft)}
 
     @_ng_app.post("/api/runner/start")
     async def runner_start(req: Request):
@@ -1452,6 +1599,22 @@ def _repo_entries(
     return out
 
 
+def _read_yaml_body(target: Path | None) -> str:
+    """Read the raw bytes of a YAML file for the modal's split-pane view.
+
+    Returns an empty string when the path is ``None`` or the file is
+    missing / unreadable — the modal renders a placeholder in that case.
+    Kept tiny on purpose so it can be called on every ``GET /config``
+    without a cache.
+    """
+    if target is None:
+        return ""
+    try:
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def _config_to_payload(cfg: CondashConfig) -> dict:
     """Serialise the live config to JSON for ``GET /config``.
 
@@ -1460,7 +1623,13 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
     when it exists, empty when conception_path is unset or the YAML
     hasn't been written yet (first-run migration state). The matching
     ``_expected_path`` fields report the future write target.
+
+    ``repositories_yaml_body`` / ``preferences_yaml_body`` carry the raw
+    file contents so the split-pane modal can show the live YAML
+    alongside the form without a second request.
     """
+    repos_yaml_target = config_mod.repositories_yaml_path(cfg.conception_path)
+    prefs_yaml_target = config_mod.preferences_yaml_path(cfg.conception_path)
     return {
         "conception_path": str(cfg.conception_path) if cfg.conception_path else "",
         "workspace_path": str(cfg.workspace_path) if cfg.workspace_path else "",
@@ -1474,17 +1643,11 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
             cfg.repositories_secondary, cfg.repo_submodules, cfg.repo_run
         ),
         "repositories_yaml_source": str(cfg.yaml_source) if cfg.yaml_source else "",
-        "repositories_yaml_expected_path": (
-            str(config_mod.repositories_yaml_path(cfg.conception_path))
-            if cfg.conception_path
-            else ""
-        ),
+        "repositories_yaml_expected_path": (str(repos_yaml_target) if repos_yaml_target else ""),
+        "repositories_yaml_body": _read_yaml_body(cfg.yaml_source or repos_yaml_target),
         "preferences_yaml_source": (str(cfg.preferences_source) if cfg.preferences_source else ""),
-        "preferences_yaml_expected_path": (
-            str(config_mod.preferences_yaml_path(cfg.conception_path))
-            if cfg.conception_path
-            else ""
-        ),
+        "preferences_yaml_expected_path": (str(prefs_yaml_target) if prefs_yaml_target else ""),
+        "preferences_yaml_body": _read_yaml_body(cfg.preferences_source or prefs_yaml_target),
         "terminal": {
             "shell": cfg.terminal.shell or "",
             "shortcut": cfg.terminal.shortcut,
@@ -1825,9 +1988,15 @@ def run(cfg: CondashConfig) -> None:
     # Filesystem → SSE bridge. The observer runs on its own worker
     # thread and publishes to the module-level bus; /events streams
     # from there. Stopped on NiceGUI shutdown.
-    _EVENT_OBSERVER = events_mod.start_watcher(_RUNTIME_CTX, _EVENT_BUS)
+    _EVENT_OBSERVER = events_mod.start_watcher(
+        _RUNTIME_CTX, _EVENT_BUS, on_config_reload=_reload_runtime_config_from_disk
+    )
     if _EVENT_OBSERVER is not None:
         _ng_app.on_shutdown(_stop_event_observer)
+        # Bind the asyncio loop to the event bus as soon as it's spinning so
+        # the first filesystem event doesn't lose its reload callback just
+        # because no SSE client has connected yet.
+        _ng_app.on_startup(lambda: _EVENT_BUS.bind_loop(asyncio.get_running_loop()))
     port = _pick_free_port() if cfg.port == 0 else cfg.port
     kwargs: dict = {
         "native": cfg.native,

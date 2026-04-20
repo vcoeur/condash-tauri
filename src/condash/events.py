@@ -4,12 +4,12 @@ Phase 6 of the update-view overhaul replaces the 5-second polling loop
 with a watchdog observer + a server-sent-events channel.
 
 The backend emits coarse tab-level events (``projects`` / ``knowledge``
-/ ``code``) whenever a watched path changes. The frontend listens via
-``EventSource('/events')`` and, on receipt, calls ``/check-updates`` to
-compute the precise per-node dirty set. This keeps the event-id scheme
-simple (three constants) while preserving the fingerprint pipeline as
-an authoritative reconciler — any event the watcher misses shows up on
-the next reconnect pass.
+/ ``code`` / ``config``) whenever a watched path changes. The frontend
+listens via ``EventSource('/events')`` and, on receipt, calls
+``/check-updates`` (for content tabs) or refetches ``/config`` (for
+config-tab events). The event-id scheme stays simple while the
+fingerprint pipeline acts as authoritative reconciler — any event the
+watcher misses shows up on the next reconnect pass.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
@@ -109,6 +110,58 @@ class _DebouncedHandler(FileSystemEventHandler):
         self._bus.publish_threadsafe({"tab": self._tab, "ts": now})
 
 
+class _ConfigHandler(FileSystemEventHandler):
+    """Emit ``config`` events on changes to the two YAML config files.
+
+    Only reacts to ``repositories.yml`` / ``preferences.yml`` — anything
+    else under ``<conception>/config/`` (scratch files, editor backups)
+    is ignored. Only write-style events trigger reload — open and
+    close-no-write events are dropped so an open for reading (e.g. the
+    dashboard's own ``GET /config`` path) never kicks off a reload
+    cycle. Before fanning out to SSE clients the handler invokes
+    ``on_reload`` (via ``loop.call_soon_threadsafe``) so the server can
+    rebuild its runtime config atomically on the event loop thread
+    rather than on watchdog's worker thread.
+
+    Debouncing is per-file: a burst of events for ``repositories.yml``
+    doesn't swallow a concurrent edit of ``preferences.yml``. The
+    window is short (0.3 s) — just enough to collapse the three-event
+    storm a single atomic write produces on Linux.
+    """
+
+    _WATCHED = frozenset({"repositories.yml", "preferences.yml"})
+    _WRITE_EVENTS = frozenset({"modified", "created", "moved", "closed"})
+    _DEBOUNCE = 0.3
+
+    def __init__(
+        self,
+        bus: EventBus,
+        on_reload: Callable[[str], None] | None = None,
+    ) -> None:
+        self._bus = bus
+        self._on_reload = on_reload
+        self._last_emit: dict[str, float] = {}
+
+    def on_any_event(self, event) -> None:
+        leaf = Path(getattr(event, "src_path", "") or "").name
+        if leaf not in self._WATCHED:
+            return
+        if event.event_type not in self._WRITE_EVENTS:
+            return
+        now = time.time()
+        if now - self._last_emit.get(leaf, 0.0) < self._DEBOUNCE:
+            return
+        self._last_emit[leaf] = now
+        logger.info("_ConfigHandler: firing reload for %s (%s)", leaf, event.event_type)
+        if self._on_reload is not None:
+            loop = self._bus._loop  # noqa: SLF001 — deliberate bridge
+            if loop is not None and not loop.is_closed():
+                loop.call_soon_threadsafe(self._on_reload, leaf)
+            else:
+                logger.warning("_ConfigHandler: event loop not bound; reload skipped")
+        self._bus.publish_threadsafe({"tab": "config", "file": leaf, "ts": now})
+
+
 class _GitHandler(FileSystemEventHandler):
     """Emit ``code`` events when a repo's HEAD or index file changes."""
 
@@ -145,8 +198,17 @@ def _git_dirs_under(workspace: Path | None) -> list[Path]:
     return out
 
 
-def start_watcher(ctx: RenderCtx, bus: EventBus) -> Observer | None:
+def start_watcher(
+    ctx: RenderCtx,
+    bus: EventBus,
+    on_config_reload: Callable[[str], None] | None = None,
+) -> Observer | None:
     """Spin up the watchdog observer against the ctx's conception paths.
+
+    ``on_config_reload`` runs on the asyncio event loop whenever one of
+    the watched YAML config files changes — the server uses it to rebuild
+    the live :class:`CondashConfig` and :class:`RenderCtx` before the SSE
+    fanout notifies browsers. Pass ``None`` to only push events.
 
     Returns the live ``Observer`` (call ``.stop() + .join()`` on shutdown)
     or ``None`` when the context has no usable base directory.
@@ -162,6 +224,14 @@ def start_watcher(ctx: RenderCtx, bus: EventBus) -> Observer | None:
     knowledge = ctx.base_dir / "knowledge"
     if knowledge.is_dir():
         observer.schedule(_DebouncedHandler(bus, "knowledge"), str(knowledge), recursive=True)
+
+    config_dir = ctx.base_dir / "config"
+    if config_dir.is_dir():
+        observer.schedule(
+            _ConfigHandler(bus, on_reload=on_config_reload),
+            str(config_dir),
+            recursive=False,
+        )
 
     for gitdir in _git_dirs_under(ctx.workspace):
         observer.schedule(_GitHandler(bus), str(gitdir), recursive=False)
