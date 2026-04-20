@@ -709,6 +709,10 @@ body:not([data-single-term]) .term-side.is-active-side .term-mount {
     transition: box-shadow 0.15s;
 }
 .card:hover { box-shadow: var(--shadow-md); }
+/* Lift the card above later siblings while its status popover is open — the
+   popover overflows the card's bottom edge and would otherwise paint behind
+   the next card in DOM order. */
+.card:has(.pri-menu.open) { position: relative; z-index: 10; }
 .card[data-kind="incident"] { border-left: 3px solid var(--card-incident-border); background: var(--card-incident); }
 .card[data-kind="project"] { border-left: 3px solid var(--card-project-border); background: var(--card-project); }
 .card[data-kind="document"] { border-left: 3px solid var(--card-document-border); background: var(--card-document); }
