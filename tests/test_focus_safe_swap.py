@@ -67,3 +67,22 @@ def test_runner_guard_checks_open_websocket():
     body = _html()
     assert "WebSocket.OPEN" in body
     assert ".runner-term-mount" in body
+
+
+def test_phase3_auto_reload_active_tab():
+    body = _html()
+    # checkUpdates must delegate to the active-tab auto-reload path.
+    assert "function _autoReloadActiveTab(" in body
+    assert "_autoReloadActiveTab(fresh)" in body
+    # The dot is binary per-tab-header, suppressed on the active tab.
+    assert "key !== _activeTab" in body
+
+
+def test_phase3_per_node_dots_removed():
+    body = _html()
+    # The old multi-level ancestor-hint rendering is gone; only the
+    # cleanup sweep for any leftover classes survives.
+    assert "hintIds.add" not in body
+    assert "el.appendChild(btn);" not in body
+    # switchTab no longer has the "same tab + stale = refresh" branch.
+    assert "if (clickedSameTab && clickedTabStale)" not in body

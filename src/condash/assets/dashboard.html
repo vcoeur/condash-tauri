@@ -2827,24 +2827,19 @@ function _persistTabState() {
 function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
     // Clicking the already-active tab refreshes the dashboard when its
-    // data is stale — the tab's own per-tab dot doubles as a reload
-    // affordance. Clicking a *different* tab already refreshes whenever
-    // any pane is stale (paths below hitting _reloadInPlace).
+    // Phase 3: the active tab auto-reloads, so the old "click same
+    // stale tab = refresh" branch is gone. Clicking an inactive tab
+    // that has its binary dot rebuilds #dash-main so the fresh tab
+    // content lands before the user sees stale data.
     var clickedSameTab = tab === _activeTab;
-    // History shares the projects on-disk data source, so _itemsStale
-    // signals staleness for both tabs.
+    _deriveLegacyFlags();
     var clickedTabStale =
         ((tab === 'projects' || tab === 'history') && _itemsStale) ||
         (tab === 'code' && _gitStale) ||
         (tab === 'knowledge' && _knowledgeStale);
-    if (clickedSameTab && clickedTabStale) {
-        _reloadInPlace();
-        return;
-    }
-    if ((_itemsStale || _gitStale || _knowledgeStale) && !clickedSameTab) {
+    if (!clickedSameTab && clickedTabStale) {
         // Commit the new tab first so _reloadInPlace's post-swap
-        // _rebindDashHandlers → switchTab(_activeTab) lands on it —
-        // otherwise the user has to click the tab a second time.
+        // _rebindDashHandlers → switchTab(_activeTab) lands on it.
         _activeTab = tab;
         _reloadInPlace();
         return;
@@ -2862,6 +2857,9 @@ function switchTab(tab) {
     document.getElementById('projects-subtabs').style.display = tab === 'projects' ? '' : 'none';
     if (tab === 'projects') _applySubtab(_activeSubtab);
     _persistTabState();
+    // Re-render dots so the newly-active tab loses its marker and any
+    // previously-active tab that remained dirty gains one.
+    if (typeof _renderStale === 'function') _renderStale();
 }
 
 function switchSubtab(sub) {
@@ -4647,7 +4645,11 @@ function _ancestorsOf(id) {
 }
 
 function _renderStale() {
-    // 1. Clear previous markers everywhere.
+    // Phase 3: the active tab auto-reloads, so per-node dots and
+    // ancestor hints are gone; the only user-visible staleness marker
+    // is a single binary dot on each *inactive* tab header.
+    // Clear any surviving Phase-1/Phase-2 markers — if a swap was
+    // guard-skipped, _renderStale re-renders with the latest state.
     document.querySelectorAll('[data-node-id].node-stale, [data-node-id].node-stale-hint')
         .forEach(function(el) {
             el.classList.remove('node-stale');
@@ -4655,69 +4657,9 @@ function _renderStale() {
         });
     document.querySelectorAll('.group-dirty-leader')
         .forEach(function(el) { el.classList.remove('group-dirty-leader'); });
+    document.querySelectorAll('.node-reload-btn')
+        .forEach(function(btn) { btn.remove(); });
 
-    // 2. Collect ancestor hint set from the dirty set.
-    var hintIds = new Set();
-    _dirtyNodes.forEach(function(id) {
-        _ancestorsOf(id).forEach(function(anc) { hintIds.add(anc); });
-    });
-
-    // 3. Apply strong marker on dirty, muted marker on ancestors.
-    _dirtyNodes.forEach(function(id) {
-        // CSS-attribute selectors need values escaped — but our ids only
-        // contain [a-zA-Z0-9/:.\-_], safe for CSS.escape.
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-        document.querySelectorAll('[data-node-id="' + esc + '"]').forEach(function(el) {
-            el.classList.add('node-stale');
-        });
-    });
-    hintIds.forEach(function(id) {
-        if (_dirtyNodes.has(id)) return; // strong wins over hint
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-        document.querySelectorAll('[data-node-id="' + esc + '"]').forEach(function(el) {
-            el.classList.add('node-stale-hint');
-        });
-    });
-
-    // 4. Group headings are hidden on most subtabs. When a group is dirty
-    //    but its heading isn't visible, stamp the marker on the first
-    //    visible card of that priority so the user still sees it.
-    _dirtyNodes.forEach(function(id) {
-        var m = /^projects\/([a-z]+)$/.exec(id);
-        if (!m) return;
-        var pri = m[1];
-        var heading = document.querySelector('.group-heading[data-group="' + pri + '"]');
-        if (heading && !heading.classList.contains('hidden')) return;
-        var firstCard = document.querySelector(
-            '.card[data-priority="' + pri + '"]:not(.hidden)'
-        );
-        if (firstCard) firstCard.classList.add('group-dirty-leader');
-    });
-
-    // 5. Inject reload buttons on every stale / hinted node so the user
-    //    can click any level to refresh just that subtree. Leaf nodes we
-    //    know how to fragment-fetch (cards + knowledge dirs) do a local
-    //    swap; everything else falls back to a global _reloadInPlace.
-    document.querySelectorAll('[data-node-id].node-stale, [data-node-id].node-stale-hint')
-        .forEach(function(el) {
-            if (el.id === 'projects-pane' || el.id === 'code-pane' || el.id === 'knowledge-pane') {
-                return; // pane wrappers never get a reload button (dot is hidden too)
-            }
-            if (el.querySelector(':scope > .node-reload-btn')) return;
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'node-reload-btn';
-            btn.setAttribute('aria-label', 'Reload this section');
-            btn.title = 'Reload this section';
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                reloadNode(el.getAttribute('data-node-id'));
-            });
-            el.appendChild(btn);
-        });
-
-    // 6. Tab-header dots — coarse "something in this tab needs attention".
     _deriveLegacyFlags();
     var staleByTab = {
         projects: _itemsStale,
@@ -4727,10 +4669,11 @@ function _renderStale() {
     };
     document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         var key = t.getAttribute('data-tab');
-        var isStale = !!staleByTab[key];
+        // Active tab never shows the dot — it self-refreshes.
+        var isStale = !!staleByTab[key] && key !== _activeTab;
         t.classList.toggle('stale', isStale);
         if (isStale) {
-            t.title = 'Refresh — data has changed on disk';
+            t.title = 'Click to refresh — data has changed on disk';
         } else {
             t.removeAttribute('title');
         }
@@ -4767,9 +4710,39 @@ async function checkUpdates() {
             // was a change even if they weren't on the tab when it happened.
             var fresh = _diffNodes(_nodeBaseline, current);
             fresh.forEach(function(id) { _dirtyNodes.add(id); });
+            // Phase 3: staleness on the active tab auto-resolves. Other
+            // tabs' dirty state is still tracked; their binary dot
+            // surfaces when _renderStale runs below.
+            if (fresh.size > 0) _autoReloadActiveTab(fresh);
         }
         _renderStale();
     } catch (e) {}
+}
+
+function _activeTabPrefix() {
+    // History derives from the same on-disk data as Projects.
+    return _activeTab === 'history' ? 'projects' : _activeTab;
+}
+
+function _idInTab(id, tab) {
+    var prefix = tab === 'history' ? 'projects' : tab;
+    return id === prefix || id.indexOf(prefix + '/') === 0;
+}
+
+function _autoReloadActiveTab(freshIds) {
+    var freshInActive = [];
+    freshIds.forEach(function(id) {
+        if (_idInTab(id, _activeTab)) freshInActive.push(id);
+    });
+    if (freshInActive.length === 0) return;
+    // If any fresh id isn't fragment-fetchable (tab roots, priority
+    // groups, History) we fall back to a single full rebuild. The
+    // focus-safe primitive and the Phase-2 guards still apply.
+    var needGlobal = freshInActive.some(function(id) {
+        return !_supportsFragmentFetch(id);
+    });
+    if (needGlobal) { _reloadInPlace(); return; }
+    freshInActive.forEach(function(id) { reloadNode(id); });
 }
 
 async function updateBaseline() {
