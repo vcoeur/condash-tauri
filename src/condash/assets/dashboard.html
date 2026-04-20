@@ -2939,34 +2939,9 @@ async function _reloadInPlace() {
         var current = document.getElementById('dash-main');
         if (!fresh || !current) { location.reload(); return; }
 
-        var winY = window.scrollY;
-        var mainScroll = document.getElementById('main-scroll');
-        var mainY = mainScroll ? mainScroll.scrollTop : 0;
-        // Best-effort focus/selection restore for text inputs by id.
-        var focusId = null, focusSel = null;
-        var active = document.activeElement;
-        if (active && current.contains(active) && active.id) {
-            focusId = active.id;
-            try { focusSel = {start: active.selectionStart, end: active.selectionEnd}; }
-            catch (e) {}
-        }
-
-        current.replaceWith(fresh);
+        var result = focusSafeSwap(current, fresh);
+        if (result.skipped) return;
         _rebindDashHandlers();
-
-        window.scrollTo(0, winY);
-        var newMainScroll = document.getElementById('main-scroll');
-        if (newMainScroll) newMainScroll.scrollTop = mainY;
-        if (focusId) {
-            var el = document.getElementById(focusId);
-            if (el) {
-                el.focus();
-                if (focusSel && el.setSelectionRange) {
-                    try { el.setSelectionRange(focusSel.start, focusSel.end); }
-                    catch (e) {}
-                }
-            }
-        }
     } catch (e) {
         location.reload();
     }
@@ -4844,6 +4819,109 @@ function _restoreDetailsOpenState(root, map) {
     });
 }
 
+/* --- Focus-safe DOM swap primitive ---
+   Shared helper used by _reloadInPlace (tab-level) and reloadNode
+   (per-subtree). Captures anything that would be lost by a naive
+   replaceWith — scroll, focus/caret, <details> open state, opt-in
+   `data-preserve` form inputs — then restores it onto the fresh DOM.
+   Callers extend it via `opts.skipIf(targetEl)` → any truthy return
+   aborts the swap and the caller is told the reason (used from
+   Phase 2 onwards to defer reloads that would kill a live runner
+   or trash unsaved modal edits). Phase 1 introduces no callers of
+   skipIf; the primitive is pure refactor. */
+function focusSafeSwap(targetEl, freshEl, opts) {
+    opts = opts || {};
+    if (opts.skipIf) {
+        var reason = opts.skipIf(targetEl);
+        if (reason) return {skipped: true, reason: reason};
+    }
+    var snapshot = _snapshotForSwap(targetEl, opts);
+    targetEl.replaceWith(freshEl);
+    _restoreFromSnapshot(freshEl, snapshot, opts);
+    return {skipped: false, snapshot: snapshot};
+}
+
+function _snapshotForSwap(el, opts) {
+    var snap = {};
+    // Window + #main-scroll position, for tab-level rebuilds where
+    // el === #dash-main; harmless when el is a subtree.
+    snap.scrollY = window.scrollY;
+    var mainScroll = document.getElementById('main-scroll');
+    snap.mainScrollTop = mainScroll ? mainScroll.scrollTop : null;
+    // Explicit named scroll containers inside the target.
+    snap.scrollMap = {};
+    el.querySelectorAll('[data-scroll-key]').forEach(function(n) {
+        snap.scrollMap[n.getAttribute('data-scroll-key')] = {
+            top: n.scrollTop, left: n.scrollLeft,
+        };
+    });
+    // <details> by data-node-id (inside el).
+    snap.detailsMap = _captureDetailsOpenState(el);
+    // Active element focus + caret (text inputs / textareas only).
+    var active = document.activeElement;
+    if (active && el.contains(active) && active.id) {
+        snap.focusId = active.id;
+        try {
+            snap.focusSel = {
+                start: active.selectionStart, end: active.selectionEnd,
+            };
+        } catch (e) {}
+    }
+    // data-preserve inputs → sessionStorage (Phase 5 lights up the
+    // callers that care, but the plumbing is harmless today).
+    el.querySelectorAll('input[data-preserve],textarea[data-preserve]').forEach(function(n) {
+        var key = n.getAttribute('data-preserve');
+        if (!key) return;
+        var payload = {value: n.value};
+        try {
+            payload.sel = {start: n.selectionStart, end: n.selectionEnd};
+        } catch (e) {}
+        try { sessionStorage.setItem(key, JSON.stringify(payload)); }
+        catch (e) {}
+    });
+    return snap;
+}
+
+function _restoreFromSnapshot(el, snap, opts) {
+    if (snap.scrollY != null) window.scrollTo(0, snap.scrollY);
+    var mainScroll = document.getElementById('main-scroll');
+    if (mainScroll && snap.mainScrollTop != null) {
+        mainScroll.scrollTop = snap.mainScrollTop;
+    }
+    el.querySelectorAll('[data-scroll-key]').forEach(function(n) {
+        var saved = snap.scrollMap && snap.scrollMap[n.getAttribute('data-scroll-key')];
+        if (saved) { n.scrollTop = saved.top; n.scrollLeft = saved.left; }
+    });
+    _restoreDetailsOpenState(el, snap.detailsMap || {});
+    if (snap.focusId) {
+        var f = document.getElementById(snap.focusId);
+        if (f) {
+            try { f.focus(); } catch (e) {}
+            if (snap.focusSel && f.setSelectionRange) {
+                try { f.setSelectionRange(snap.focusSel.start, snap.focusSel.end); }
+                catch (e) {}
+            }
+        }
+    }
+    el.querySelectorAll('input[data-preserve],textarea[data-preserve]').forEach(function(n) {
+        var key = n.getAttribute('data-preserve');
+        if (!key) return;
+        try {
+            var raw = sessionStorage.getItem(key);
+            if (!raw) return;
+            var payload = JSON.parse(raw);
+            if (payload.value != null && n.value !== payload.value) {
+                n.value = payload.value;
+            }
+            if (payload.sel && n.setSelectionRange &&
+                document.activeElement === n) {
+                try { n.setSelectionRange(payload.sel.start, payload.sel.end); }
+                catch (e) {}
+            }
+        } catch (e) {}
+    });
+}
+
 async function reloadNode(nodeId) {
     // Fall back to global reload for tab-level, group-level, and code nodes.
     if (!_supportsFragmentFetch(nodeId)) {
@@ -4859,9 +4937,6 @@ async function reloadNode(nodeId) {
         var existing = document.querySelector('[data-node-id="' + esc + '"]');
         if (!existing) { _reloadInPlace(); return; }
 
-        // Preserve <details> open state inside the subtree across the swap.
-        var openMap = _captureDetailsOpenState(existing);
-
         var tpl = document.createElement('template');
         tpl.innerHTML = html.trim();
         var fresh = tpl.content.firstElementChild;
@@ -4874,8 +4949,8 @@ async function reloadNode(nodeId) {
         var wasExpanded = existing.classList.contains('card')
             && !existing.classList.contains('collapsed');
 
-        existing.replaceWith(fresh);
-        _restoreDetailsOpenState(fresh, openMap);
+        var result = focusSafeSwap(existing, fresh);
+        if (result.skipped) return;
         if (wasExpanded && fresh.classList && fresh.classList.contains('card')) {
             fresh.classList.remove('collapsed');
         }
