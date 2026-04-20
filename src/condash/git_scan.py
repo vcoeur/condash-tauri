@@ -108,12 +108,17 @@ def _git_worktrees(repo_path):
         if not line:
             if current.get("path") and current["path"] != main:
                 wt_path = Path(current["path"])
-                key = (
-                    wt_path.parent.name
-                    if wt_path.parent.parent.name == "worktrees"
-                    else wt_path.name
-                )
                 branch, dirty, changed, changed_files = _git_status(wt_path)
+                # Prefer the full branch name (slash-preserving) so nested
+                # worktrees like feature/colored-layers and
+                # feature/independent-endpieces-width don't collide on the
+                # same key. Fall back to the worktree directory name for
+                # detached HEADs or when the branch is otherwise unknown.
+                raw_branch = current.get("branch") or branch
+                if raw_branch and raw_branch != "HEAD":
+                    key = raw_branch
+                else:
+                    key = wt_path.name
                 worktrees.append(
                     {
                         "key": key,
