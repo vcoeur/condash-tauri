@@ -18,6 +18,7 @@ import socket
 import struct
 import sys
 import termios
+import time
 from dataclasses import dataclass, field
 from importlib.resources import files as _package_files
 from pathlib import Path
@@ -93,6 +94,16 @@ log = logging.getLogger(__name__)
 _RUNTIME_CFG: CondashConfig | None = None
 _RUNTIME_CTX: RenderCtx | None = None
 
+# When POST /config writes the YAML, the watchdog observer sees its own
+# write and would emit a redundant config-reload event. We stamp each
+# expected filename here with an expiry timestamp right before saving; the
+# file-watcher callback drops any leaf whose stamp is still in the future.
+# A timestamp-based approach (vs. a one-shot set) handles the case where
+# the handler's 0.75s debounce collapses two rapid self-writes into a
+# single event — a set-based stamp would leak.
+_CONFIG_SELF_WRITE: dict[str, float] = {}
+_CONFIG_SELF_WRITE_TTL = 2.0
+
 # Phase 6: filesystem-driven staleness push. The bus collects events
 # from the watchdog worker thread; ``/events`` fans them out to every
 # connected SSE client. A single observer is spun up in :func:`run`
@@ -144,6 +155,45 @@ def _stop_event_observer() -> None:
         obs.join(timeout=2.0)
     except Exception:
         log.exception("failed to stop watchdog observer")
+
+
+def _reload_runtime_config_from_disk(leaf: str) -> None:
+    """Reload the live :class:`CondashConfig` after an external YAML edit.
+
+    Runs on the asyncio event loop (scheduled by the watchdog worker via
+    ``loop.call_soon_threadsafe``). Drops the event when the write was
+    initiated by this process itself — POST ``/config`` stamps the leaf
+    into :data:`_CONFIG_SELF_WRITE` right before saving so the watcher's
+    echo is suppressed exactly once.
+
+    Rebuilds ``_RUNTIME_CFG`` + ``_RUNTIME_CTX`` atomically (pointer swap)
+    so concurrent readers see either the previous config or the new one,
+    never a half-initialised state. Errors are logged and dropped — a
+    malformed hand edit leaves the running config intact, and the user
+    gets the parse error via the normal log channel.
+    """
+    global _RUNTIME_CFG, _RUNTIME_CTX
+    now = time.time()
+    expiry = _CONFIG_SELF_WRITE.get(leaf)
+    if expiry is not None and now < expiry:
+        return
+    # Reap any long-expired self-write stamps so the dict doesn't grow.
+    for stale_leaf in [k for k, v in _CONFIG_SELF_WRITE.items() if v <= now]:
+        _CONFIG_SELF_WRITE.pop(stale_leaf, None)
+    if _RUNTIME_CFG is None:
+        return
+    try:
+        new_cfg = config_mod.load(
+            port_override=_RUNTIME_CFG.port,
+            native_override=_RUNTIME_CFG.native,
+        )
+    except (config_mod.ConfigNotFoundError, config_mod.ConfigIncompleteError) as exc:
+        log.warning("live config reload failed (%s): %s", leaf, exc)
+        return
+    new_ctx = build_ctx(new_cfg)
+    _RUNTIME_CFG = new_cfg
+    _RUNTIME_CTX = new_ctx
+    log.info("live config reload: %s applied", leaf)
 
 
 # --- Pty session registry --------------------------------------------------
@@ -791,6 +841,12 @@ def _register_routes() -> None:
             new_cfg = _payload_to_config(data)
         except (ValueError, KeyError, TypeError) as exc:
             return _error(400, f"invalid config: {exc}")
+        # Stamp self-writes so the filesystem watcher doesn't echo our
+        # own save back as an external reload event. Expiry-based so the
+        # 0.75s handler debounce can't leak a stamp into the next edit.
+        expiry = time.time() + _CONFIG_SELF_WRITE_TTL
+        _CONFIG_SELF_WRITE["repositories.yml"] = expiry
+        _CONFIG_SELF_WRITE["preferences.yml"] = expiry
         config_mod.save(new_cfg)
         # Rebuild the RenderCtx so paths / repos / open-with changes
         # take effect on the next request without needing a process restart.
@@ -1825,7 +1881,9 @@ def run(cfg: CondashConfig) -> None:
     # Filesystem → SSE bridge. The observer runs on its own worker
     # thread and publishes to the module-level bus; /events streams
     # from there. Stopped on NiceGUI shutdown.
-    _EVENT_OBSERVER = events_mod.start_watcher(_RUNTIME_CTX, _EVENT_BUS)
+    _EVENT_OBSERVER = events_mod.start_watcher(
+        _RUNTIME_CTX, _EVENT_BUS, on_config_reload=_reload_runtime_config_from_disk
+    )
     if _EVENT_OBSERVER is not None:
         _ng_app.on_shutdown(_stop_event_observer)
     port = _pick_free_port() if cfg.port == 0 else cfg.port

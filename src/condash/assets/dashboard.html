@@ -5030,6 +5030,35 @@ var _eventSource = null;
 var _eventReconnectTimer = null;
 var _eventReconnectDelay = 1000;
 
+/* Live YAML reload: dispatched from the SSE onmessage handler when the
+   filesystem watcher notices an external edit to repositories.yml or
+   preferences.yml. The server has already rebuilt its RenderCtx by
+   the time this fires, so the client's job is just to:
+     (a) refresh the open config modal's form in place, if any, and
+     (b) rebuild the dashboard body so server-rendered bits (repo strip,
+         open-with buttons, terminal shortcut specs) pick up the change.
+   Self-writes from POST /config are suppressed server-side, so this
+   only fires on external edits — no infinite loop. */
+var _configReloadTimer = null;
+function _onConfigChanged(payload) {
+    if (_configReloadTimer) clearTimeout(_configReloadTimer);
+    _configReloadTimer = setTimeout(function() {
+        _configReloadTimer = null;
+        var modal = document.getElementById('config-modal');
+        var modalOpen = modal && modal.style.display !== 'none' && modal.style.display !== '';
+        if (modalOpen && typeof openConfigModal === 'function') {
+            // Re-populate the form from disk, preserving modal visibility.
+            openConfigModal();
+        }
+        // Always refresh shortcut specs — they live outside the modal
+        // and bind global key handlers.
+        if (typeof _loadTermShortcuts === 'function') _loadTermShortcuts();
+        // Rebuild the server-rendered dashboard so the repo strip and
+        // open-with buttons reflect the new config.
+        _reloadInPlace();
+    }, 150);
+}
+
 function _startEventStream() {
     if (typeof EventSource !== 'function') return;  // no push, stick with boot checkUpdates
     try {
@@ -5047,9 +5076,20 @@ function _startEventStream() {
         checkUpdates();
     });
     _eventSource.addEventListener('ping', function() { /* keepalive */ });
-    _eventSource.onmessage = function() {
-        // Any non-typed message is a staleness hint. Debounced so a
-        // burst of watcher events collapses into a single fetch + swap.
+    _eventSource.onmessage = function(ev) {
+        // Parse the payload to dispatch on the ``tab`` field. Config
+        // events run a dedicated handler (refresh the modal if open,
+        // else in-place reload so repo strip + open-with buttons pick
+        // up the new YAML). Everything else falls through to the
+        // existing staleness pipeline.
+        var payload = null;
+        try { payload = JSON.parse(ev.data || '{}'); } catch (e) { payload = {}; }
+        if (payload && payload.tab === 'config') {
+            _onConfigChanged(payload);
+            return;
+        }
+        // Any other non-typed message is a staleness hint. Debounced so
+        // a burst of watcher events collapses into a single fetch + swap.
         _scheduleCheckUpdates();
         // Phase 7: open-note reconcile — a disk change anywhere in the
         // watched tree might affect the currently-displayed note.
