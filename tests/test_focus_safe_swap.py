@@ -86,3 +86,14 @@ def test_phase3_per_node_dots_removed():
     assert "el.appendChild(btn);" not in body
     # switchTab no longer has the "same tab + stale = refresh" branch.
     assert "if (clickedSameTab && clickedTabStale)" not in body
+
+
+def test_phase4_shadow_cache_present():
+    body = _html()
+    assert "_shadowCache" in body
+    assert "function _refreshShadowCache(" in body
+    assert "function _consumeShadowCache(" in body
+    # Prefetch kicked off from checkUpdates when any inactive tab is dirty.
+    assert "anyInactiveDirty" in body
+    # _reloadInPlace prefers the cache over re-fetching.
+    assert "_consumeShadowCache()" in body

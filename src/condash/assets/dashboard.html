@@ -2927,10 +2927,17 @@ document.addEventListener('click', function(e) {
    Falls back to location.reload() on any error so the user never ends
    up looking at a half-swapped DOM. */
 async function _reloadInPlace() {
+    // Phase 4: consume the shadow cache when present so a tab click
+    // that landed right after a background prefetch doesn't re-issue
+    // the same fetch. Any other path falls back to a live fetch.
+    var prefetched = _consumeShadowCache();
     try {
-        var res = await fetch('/', {cache: 'no-store'});
-        if (!res.ok) { location.reload(); return; }
-        var html = await res.text();
+        var html = prefetched;
+        if (!html) {
+            var res = await fetch('/', {cache: 'no-store'});
+            if (!res.ok) { location.reload(); return; }
+            html = await res.text();
+        }
         var fresh = new DOMParser()
             .parseFromString(html, 'text/html')
             .getElementById('dash-main');
@@ -2946,6 +2953,42 @@ async function _reloadInPlace() {
     } catch (e) {
         location.reload();
     }
+}
+
+/* --- Shadow pre-reload cache (Phase 4) ---
+   When staleness lands on an inactive tab, kick off a background
+   fetch of the dashboard HTML. On the user's next tab click that
+   would have triggered a live _reloadInPlace, the cached HTML is
+   applied instead, so the switch feels instant. The cache is a
+   single entry because `/` returns the whole app — any tab's fresh
+   content is already included. */
+var _shadowCache = null;  // {html, at} | {inflight: true} | null
+
+async function _refreshShadowCache() {
+    if (_shadowCache && _shadowCache.inflight) return;
+    _shadowCache = {inflight: true};
+    try {
+        var res = await fetch('/', {cache: 'no-store'});
+        if (!res.ok) { _shadowCache = null; return; }
+        var html = await res.text();
+        _shadowCache = {html: html, at: Date.now()};
+    } catch (e) {
+        _shadowCache = null;
+    }
+}
+
+function _consumeShadowCache() {
+    if (!_shadowCache || _shadowCache.inflight || !_shadowCache.html) return null;
+    var html = _shadowCache.html;
+    _shadowCache = null;
+    return html;
+}
+
+function _tabForNodeId(id) {
+    if (id === 'projects' || id.indexOf('projects/') === 0) return 'projects';
+    if (id === 'code' || id.indexOf('code/') === 0) return 'code';
+    if (id === 'knowledge' || id.indexOf('knowledge/') === 0) return 'knowledge';
+    return null;
 }
 
 /* Re-apply state to the freshly-swapped #dash-main. Inline onclick
@@ -4714,6 +4757,15 @@ async function checkUpdates() {
             // tabs' dirty state is still tracked; their binary dot
             // surfaces when _renderStale runs below.
             if (fresh.size > 0) _autoReloadActiveTab(fresh);
+            // Phase 4: any staleness on an inactive tab kicks off a
+            // single background fetch of / so the next tab click can
+            // swap instantly.
+            var anyInactiveDirty = false;
+            fresh.forEach(function(id) {
+                var tab = _tabForNodeId(id);
+                if (tab && tab !== _activeTab) anyInactiveDirty = true;
+            });
+            if (anyInactiveDirty) _refreshShadowCache();
         }
         _renderStale();
     } catch (e) {}
