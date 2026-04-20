@@ -291,6 +291,14 @@ body {
 .config-toggle svg { display: block; }
 .about-toggle { padding: 4px 8px; }
 .about-toggle svg { display: block; }
+/* Phase 6: SSE-dropped indicator. Quiet pill next to the header
+   actions; surfaces only while /events is disconnected. */
+.reconnecting-pill {
+    padding: 3px 10px; font-size: 0.75rem; border-radius: 12px;
+    background: #fdd; color: #000; border: 1px solid #e99;
+    user-select: none; cursor: default;
+}
+.reconnecting-pill[hidden] { display: none !important; }
 
 /* --- About modal --- */
 .about-modal { width: min(420px, 96vw); height: auto; max-height: min(640px, 90vh); }
@@ -1205,6 +1213,17 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     background: var(--bg-card-hover);
 }
 .note-modal-search[hidden] { display: none; }
+/* Phase 7: external-change banner. Surfaces inside the note modal
+   when disk mtime drifts from the buffer's load mtime. */
+.note-modal-external-banner {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.4rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    background: #fff3cd; color: #000;
+    font-size: 0.85rem;
+}
+.note-modal-external-banner[hidden] { display: none; }
+.note-modal-external-banner span { flex: 1; }
 .note-modal-search input[type="search"] {
     flex: 1; padding: 0.3rem 0.6rem;
     border: 1px solid var(--input-border); border-radius: 6px;
@@ -1868,6 +1887,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
         <div class="tab" data-tab="history" onclick="switchTab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
     </div>
     <div class="header-actions">
+        <span id="reconnecting-pill" class="reconnecting-pill" hidden title="Lost connection to the dashboard backend — retrying…">Reconnecting…</span>
         <button id="refresh-all-btn" class="theme-toggle" onclick="refreshAll()" title="Refresh everything (escape hatch — clears all dirty markers)" aria-label="Refresh everything">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
@@ -1925,13 +1945,13 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     </div>
     <div id="knowledge-pane" style="display:none" data-node-id="knowledge">
         <div class="search-toolbar knowledge-toolbar">
-            <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off">
+            <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off" data-preserve="condash.search.knowledge">
         </div>
         <div id="knowledge">{{KNOWLEDGE}}</div>
     </div>
     <div id="history-pane" style="display:none" data-node-id="history">
         <div class="search-toolbar history-toolbar">
-            <input id="history-search" type="search" placeholder="Search history — title, apps, notes, filenames…" oninput="filterHistory(this.value)" autocomplete="off">
+            <input id="history-search" type="search" placeholder="Search history — title, apps, notes, filenames…" oninput="filterHistory(this.value)" autocomplete="off" data-preserve="condash.search.history">
         </div>
         <div id="history-results" hidden></div>
         <div id="history">{{HISTORY}}</div>
@@ -1974,6 +1994,11 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                 <button id="note-save-btn" class="note-action-btn note-action-primary" onclick="saveEdit()" style="display:none">Save</button>
                 <button class="note-modal-close" onclick="closeNotePreview()" aria-label="Close">&times;</button>
             </div>
+        </div>
+        <div class="note-modal-external-banner" id="note-modal-external-banner" hidden>
+            <span>This note changed on disk.</span>
+            <button type="button" class="note-action-btn" onclick="_noteReconcileDismiss()">Keep my edits</button>
+            <button type="button" class="note-action-btn note-action-primary" onclick="_noteReconcileReload()">Reload from disk</button>
         </div>
         <div class="note-modal-search" id="note-search-bar" hidden>
             <input type="search" id="note-search-input" placeholder="Find in note…" autocomplete="off" oninput="noteSearchRun()">
@@ -2833,24 +2858,19 @@ function _persistTabState() {
 function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
     // Clicking the already-active tab refreshes the dashboard when its
-    // data is stale — the tab's own per-tab dot doubles as a reload
-    // affordance. Clicking a *different* tab already refreshes whenever
-    // any pane is stale (paths below hitting _reloadInPlace).
+    // Phase 3: the active tab auto-reloads, so the old "click same
+    // stale tab = refresh" branch is gone. Clicking an inactive tab
+    // that has its binary dot rebuilds #dash-main so the fresh tab
+    // content lands before the user sees stale data.
     var clickedSameTab = tab === _activeTab;
-    // History shares the projects on-disk data source, so _itemsStale
-    // signals staleness for both tabs.
+    _deriveLegacyFlags();
     var clickedTabStale =
         ((tab === 'projects' || tab === 'history') && _itemsStale) ||
         (tab === 'code' && _gitStale) ||
         (tab === 'knowledge' && _knowledgeStale);
-    if (clickedSameTab && clickedTabStale) {
-        _reloadInPlace();
-        return;
-    }
-    if ((_itemsStale || _gitStale || _knowledgeStale) && !clickedSameTab) {
+    if (!clickedSameTab && clickedTabStale) {
         // Commit the new tab first so _reloadInPlace's post-swap
-        // _rebindDashHandlers → switchTab(_activeTab) lands on it —
-        // otherwise the user has to click the tab a second time.
+        // _rebindDashHandlers → switchTab(_activeTab) lands on it.
         _activeTab = tab;
         _reloadInPlace();
         return;
@@ -2868,6 +2888,9 @@ function switchTab(tab) {
     document.getElementById('projects-subtabs').style.display = tab === 'projects' ? '' : 'none';
     if (tab === 'projects') _applySubtab(_activeSubtab);
     _persistTabState();
+    // Re-render dots so the newly-active tab loses its marker and any
+    // previously-active tab that remained dirty gains one.
+    if (typeof _renderStale === 'function') _renderStale();
 }
 
 function switchSubtab(sub) {
@@ -2935,47 +2958,68 @@ document.addEventListener('click', function(e) {
    Falls back to location.reload() on any error so the user never ends
    up looking at a half-swapped DOM. */
 async function _reloadInPlace() {
+    // Phase 4: consume the shadow cache when present so a tab click
+    // that landed right after a background prefetch doesn't re-issue
+    // the same fetch. Any other path falls back to a live fetch.
+    var prefetched = _consumeShadowCache();
     try {
-        var res = await fetch('/', {cache: 'no-store'});
-        if (!res.ok) { location.reload(); return; }
-        var html = await res.text();
+        var html = prefetched;
+        if (!html) {
+            var res = await fetch('/', {cache: 'no-store'});
+            if (!res.ok) { location.reload(); return; }
+            html = await res.text();
+        }
         var fresh = new DOMParser()
             .parseFromString(html, 'text/html')
             .getElementById('dash-main');
         var current = document.getElementById('dash-main');
         if (!fresh || !current) { location.reload(); return; }
 
-        var winY = window.scrollY;
-        var mainScroll = document.getElementById('main-scroll');
-        var mainY = mainScroll ? mainScroll.scrollTop : 0;
-        // Best-effort focus/selection restore for text inputs by id.
-        var focusId = null, focusSel = null;
-        var active = document.activeElement;
-        if (active && current.contains(active) && active.id) {
-            focusId = active.id;
-            try { focusSel = {start: active.selectionStart, end: active.selectionEnd}; }
-            catch (e) {}
+        var result = focusSafeSwap(current, fresh);
+        if (result.skipped) {
+            _pendingReloadInPlace = true;
+            return;
         }
-
-        current.replaceWith(fresh);
         _rebindDashHandlers();
-
-        window.scrollTo(0, winY);
-        var newMainScroll = document.getElementById('main-scroll');
-        if (newMainScroll) newMainScroll.scrollTop = mainY;
-        if (focusId) {
-            var el = document.getElementById(focusId);
-            if (el) {
-                el.focus();
-                if (focusSel && el.setSelectionRange) {
-                    try { el.setSelectionRange(focusSel.start, focusSel.end); }
-                    catch (e) {}
-                }
-            }
-        }
     } catch (e) {
         location.reload();
     }
+}
+
+/* --- Shadow pre-reload cache (Phase 4) ---
+   When staleness lands on an inactive tab, kick off a background
+   fetch of the dashboard HTML. On the user's next tab click that
+   would have triggered a live _reloadInPlace, the cached HTML is
+   applied instead, so the switch feels instant. The cache is a
+   single entry because `/` returns the whole app — any tab's fresh
+   content is already included. */
+var _shadowCache = null;  // {html, at} | {inflight: true} | null
+
+async function _refreshShadowCache() {
+    if (_shadowCache && _shadowCache.inflight) return;
+    _shadowCache = {inflight: true};
+    try {
+        var res = await fetch('/', {cache: 'no-store'});
+        if (!res.ok) { _shadowCache = null; return; }
+        var html = await res.text();
+        _shadowCache = {html: html, at: Date.now()};
+    } catch (e) {
+        _shadowCache = null;
+    }
+}
+
+function _consumeShadowCache() {
+    if (!_shadowCache || _shadowCache.inflight || !_shadowCache.html) return null;
+    var html = _shadowCache.html;
+    _shadowCache = null;
+    return html;
+}
+
+function _tabForNodeId(id) {
+    if (id === 'projects' || id.indexOf('projects/') === 0) return 'projects';
+    if (id === 'code' || id.indexOf('code/') === 0) return 'code';
+    if (id === 'knowledge' || id.indexOf('knowledge/') === 0) return 'knowledge';
+    return null;
 }
 
 /* Re-apply state to the freshly-swapped #dash-main. Inline onclick
@@ -3006,7 +3050,33 @@ document.addEventListener('DOMContentLoaded', function() {
     if (tab === 'projects' && SUBTABS.indexOf(sub) !== -1) _activeSubtab = sub;
     switchTab(tab);
     restoreNotesTreeState();
+    _restorePreservedSearches();
 });
+
+/* Phase 5: pull saved search terms out of sessionStorage and replay
+   them through the filter functions. Runs once on initial page load;
+   subsequent swaps go through focusSafeSwap which handles restoration
+   via data-preserve. */
+function _restorePreservedSearches() {
+    var mapping = {
+        'condash.search.knowledge': {id: 'knowledge-search', fn: 'filterKnowledge'},
+        'condash.search.history': {id: 'history-search', fn: 'filterHistory'},
+    };
+    Object.keys(mapping).forEach(function(key) {
+        var raw = null;
+        try { raw = sessionStorage.getItem(key); } catch (e) { return; }
+        if (!raw) return;
+        var payload;
+        try { payload = JSON.parse(raw); } catch (e) { return; }
+        if (!payload || payload.value == null || payload.value === '') return;
+        var input = document.getElementById(mapping[key].id);
+        if (!input) return;
+        input.value = payload.value;
+        if (typeof window[mapping[key].fn] === 'function') {
+            window[mapping[key].fn](payload.value);
+        }
+    });
+}
 
 /* --- Notes-tree per-subdir collapsed/expanded state ---
    Each <details data-subdir-key="<slug>/<rel_dir>"> remembers its open
@@ -3316,11 +3386,19 @@ function _resetTree(panel, emptyCls) {
 /* --- Knowledge search --- */
 function filterKnowledge(q) {
     _knowledgeSearchQ = q || '';
+    _persistSearch('condash.search.knowledge', _knowledgeSearchQ);
     var panel = document.getElementById('knowledge');
     if (!panel) return;
     var qTrim = (q || '').trim();
     _filterTree(panel, _searchTokens(q), qTrim,
         'knowledge-empty', 'No knowledge pages match "' + qTrim + '".');
+}
+
+function _persistSearch(key, value) {
+    try {
+        if (!value) sessionStorage.removeItem(key);
+        else sessionStorage.setItem(key, JSON.stringify({value: value}));
+    } catch (e) {}
 }
 
 /* --- History search ---
@@ -3332,6 +3410,7 @@ var _historySearchTimer = null;
 var _historySearchAbort = null;
 function filterHistory(q) {
     _historySearchQ = q || '';
+    _persistSearch('condash.search.history', _historySearchQ);
     var pane = document.getElementById('history-pane');
     var tree = document.getElementById('history');
     var results = document.getElementById('history-results');
@@ -3580,12 +3659,16 @@ var _noteModal = {
 };
 
 /* Flip the dirty flag and refresh the Save button. Safe to call on every
-   keystroke — the button toggle is the only DOM work. */
+   keystroke — the button toggle is the only DOM work. Also drains any
+   reload requests that were parked because the modal was dirty. */
 function _setDirty(value) {
     var next = !!value;
     if (_noteModal.dirty === next) return;
     _noteModal.dirty = next;
     _syncSaveButton();
+    if (!next && typeof _flushPendingReloads === 'function') {
+        _flushPendingReloads();
+    }
 }
 
 /* Save button is enabled only when there are unsaved edits, so after a
@@ -3620,6 +3703,8 @@ async function openNotePreview(path, name) {
     _noteModal.text = '';
     _noteModal.renderedHtml = '';
     _noteModal.dirty = false;
+    _noteShowExternalBanner(false);
+    _noteReconcileSuppressedUntilMtime = null;
     ta.value = '';
     viewPane.innerHTML = '<p class="note-loading">Loading\u2026</p>';
     _setNoteModeAttr(inner, 'view');
@@ -3802,6 +3887,9 @@ function closeNotePreview() {
     _noteNavStack = [];
     _syncNoteBack();
     noteSearchClose();
+    _noteShowExternalBanner(false);
+    _noteReconcileSuppressedUntilMtime = null;
+    if (typeof _flushPendingReloads === 'function') _flushPendingReloads();
 }
 
 /* --- In-note search (Ctrl+F inside the note modal) ---
@@ -4325,6 +4413,97 @@ function startRenameNote() {
     input.onclick = function(ev) { ev.stopPropagation(); };
 }
 
+/* --- Phase 7: note modal reconcile ---
+   When /events signals a filesystem change, any open note may now
+   diverge from its on-disk content. _reconcileNoteModal compares the
+   loaded mtime with the live mtime and acts by buffer state:
+     - clean buffer → silently reload text + render, restoring selection.
+     - dirty buffer → reveal the banner and leave the buffer alone until
+       the user picks "Keep my edits" or "Reload from disk".
+   The banner dismissal is sticky until a new external change is
+   detected (so the user who keeps editing isn't re-nagged).
+*/
+var _noteReconcileSuppressedUntilMtime = null;
+
+async function _reconcileNoteModal() {
+    if (!_noteModal || !_noteModal.path) return;
+    var path = _noteModal.path;
+    try {
+        var res = await fetch('/note-raw?path=' + encodeURIComponent(path));
+        if (!res.ok) return;
+        var data = await res.json();
+        if (_noteModal.path !== path) return;  // user switched notes mid-flight
+        var fresh = Number(data.mtime);
+        var loaded = Number(_noteModal.mtime);
+        if (!isFinite(fresh) || !isFinite(loaded)) return;
+        if (fresh <= loaded) return;  // no external change
+        if (_noteReconcileSuppressedUntilMtime != null
+            && fresh <= _noteReconcileSuppressedUntilMtime) {
+            return;  // user said "keep my edits"; wait for a newer change
+        }
+        if (_noteModal.editable) _captureActiveBuffer();
+        if (_noteModal.dirty) {
+            _noteShowExternalBanner(true);
+        } else {
+            await _noteSilentReload(data);
+        }
+    } catch (e) {}
+}
+
+function _noteShowExternalBanner(show) {
+    var banner = document.getElementById('note-modal-external-banner');
+    if (!banner) return;
+    if (show) banner.removeAttribute('hidden');
+    else banner.setAttribute('hidden', '');
+}
+
+function _noteReconcileDismiss() {
+    // Remember the disk mtime we just decided to ignore so repeat
+    // polls don't re-show the banner until a newer change lands.
+    _noteReconcileSuppressedUntilMtime = Number(_noteModal.mtime) || 0;
+    _noteShowExternalBanner(false);
+}
+
+async function _noteReconcileReload() {
+    try {
+        var res = await fetch('/note-raw?path=' + encodeURIComponent(_noteModal.path));
+        if (!res.ok) return;
+        var data = await res.json();
+        await _noteSilentReload(data);
+        _noteShowExternalBanner(false);
+        _noteReconcileSuppressedUntilMtime = null;
+    } catch (e) {}
+}
+
+async function _noteSilentReload(rawData) {
+    // Update buffer + preview, preserve caret/selection where possible.
+    _noteModal.text = rawData.content;
+    _noteModal.mtime = Number(rawData.mtime);
+    _setDirty(false);
+    // Hydrate whichever pane is active. CM6 owns its own state —
+    // replace the doc but keep the selection when it still fits.
+    if (_cm && _cm.view) {
+        var prevSel = null;
+        try { prevSel = _cm.view.state.selection; } catch (e) {}
+        _cm.view.dispatch({
+            changes: {from: 0, to: _cm.view.state.doc.length, insert: _noteModal.text},
+        });
+        if (prevSel) {
+            try {
+                var max = _cm.view.state.doc.length;
+                var anchor = Math.min(prevSel.main.anchor, max);
+                var head = Math.min(prevSel.main.head, max);
+                _cm.view.dispatch({selection: {anchor: anchor, head: head}});
+            } catch (e) {}
+        }
+    }
+    var ta = document.getElementById('note-edit-textarea');
+    if (ta) ta.value = _noteModal.text;
+    try {
+        await _reloadNotePreview(_noteModal.path, null);
+    } catch (e) {}
+}
+
 async function _reloadNotePreview(path, name) {
     var pane = document.getElementById('note-pane-view');
     if (name) document.getElementById('note-modal-title').textContent = name;
@@ -4722,7 +4901,11 @@ function _ancestorsOf(id) {
 }
 
 function _renderStale() {
-    // 1. Clear previous markers everywhere.
+    // Phase 3: the active tab auto-reloads, so per-node dots and
+    // ancestor hints are gone; the only user-visible staleness marker
+    // is a single binary dot on each *inactive* tab header.
+    // Clear any surviving Phase-1/Phase-2 markers — if a swap was
+    // guard-skipped, _renderStale re-renders with the latest state.
     document.querySelectorAll('[data-node-id].node-stale, [data-node-id].node-stale-hint')
         .forEach(function(el) {
             el.classList.remove('node-stale');
@@ -4730,69 +4913,9 @@ function _renderStale() {
         });
     document.querySelectorAll('.group-dirty-leader')
         .forEach(function(el) { el.classList.remove('group-dirty-leader'); });
+    document.querySelectorAll('.node-reload-btn')
+        .forEach(function(btn) { btn.remove(); });
 
-    // 2. Collect ancestor hint set from the dirty set.
-    var hintIds = new Set();
-    _dirtyNodes.forEach(function(id) {
-        _ancestorsOf(id).forEach(function(anc) { hintIds.add(anc); });
-    });
-
-    // 3. Apply strong marker on dirty, muted marker on ancestors.
-    _dirtyNodes.forEach(function(id) {
-        // CSS-attribute selectors need values escaped — but our ids only
-        // contain [a-zA-Z0-9/:.\-_], safe for CSS.escape.
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-        document.querySelectorAll('[data-node-id="' + esc + '"]').forEach(function(el) {
-            el.classList.add('node-stale');
-        });
-    });
-    hintIds.forEach(function(id) {
-        if (_dirtyNodes.has(id)) return; // strong wins over hint
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-        document.querySelectorAll('[data-node-id="' + esc + '"]').forEach(function(el) {
-            el.classList.add('node-stale-hint');
-        });
-    });
-
-    // 4. Group headings are hidden on most subtabs. When a group is dirty
-    //    but its heading isn't visible, stamp the marker on the first
-    //    visible card of that priority so the user still sees it.
-    _dirtyNodes.forEach(function(id) {
-        var m = /^projects\/([a-z]+)$/.exec(id);
-        if (!m) return;
-        var pri = m[1];
-        var heading = document.querySelector('.group-heading[data-group="' + pri + '"]');
-        if (heading && !heading.classList.contains('hidden')) return;
-        var firstCard = document.querySelector(
-            '.card[data-priority="' + pri + '"]:not(.hidden)'
-        );
-        if (firstCard) firstCard.classList.add('group-dirty-leader');
-    });
-
-    // 5. Inject reload buttons on every stale / hinted node so the user
-    //    can click any level to refresh just that subtree. Leaf nodes we
-    //    know how to fragment-fetch (cards + knowledge dirs) do a local
-    //    swap; everything else falls back to a global _reloadInPlace.
-    document.querySelectorAll('[data-node-id].node-stale, [data-node-id].node-stale-hint')
-        .forEach(function(el) {
-            if (el.id === 'projects-pane' || el.id === 'code-pane' || el.id === 'knowledge-pane') {
-                return; // pane wrappers never get a reload button (dot is hidden too)
-            }
-            if (el.querySelector(':scope > .node-reload-btn')) return;
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'node-reload-btn';
-            btn.setAttribute('aria-label', 'Reload this section');
-            btn.title = 'Reload this section';
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                reloadNode(el.getAttribute('data-node-id'));
-            });
-            el.appendChild(btn);
-        });
-
-    // 6. Tab-header dots — coarse "something in this tab needs attention".
     _deriveLegacyFlags();
     var staleByTab = {
         projects: _itemsStale,
@@ -4802,10 +4925,11 @@ function _renderStale() {
     };
     document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         var key = t.getAttribute('data-tab');
-        var isStale = !!staleByTab[key];
+        // Active tab never shows the dot — it self-refreshes.
+        var isStale = !!staleByTab[key] && key !== _activeTab;
         t.classList.toggle('stale', isStale);
         if (isStale) {
-            t.title = 'Refresh — data has changed on disk';
+            t.title = 'Click to refresh — data has changed on disk';
         } else {
             t.removeAttribute('title');
         }
@@ -4826,7 +4950,27 @@ function _diffNodes(baseline, current) {
     return dirty;
 }
 
+/* Coalesce rapid checkUpdates triggers. A single user save fires
+   multiple watchdog events (the file, its directory, its parents);
+   each used to start its own fetch + fragment-swap pass, which
+   showed up as a flicker on the active tab. _scheduleCheckUpdates
+   collapses calls within a 250ms window into a single run and
+   guarantees a trailing pass so the last event isn't dropped. */
+var _checkUpdatesTimer = null;
+var _checkUpdatesInFlight = false;
+var _checkUpdatesPending = false;
+function _scheduleCheckUpdates() {
+    if (_checkUpdatesInFlight) { _checkUpdatesPending = true; return; }
+    if (_checkUpdatesTimer) return;
+    _checkUpdatesTimer = setTimeout(function() {
+        _checkUpdatesTimer = null;
+        checkUpdates();
+    }, 250);
+}
+
 async function checkUpdates() {
+    if (_checkUpdatesInFlight) { _checkUpdatesPending = true; return; }
+    _checkUpdatesInFlight = true;
     try {
         var res = await fetch('/check-updates');
         if (!res.ok) return;
@@ -4842,9 +4986,129 @@ async function checkUpdates() {
             // was a change even if they weren't on the tab when it happened.
             var fresh = _diffNodes(_nodeBaseline, current);
             fresh.forEach(function(id) { _dirtyNodes.add(id); });
+            // Phase 3: staleness on the active tab auto-resolves. Other
+            // tabs' dirty state is still tracked; their binary dot
+            // surfaces when _renderStale runs below.
+            if (fresh.size > 0) _autoReloadActiveTab(fresh);
+            // Phase 4: any staleness on an inactive tab kicks off a
+            // single background fetch of / so the next tab click can
+            // swap instantly.
+            var anyInactiveDirty = false;
+            fresh.forEach(function(id) {
+                var tab = _tabForNodeId(id);
+                if (tab && tab !== _activeTab) anyInactiveDirty = true;
+            });
+            if (anyInactiveDirty) _refreshShadowCache();
         }
         _renderStale();
-    } catch (e) {}
+    } catch (e) {
+    } finally {
+        _checkUpdatesInFlight = false;
+        if (_checkUpdatesPending) {
+            _checkUpdatesPending = false;
+            _scheduleCheckUpdates();
+        }
+    }
+}
+
+function _activeTabPrefix() {
+    // History derives from the same on-disk data as Projects.
+    return _activeTab === 'history' ? 'projects' : _activeTab;
+}
+
+function _idInTab(id, tab) {
+    var prefix = tab === 'history' ? 'projects' : tab;
+    return id === prefix || id.indexOf(prefix + '/') === 0;
+}
+
+/* --- SSE event stream (Phase 6) ---
+   Replaces the 5s polling loop. Every event from /events triggers a
+   reconcile call to /check-updates; the real dirty-set computation
+   lives there, unchanged. On drop, _setReconnecting(true) surfaces
+   the pill and an exponential-backoff retry loop tries to reopen. */
+var _eventSource = null;
+var _eventReconnectTimer = null;
+var _eventReconnectDelay = 1000;
+
+function _startEventStream() {
+    if (typeof EventSource !== 'function') return;  // no push, stick with boot checkUpdates
+    try {
+        _eventSource = new EventSource('/events');
+    } catch (e) {
+        _setReconnecting(true);
+        _scheduleEventReconnect();
+        return;
+    }
+    _eventSource.addEventListener('hello', function() {
+        _setReconnecting(false);
+        _eventReconnectDelay = 1000;
+        // Reconcile: the stream may have missed changes during the
+        // gap. checkUpdates diffs fingerprints and picks them up.
+        checkUpdates();
+    });
+    _eventSource.addEventListener('ping', function() { /* keepalive */ });
+    _eventSource.onmessage = function() {
+        // Any non-typed message is a staleness hint. Debounced so a
+        // burst of watcher events collapses into a single fetch + swap.
+        _scheduleCheckUpdates();
+        // Phase 7: open-note reconcile — a disk change anywhere in the
+        // watched tree might affect the currently-displayed note.
+        _reconcileNoteModal();
+    };
+    _eventSource.onerror = function() {
+        _setReconnecting(true);
+        try { _eventSource.close(); } catch (e) {}
+        _eventSource = null;
+        _scheduleEventReconnect();
+    };
+}
+
+function _scheduleEventReconnect() {
+    if (_eventReconnectTimer) return;
+    _eventReconnectTimer = setTimeout(function() {
+        _eventReconnectTimer = null;
+        _eventReconnectDelay = Math.min(_eventReconnectDelay * 2, 30000);
+        _startEventStream();
+    }, _eventReconnectDelay);
+}
+
+function _setReconnecting(on) {
+    var pill = document.getElementById('reconnecting-pill');
+    if (!pill) return;
+    if (on) pill.removeAttribute('hidden');
+    else pill.setAttribute('hidden', '');
+}
+
+function _autoReloadActiveTab(freshIds) {
+    var freshInActive = [];
+    freshIds.forEach(function(id) {
+        if (_idInTab(id, _activeTab)) freshInActive.push(id);
+    });
+    if (freshInActive.length === 0) return;
+    // If any fresh id isn't fragment-fetchable (tab roots, priority
+    // groups, History) we fall back to a single full rebuild. The
+    // focus-safe primitive and the Phase-2 guards still apply.
+    var needGlobal = freshInActive.some(function(id) {
+        return !_supportsFragmentFetch(id);
+    });
+    if (needGlobal) { _reloadInPlace(); return; }
+    // Dedupe: if both "projects/now/foo" and "projects/now/foo/sub" are
+    // dirty, reloading the parent covers the child. Without this every
+    // descendant triggers its own fragment swap and the tab flickers.
+    var minimal = _minimalRoots(freshInActive);
+    minimal.forEach(function(id) { reloadNode(id); });
+}
+
+function _minimalRoots(ids) {
+    var sorted = ids.slice().sort();
+    var out = [];
+    sorted.forEach(function(id) {
+        var covered = out.some(function(prev) {
+            return id === prev || id.indexOf(prev + '/') === 0;
+        });
+        if (!covered) out.push(id);
+    });
+    return out;
 }
 
 async function updateBaseline() {
@@ -4902,6 +5166,169 @@ function _restoreDetailsOpenState(root, map) {
     });
 }
 
+/* --- Reload guards (Phase 2) ---
+   The two production landmines before the overhaul: a fragment swap
+   while a runner's WebSocket is live silently kills the build; a
+   _reloadInPlace while the note modal has unsaved edits silently
+   discards them. Both are now caught by focusSafeSwap's default
+   skipIf — the swap is refused, the dirty state is preserved, and a
+   retry is queued for when the guard clears. */
+function _noteModalDirty() {
+    return !!(window._noteModal && _noteModal.dirty);
+}
+
+function _runnerActiveIn(targetEl) {
+    if (!targetEl || typeof _runnerViewers !== 'object') return false;
+    var mounts = targetEl.querySelectorAll &&
+        targetEl.querySelectorAll('.runner-term-mount');
+    if (!mounts || !mounts.length) return false;
+    var activeKeys = {};
+    for (var dk in _runnerViewers) {
+        var v = _runnerViewers[dk];
+        if (v && !v.exited && v.ws && v.ws.readyState === WebSocket.OPEN) {
+            activeKeys[v.key] = true;
+        }
+    }
+    for (var i = 0; i < mounts.length; i++) {
+        var key = mounts[i].getAttribute('data-runner-key');
+        if (key && activeKeys[key]) return true;
+    }
+    return false;
+}
+
+function _defaultReloadSkipIf(targetEl) {
+    if (_noteModalDirty()) return 'note-dirty';
+    if (_runnerActiveIn(targetEl)) return 'runner-active';
+    return null;
+}
+
+/* Pending-reload bookkeeping. When a swap is refused, we stash the
+   request and retry when the responsible guard clears. Deliberately
+   kept small: one boolean for the global rebuild, a set of node ids
+   for per-subtree reloads. */
+var _pendingReloadNodes = new Set();
+var _pendingReloadInPlace = false;
+
+function _flushPendingReloads() {
+    if (_noteModalDirty()) return;  // still blocked; caller will re-flush
+    if (_pendingReloadInPlace) {
+        _pendingReloadInPlace = false;
+        _pendingReloadNodes.clear();  // superseded by the global rebuild
+        _reloadInPlace();
+        return;
+    }
+    var retry = Array.from(_pendingReloadNodes);
+    _pendingReloadNodes.clear();
+    retry.forEach(function(id) {
+        // Runner-active guard for this specific node is re-checked by
+        // focusSafeSwap's skipIf — any still-blocked entries land back
+        // in _pendingReloadNodes via reloadNode's skipped-branch.
+        reloadNode(id);
+    });
+}
+
+/* --- Focus-safe DOM swap primitive ---
+   Shared helper used by _reloadInPlace (tab-level) and reloadNode
+   (per-subtree). Captures anything that would be lost by a naive
+   replaceWith — scroll, focus/caret, <details> open state, opt-in
+   `data-preserve` form inputs — then restores it onto the fresh DOM.
+   Callers extend it via `opts.skipIf(targetEl)` → any truthy return
+   aborts the swap and the caller is told the reason (used from
+   Phase 2 onwards to defer reloads that would kill a live runner
+   or trash unsaved modal edits). Phase 1 introduces no callers of
+   skipIf; the primitive is pure refactor. */
+function focusSafeSwap(targetEl, freshEl, opts) {
+    opts = opts || {};
+    var skipIf = opts.skipIf || _defaultReloadSkipIf;
+    var reason = skipIf(targetEl);
+    if (reason) return {skipped: true, reason: reason};
+    var snapshot = _snapshotForSwap(targetEl, opts);
+    targetEl.replaceWith(freshEl);
+    _restoreFromSnapshot(freshEl, snapshot, opts);
+    return {skipped: false, snapshot: snapshot};
+}
+
+function _snapshotForSwap(el, opts) {
+    var snap = {};
+    // Window + #main-scroll position, for tab-level rebuilds where
+    // el === #dash-main; harmless when el is a subtree.
+    snap.scrollY = window.scrollY;
+    var mainScroll = document.getElementById('main-scroll');
+    snap.mainScrollTop = mainScroll ? mainScroll.scrollTop : null;
+    // Explicit named scroll containers inside the target.
+    snap.scrollMap = {};
+    el.querySelectorAll('[data-scroll-key]').forEach(function(n) {
+        snap.scrollMap[n.getAttribute('data-scroll-key')] = {
+            top: n.scrollTop, left: n.scrollLeft,
+        };
+    });
+    // <details> by data-node-id (inside el).
+    snap.detailsMap = _captureDetailsOpenState(el);
+    // Active element focus + caret (text inputs / textareas only).
+    var active = document.activeElement;
+    if (active && el.contains(active) && active.id) {
+        snap.focusId = active.id;
+        try {
+            snap.focusSel = {
+                start: active.selectionStart, end: active.selectionEnd,
+            };
+        } catch (e) {}
+    }
+    // data-preserve inputs → sessionStorage (Phase 5 lights up the
+    // callers that care, but the plumbing is harmless today).
+    el.querySelectorAll('input[data-preserve],textarea[data-preserve]').forEach(function(n) {
+        var key = n.getAttribute('data-preserve');
+        if (!key) return;
+        var payload = {value: n.value};
+        try {
+            payload.sel = {start: n.selectionStart, end: n.selectionEnd};
+        } catch (e) {}
+        try { sessionStorage.setItem(key, JSON.stringify(payload)); }
+        catch (e) {}
+    });
+    return snap;
+}
+
+function _restoreFromSnapshot(el, snap, opts) {
+    if (snap.scrollY != null) window.scrollTo(0, snap.scrollY);
+    var mainScroll = document.getElementById('main-scroll');
+    if (mainScroll && snap.mainScrollTop != null) {
+        mainScroll.scrollTop = snap.mainScrollTop;
+    }
+    el.querySelectorAll('[data-scroll-key]').forEach(function(n) {
+        var saved = snap.scrollMap && snap.scrollMap[n.getAttribute('data-scroll-key')];
+        if (saved) { n.scrollTop = saved.top; n.scrollLeft = saved.left; }
+    });
+    _restoreDetailsOpenState(el, snap.detailsMap || {});
+    if (snap.focusId) {
+        var f = document.getElementById(snap.focusId);
+        if (f) {
+            try { f.focus(); } catch (e) {}
+            if (snap.focusSel && f.setSelectionRange) {
+                try { f.setSelectionRange(snap.focusSel.start, snap.focusSel.end); }
+                catch (e) {}
+            }
+        }
+    }
+    el.querySelectorAll('input[data-preserve],textarea[data-preserve]').forEach(function(n) {
+        var key = n.getAttribute('data-preserve');
+        if (!key) return;
+        try {
+            var raw = sessionStorage.getItem(key);
+            if (!raw) return;
+            var payload = JSON.parse(raw);
+            if (payload.value != null && n.value !== payload.value) {
+                n.value = payload.value;
+            }
+            if (payload.sel && n.setSelectionRange &&
+                document.activeElement === n) {
+                try { n.setSelectionRange(payload.sel.start, payload.sel.end); }
+                catch (e) {}
+            }
+        } catch (e) {}
+    });
+}
+
 async function reloadNode(nodeId) {
     // Fall back to global reload for tab-level, group-level, and code nodes.
     if (!_supportsFragmentFetch(nodeId)) {
@@ -4917,9 +5344,6 @@ async function reloadNode(nodeId) {
         var existing = document.querySelector('[data-node-id="' + esc + '"]');
         if (!existing) { _reloadInPlace(); return; }
 
-        // Preserve <details> open state inside the subtree across the swap.
-        var openMap = _captureDetailsOpenState(existing);
-
         var tpl = document.createElement('template');
         tpl.innerHTML = html.trim();
         var fresh = tpl.content.firstElementChild;
@@ -4932,8 +5356,14 @@ async function reloadNode(nodeId) {
         var wasExpanded = existing.classList.contains('card')
             && !existing.classList.contains('collapsed');
 
-        existing.replaceWith(fresh);
-        _restoreDetailsOpenState(fresh, openMap);
+        var result = focusSafeSwap(existing, fresh);
+        if (result.skipped) {
+            // Guard tripped (runner live, or note modal dirty). Park the
+            // request; _flushPendingReloads replays it when the guard
+            // clears. Dirty-set + baseline are intentionally preserved.
+            _pendingReloadNodes.add(nodeId);
+            return;
+        }
         if (wasExpanded && fresh.classList && fresh.classList.contains('card')) {
             fresh.classList.remove('collapsed');
         }
@@ -6107,8 +6537,13 @@ _loadTermShortcuts();
     });
 })();
 
+// Phase 6: event-driven staleness. /events streams tab-level hints;
+// checkUpdates() runs on connect + every hint to reconcile the real
+// node-level dirty set. The 5s poll is gone. If the SSE connection
+// drops, a visible indicator surfaces and reconnect logic re-runs
+// checkUpdates() as soon as the stream is back.
 checkUpdates();
-setInterval(checkUpdates, 5000);
+_startEventStream();
 
 /* On first load, detect an unset conception_path and surface the setup
    banner + auto-open the config modal so the user lands on the editor. */
@@ -6234,7 +6669,12 @@ function _runnerCreateViewer(mount, key, checkout, opts) {
                     mount.setAttribute('data-exit-code', String(obj.exit_code));
                     mount.classList.add('runner-exited');
                     _runnerSetStatus(viewer, 'exited: ' + (obj.exit_code == null ? '?' : obj.exit_code));
-                    if (!wasExited) _runnerScheduleRefresh(key, checkout);
+                    if (!wasExited) {
+                        _runnerScheduleRefresh(key, checkout);
+                        if (typeof _flushPendingReloads === 'function') {
+                            _flushPendingReloads();
+                        }
+                    }
                 } else if (obj.type === 'session-missing') {
                     _runnerSetStatus(viewer, 'no session');
                 } else if (obj.type === 'error' && obj.message) {
@@ -6246,7 +6686,9 @@ function _runnerCreateViewer(mount, key, checkout, opts) {
         term.write(new Uint8Array(ev.data));
     };
     ws.onclose = function() {
-        // Left in place — the reattach / stop path takes care of cleanup.
+        // Runner teardown clears the runner-active guard for this node —
+        // drain any reload that was parked while the runner was live.
+        if (typeof _flushPendingReloads === 'function') _flushPendingReloads();
     };
     term.onData(function(data) {
         if (viewer.exited) return;

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "condash"
-version = "0.14.7"
+version = "0.15.0"
 description = "Standalone desktop dashboard for markdown-based conception items (projects, incidents, documents) under a unified projects/YYYY-MM/ tree."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,7 @@ dependencies = [
     "pyyaml>=6.0",
     "tomlkit>=0.13",
     "typer>=0.16",
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]
