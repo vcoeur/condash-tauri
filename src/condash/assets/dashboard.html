@@ -886,6 +886,8 @@ body:not([data-single-term]) .term-side.is-active-side .term-mount {
 .drag-handle:active { cursor: grabbing; }
 .step:hover .drag-handle { opacity: 1; }
 .step.dragging { opacity: 0.4; }
+.step.is-drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+.step.is-drop-after { box-shadow: inset 0 -2px 0 0 var(--accent); }
 .add-row { display: flex; gap: 4px; margin-top: 0.4rem; }
 .add-row input {
     flex: 1; font-size: 0.8rem; border: 1px solid var(--input-border);
@@ -4482,7 +4484,14 @@ async function addStep(file, section, inputEl) {
    pywebview on HTML5 dragstart of any moderately complex DOM element.
    Triggered from the drag handle only so click-to-edit on the text span
    and the status-dot cycle both keep working.
-   See #8. */
+
+   The reorder is committed on pointerup, not during pointermove. An earlier
+   version of this code called `insertBefore` on the dragging step during
+   move; QtWebEngine drops `setPointerCapture` when the captured handle's
+   ancestor is reparented, so pointerup never fired and `.dragging` stuck
+   (opacity 0.4). During the gesture we only move a pointer-events:none
+   ghost clone and toggle `is-drop-before`/`is-drop-after` markers on
+   sibling steps. See #8. */
 var _stepDrag = null;
 var _STEP_DRAG_THRESHOLD_PX = 4;
 
@@ -4499,6 +4508,10 @@ function stepPointerDown(ev) {
         startY: ev.clientY,
         active: false,
         handle: handle,
+        ghost: null,
+        ghostOffX: 0,
+        ghostOffY: 0,
+        drop: null,  // {target: <step>, before: bool}
     };
     try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
     handle.addEventListener('pointermove', stepPointerMove);
@@ -4513,24 +4526,52 @@ function stepPointerMove(ev) {
         var dx = ev.clientX - _stepDrag.startX;
         var dy = ev.clientY - _stepDrag.startY;
         if (Math.hypot(dx, dy) < _STEP_DRAG_THRESHOLD_PX) return;
-        _stepDrag.active = true;
-        _stepDrag.step.classList.add('dragging');
+        _stepBeginDrag();
     }
-    // Hit-test for another step to insert above/below. setPointerCapture
-    // routes events to the handle even when the cursor leaves it, so we
-    // consult elementFromPoint ourselves to find the hovered step.
-    var under = document.elementFromPoint(ev.clientX, ev.clientY);
+    _stepDrag.ghost.style.left = (ev.clientX - _stepDrag.ghostOffX) + 'px';
+    _stepDrag.ghost.style.top = (ev.clientY - _stepDrag.ghostOffY) + 'px';
+    _stepUpdateDropMarker(ev.clientX, ev.clientY);
+}
+
+function _stepBeginDrag() {
+    var step = _stepDrag.step;
+    _stepDrag.active = true;
+    var rect = step.getBoundingClientRect();
+    var ghost = step.cloneNode(true);
+    ghost.classList.add('step-ghost');
+    ghost.style.position = 'fixed';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    ghost.style.width = rect.width + 'px';
+    ghost.style.height = rect.height + 'px';
+    // pointer-events:none is critical — without it, elementFromPoint would
+    // return the ghost and the drop marker could never latch on a sibling.
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '9999';
+    ghost.style.opacity = '0.85';
+    document.body.appendChild(ghost);
+    _stepDrag.ghost = ghost;
+    _stepDrag.ghostOffX = _stepDrag.startX - rect.left;
+    _stepDrag.ghostOffY = _stepDrag.startY - rect.top;
+    step.classList.add('dragging');
+}
+
+function _stepUpdateDropMarker(x, y) {
+    document.querySelectorAll('.step.is-drop-before, .step.is-drop-after').forEach(function(el) {
+        el.classList.remove('is-drop-before');
+        el.classList.remove('is-drop-after');
+    });
+    _stepDrag.drop = null;
+    var under = document.elementFromPoint(x, y);
     if (!under) return;
     var target = under.closest && under.closest('.step');
     if (!target || target === _stepDrag.step) return;
     if (target.closest('.sec-items') !== _stepDrag.container) return;
     var rect = target.getBoundingClientRect();
-    var mid = rect.top + rect.height / 2;
-    if (ev.clientY < mid) {
-        _stepDrag.container.insertBefore(_stepDrag.step, target);
-    } else {
-        _stepDrag.container.insertBefore(_stepDrag.step, target.nextSibling);
-    }
+    var before = y < rect.top + rect.height / 2;
+    target.classList.toggle('is-drop-before', before);
+    target.classList.toggle('is-drop-after', !before);
+    _stepDrag.drop = {target: target, before: before};
 }
 
 function stepPointerUp(ev) {
@@ -4538,8 +4579,14 @@ function stepPointerUp(ev) {
     var drag = _stepDrag;
     _stepCleanupDrag();
     if (!drag.active) return;  // Just a click on the handle — nothing to do.
-    var container = drag.container;
-    var steps = container.querySelectorAll('.step');
+    if (!drag.drop) return;
+    var drop = drag.drop;
+    if (drop.before) {
+        drag.container.insertBefore(drag.step, drop.target);
+    } else {
+        drag.container.insertBefore(drag.step, drop.target.nextSibling);
+    }
+    var steps = drag.container.querySelectorAll('.step');
     if (!steps.length) return;
     var file = steps[0].getAttribute('data-file');
     var lines = [].map.call(steps, function(s) { return parseInt(s.getAttribute('data-line')); });
@@ -4568,7 +4615,14 @@ function _stepCleanupDrag() {
     handle.removeEventListener('pointermove', stepPointerMove);
     handle.removeEventListener('pointerup', stepPointerUp);
     handle.removeEventListener('pointercancel', stepPointerCancel);
+    if (_stepDrag.ghost && _stepDrag.ghost.parentNode) {
+        _stepDrag.ghost.parentNode.removeChild(_stepDrag.ghost);
+    }
     _stepDrag.step.classList.remove('dragging');
+    document.querySelectorAll('.step.is-drop-before, .step.is-drop-after').forEach(function(el) {
+        el.classList.remove('is-drop-before');
+        el.classList.remove('is-drop-after');
+    });
     _stepDrag = null;
 }
 
