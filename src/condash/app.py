@@ -341,6 +341,29 @@ def _register_routes() -> None:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
+    @_ng_app.get("/vendor/codemirror/{rel_path:path}")
+    def codemirror_asset(rel_path: str):
+        """Serve the vendored CodeMirror 6 IIFE bundle to the config modal."""
+        if not rel_path or "\x00" in rel_path:
+            return Response(status_code=403)
+        parts = rel_path.split("/")
+        if any(p in ("", "..") for p in parts):
+            return Response(status_code=403)
+        base = Path(str(_package_files("condash") / "assets" / "vendor" / "codemirror"))
+        try:
+            full = (base / rel_path).resolve()
+            full.relative_to(base.resolve())
+        except (OSError, ValueError):
+            return Response(status_code=403)
+        if not full.is_file():
+            return Response(status_code=404)
+        ctype = "text/javascript" if full.suffix == ".js" else "text/plain"
+        return Response(
+            content=full.read_bytes(),
+            media_type=ctype,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @_ng_app.get("/check-updates")
     def check_updates():
         ctx = _ctx()

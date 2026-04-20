@@ -26,6 +26,7 @@
 <link rel="stylesheet" href="/vendor/xterm/css/xterm.min.css">
 <script src="/vendor/xterm/lib/xterm.min.js" defer></script>
 <script src="/vendor/xterm/lib/xterm-addon-fit.min.js" defer></script>
+<script src="/vendor/codemirror/codemirror.min.js" defer></script>
 <style>
 :root, [data-theme="light"] {
     --bg: #f4f4f5;
@@ -351,6 +352,26 @@ body {
 .config-yaml-editor:focus { outline: none; border-color: var(--accent); }
 .config-yaml-editor.config-yaml-dirty { border-color: var(--accent); }
 .config-yaml-editor[readonly] { opacity: 0.85; cursor: default; }
+/* CodeMirror wrapper — the cm-editor fills the parent and inherits
+   the dashboard background. We override a few CM defaults so the
+   editor matches the rest of the modal. */
+.config-yaml-cm { padding: 0; overflow: hidden; }
+.config-yaml-cm .cm-editor {
+    height: 100%;
+    min-height: 380px;
+    background: var(--bg-card);
+    font-family: ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+.config-yaml-cm .cm-editor.cm-focused { outline: none; }
+.config-yaml-cm .cm-scroller { font-family: inherit; }
+.config-yaml-cm .cm-gutters {
+    background: transparent;
+    border-right: 1px solid var(--border);
+    color: var(--text-muted);
+}
+[data-theme="light"] .config-yaml-cm .cm-gutters { color: var(--text-muted); }
 
 /* Segmented radio groups in the New-item modal. Uses flex-wrap so
    small (3-option) and wider (6-option) groups share one row on
@@ -2328,6 +2349,17 @@ function applyTheme(theme) {
         icon.innerHTML = '&#9788;';
         label.textContent = 'Light';
     }
+    // Live-swap any open CodeMirror editors to the matching theme.
+    if (window.CondashCM && typeof _cmViews === 'object') {
+        Object.keys(_cmViews).forEach(function(which) {
+            var view = _cmViews[which];
+            var ta = document.querySelector('#config-form textarea[data-yaml-file="' + which + '"]');
+            var comp = ta && ta._cmThemeComp;
+            if (view && comp) {
+                view.dispatch({ effects: comp.reconfigure(_currentCmTheme()) });
+            }
+        });
+    }
 }
 
 function toggleTheme() {
@@ -2502,12 +2534,26 @@ async function openConfigModal() {
    badge flips to "edited" on input and back to "synced" once the diff
    against pristine is zero. When ``preserveDirty`` is true and the
    user has unsaved edits, we don't overwrite — an external live-reload
-   event would otherwise blow away their in-flight work. */
+   event would otherwise blow away their in-flight work.
+
+   When the CodeMirror 6 bundle (``window.CondashCM``) has loaded, we
+   swap the textarea for a real editor (syntax highlight, gutter, the
+   whole thing) and keep the original textarea hidden but in the DOM —
+   its value stays mirrored so ``_getDirtyYamlFile`` keeps working
+   without ever poking at CM6 APIs. If the bundle hasn't arrived yet
+   (defer script still loading) we fall back to the textarea for this
+   paint; once the modal reopens, CM6 is wired. */
+var _cmViews = {};  // which → EditorView
 function _populateYamlEditor(which, body, preserveDirty) {
     var ta = document.querySelector('#config-form textarea[data-yaml-file="' + which + '"]');
     if (!ta) return;
     var dirty = ta.classList.contains('config-yaml-dirty');
     if (preserveDirty && dirty) return;
+    if (window.CondashCM) {
+        _populateYamlEditorCM(which, ta, body);
+        return;
+    }
+    // Fallback: plain textarea.
     ta.value = body;
     ta.dataset.pristine = body;
     ta.classList.remove('config-yaml-dirty');
@@ -2525,6 +2571,76 @@ function _populateYamlEditor(which, body, preserveDirty) {
         });
         ta.dataset.boundInput = '1';
     }
+}
+
+/* CodeMirror-backed pane. On first call for a given file we create an
+   EditorView next to the textarea and hide the textarea; subsequent
+   calls dispatch a full-document replace transaction. The textarea's
+   value is kept in sync via the CM updateListener so the rest of the
+   save pipeline can keep reading ``ta.value``. */
+function _populateYamlEditorCM(which, ta, body) {
+    var CM = window.CondashCM;
+    var view = _cmViews[which];
+    var themeComp = ta._cmThemeComp;
+    if (!view) {
+        ta.style.display = 'none';
+        themeComp = new CM.Compartment();
+        ta._cmThemeComp = themeComp;
+        var wrap = document.createElement('div');
+        wrap.className = 'config-yaml-editor config-yaml-cm';
+        ta.parentNode.insertBefore(wrap, ta.nextSibling);
+        var extensions = [
+            CM.basicSetup,
+            CM.yamlLang(),
+            themeComp.of(_currentCmTheme()),
+            CM.EditorView.updateListener.of(function(update) {
+                if (!update.docChanged) return;
+                ta.value = update.state.doc.toString();
+                var pristine = ta.dataset.pristine || '';
+                if (ta.value !== pristine) {
+                    ta.classList.add('config-yaml-dirty');
+                    wrap.classList.add('config-yaml-dirty');
+                    _setYamlStatus(which, 'edited — unsaved');
+                } else {
+                    ta.classList.remove('config-yaml-dirty');
+                    wrap.classList.remove('config-yaml-dirty');
+                    _setYamlStatus(which, 'synced');
+                }
+            }),
+        ];
+        try {
+            view = new CM.EditorView({
+                doc: body,
+                extensions: extensions,
+                parent: wrap,
+            });
+            _cmViews[which] = view;
+        } catch (err) {
+            console.warn('[condash] CodeMirror mount failed for', which, err);
+            ta.style.display = '';
+            wrap.remove();
+            return;
+        }
+    } else {
+        view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: body },
+        });
+        // Re-apply current theme in case the user toggled light/dark
+        // while the modal was closed.
+        if (themeComp) {
+            view.dispatch({ effects: themeComp.reconfigure(_currentCmTheme()) });
+        }
+    }
+    ta.value = body;
+    ta.dataset.pristine = body;
+    ta.classList.remove('config-yaml-dirty');
+    view.dom.classList.remove('config-yaml-dirty');
+    _setYamlStatus(which, 'synced');
+}
+
+function _currentCmTheme() {
+    var theme = document.documentElement.getAttribute('data-theme') || 'light';
+    return theme === 'dark' ? window.CondashCM.oneDark : [];
 }
 
 function _setYamlStatus(which, label) {
