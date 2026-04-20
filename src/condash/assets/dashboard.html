@@ -1524,131 +1524,296 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 .group-heading:first-child { margin-top: 0; }
 .group-heading.hidden { display: none; }
 
-/* Each category (Primary / Secondary / Others) is its own card,
-   separated by generous margin so the groups feel distinct. */
-.git-group {
+/* ─────────────────────────────────────────────────────────────────
+   Code tab — flat view.
+
+   Structure:
+     .flat-bucket            Primary / Secondary / Others heading + groups
+     .flat-group             One collapsible project group (a family)
+       .flat-group-head      Chevron + project name + rollup tags
+       .flat-collapsed-strip Summary strip shown only when .collapsed
+       .flat-group-body      Grid of peer-cards
+         .peer-card          One repo or promoted sub-repo
+           .peer-head        Name + kind + overall status tag
+           .peer-rows        One branch row per checkout + worktree
+             .peer-row       dot · name · status · run · open-with
+           .peer-term        Inline runner terminal mount (when live)
+           .peer-foot        Path + optional jump-arrow
+   ───────────────────────────────────────────────────────────────── */
+
+.flat-bucket { margin-bottom: 1.75rem; }
+.flat-bucket:last-child { margin-bottom: 0; }
+.flat-bucket-heading {
+    font-size: 0.72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    padding: 0.5rem 0 0.4rem;
+    margin: 0 0 0.75rem;
+    border-bottom: 1px dashed var(--border);
+}
+
+/* Bucket body — a two-column grid every peer-card flows into. Both
+   solo families and compound families use `display: contents` on the
+   wrapper so their cards become direct grid items of the bucket.
+   Compound families prepend a full-row ornament that labels the group
+   without shifting the cards or breaking column alignment. */
+.flat-bucket-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+    gap: 0.7rem;
+    align-items: start;
+}
+
+.flat-group-solo,
+.flat-group-compound { display: contents; }
+
+/* The family ornament — a small-caps muted label that claims a full
+   bucket row, sitting directly above the compound family's peer-cards.
+   No background frame, no left accent: the cards below stay aligned
+   with solo-family cards in neighbouring rows. */
+.flat-group-ornament {
+    grid-column: 1 / -1;
+    padding: 0.25rem 0.2rem 0.05rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    /* A subtle underline seats the label visually against the group
+       below without drawing a full framing rule. */
+    border-bottom: 1px dashed var(--border-light);
+    margin-bottom: -0.2rem;
+}
+
+/* One peer-card — a repo or a promoted sub-repo. */
+.peer-card {
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex; flex-direction: column;
+    overflow: visible;     /* open-with popover escapes downward */
+    position: relative;
+}
+.peer-card.peer-card-dirty { border-color: color-mix(in srgb, var(--git-changes) 40%, var(--border)); }
+.peer-card.peer-card-live  { border-color: color-mix(in srgb, var(--git-clean) 40%, var(--border)); }
+.peer-card.peer-card-live.peer-card-dirty {
+    border-color: color-mix(in srgb, var(--git-clean) 30%, var(--git-changes) 30%);
+}
+.peer-card.peer-card-missing { opacity: 0.55; }
+.peer-card.peer-card-parent { border-left: 2px solid var(--accent); }
+
+.peer-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.75rem 0.4rem;
+}
+.peer-name {
+    font-size: 0.95rem; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+.peer-kind {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.6rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text-muted);
+    margin-left: auto; white-space: nowrap;
+}
+.peer-tag {
+    font-size: 0.6rem; letter-spacing: 0.06em;
+    text-transform: uppercase; font-weight: 600;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-card);
+    white-space: nowrap;
+}
+.peer-tag-clean { color: var(--git-clean); border-color: color-mix(in srgb, var(--git-clean) 30%, transparent); }
+.peer-tag-dirty { color: var(--git-changes); border-color: color-mix(in srgb, var(--git-changes) 40%, transparent); }
+.peer-tag-live  {
+    color: var(--git-clean);
+    border-color: color-mix(in srgb, var(--git-clean) 40%, transparent);
+    background: color-mix(in srgb, var(--git-clean) 10%, transparent);
+}
+.peer-tag-missing { color: var(--text-muted); font-style: italic; }
+
+/* Branch row — dot · name(+kind) · status · run · open-with. */
+.peer-rows {
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: visible;
+}
+.peer-row {
+    display: grid;
+    grid-template-columns: 12px 1fr auto auto auto;
+    column-gap: 0.55rem;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.82rem;
+    border-top: 1px solid var(--border-light);
+    position: relative;
+}
+.peer-row:first-child { border-top: none; }
+.peer-row:hover { background: var(--bg-card); }
+.peer-row-dirty { background: color-mix(in srgb, var(--git-dirty-bg) 70%, transparent); }
+.peer-row-live  { background: color-mix(in srgb, var(--git-clean) 6%, transparent); }
+.peer-row-live.peer-row-dirty { background: color-mix(in srgb, var(--git-clean) 6%, var(--git-dirty-bg) 50%); }
+.peer-row-missing { opacity: 0.55; }
+
+.b-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-muted);
+    justify-self: center;
+}
+.b-dot-clean   { background: var(--git-clean); }
+.b-dot-dirty   { background: var(--git-changes); }
+.b-dot-missing { background: var(--text-muted); }
+.b-dot-live    {
+    background: var(--git-clean);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--git-clean) 30%, transparent);
+    animation: peerLivePulse 1.4s ease-in-out infinite;
+}
+@keyframes peerLivePulse { 0%,100%{opacity:0.55}50%{opacity:1} }
+
+.b-name {
+    display: inline-flex; align-items: baseline; gap: 0.5rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.8rem; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0;
+}
+.peer-row-main .b-name {
+    color: var(--git-branch);
+    font-weight: 600;
+}
+.b-kind {
+    font-size: 0.6rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-muted);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+.b-status { justify-self: end; min-width: 32px; text-align: right; }
+.branch-clean   { color: var(--git-clean); font-size: 0.85rem; }
+.branch-dirty {
+    font-size: 0.68rem; font-weight: 600;
+    color: var(--git-changes); background: var(--git-changes-bg);
+    padding: 1px 7px; border-radius: 999px;
+}
+.branch-missing {
+    font-size: 0.6rem; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text-muted);
+    padding: 1px 7px; border-radius: 999px;
+    border: 1px dashed var(--border);
+}
+.b-run {
+    justify-self: center;
+    display: inline-flex; align-items: center; min-width: 28px;
+}
+.b-run:empty { min-width: 0; }
+
+/* Inline terminal mount placed between rows and foot. */
+.peer-term { padding: 0.4rem 0.75rem 0; }
+.peer-term .runner-term-mount { margin: 0; }
+
+/* Peer-card foot — absolute repo path + optional jump-arrow. */
+.peer-foot {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0.75rem 0.5rem;
+    border-top: 1px solid var(--border-light);
+}
+.peer-foot-path {
+    flex: 1;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.68rem; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    direction: rtl;   /* ellipsis on the left so the tail stays visible */
+    text-align: left;
+}
+.peer-jump {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0;
+    background: color-mix(in srgb, var(--git-clean) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--git-clean) 35%, transparent);
+    border-radius: 50%;
+    color: var(--git-clean);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.peer-jump:hover { background: color-mix(in srgb, var(--git-clean) 26%, transparent); }
+
+/* Split open-with button: primary + caret + popover. */
+.open-grp {
+    display: inline-flex; align-items: stretch;
+    height: 22px;
+    border: 1px solid var(--btn-border);
+    border-radius: 6px;
+    background: var(--btn-bg);
+    position: relative;
+    flex-shrink: 0;
+}
+.open-grp:hover { border-color: var(--accent); }
+.open-grp-empty { visibility: hidden; width: 60px; }
+.open-primary, .open-caret {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    color: var(--btn-text);
+    padding: 0;
+}
+.open-primary {
+    width: 28px;
+    border-right: 1px solid var(--btn-border);
+    border-radius: 6px 0 0 6px;
+}
+.open-primary:hover { background: var(--accent-bg); color: var(--accent); }
+.open-primary svg { width: 13px; height: 13px; display: block; }
+.open-caret {
+    width: 16px;
+    color: var(--text-muted);
+    border-radius: 0 6px 6px 0;
+}
+.open-caret:hover { background: var(--accent-bg); color: var(--accent); }
+
+/* Popover menu — anchored below the caret, right-aligned. */
+.open-popover {
+    position: absolute;
+    top: calc(100% + 4px); right: 0;
+    min-width: 190px;
+    z-index: 30;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: var(--shadow-sm);
-    overflow: hidden;
-    margin-bottom: 1.5rem;
+    border-radius: 8px;
+    padding: 3px;
+    box-shadow: var(--shadow-md);
+    display: flex; flex-direction: column;
 }
-.git-group:last-child { margin-bottom: 0; }
-
-.git-group-header {
-    padding: 0.75rem 1.1rem 0.7rem;
-    font-size: 0.95rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text);
-    background: var(--bg-card-hover);
-    border-bottom: 1px solid var(--border);
-}
-
-.git-group-body { padding: 0.15rem 0; }
-
-/* A repo block groups a main repo row with its worktrees. Sibling
-   repo blocks are split by a solid rule — clearly more space than
-   between a repo and its own worktrees. */
-.git-family + .git-family {
-    border-top: 1px solid var(--border);
-    margin-top: 0.2rem;
-    padding-top: 0.2rem;
-}
-
-/* Shared column grid — every row (main repo or worktree) uses the
-   same column widths so names, branches, status, and buttons all
-   line up vertically. Only font size / weight / colour change
-   between main and worktree rows. */
-.git-row {
-    display: flex; align-items: center; gap: 0.7rem;
-    padding: 0.55rem 1rem; font-size: 0.95rem;
-    transition: background 0.1s;
-}
-.git-row:hover { background: var(--bg-card-hover); }
-.git-row.git-dirty { background: var(--git-dirty-bg); }
-
-.git-name {
-    font-weight: 700; font-size: 1.05rem;
-    width: 210px; flex-shrink: 0; color: var(--text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.git-branch {
-    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
-    font-size: 0.85rem; color: var(--git-branch);
-    width: 220px; flex-shrink: 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* Fixed-width status column so the badge / check align across rows */
-.git-status {
-    width: 110px; flex-shrink: 0;
-    display: flex; align-items: center;
-}
-/* Fixed-width slot holding the inline runner button between name and
-   branch — always rendered (empty for non-runnable repos) so the branch
-   and status columns stay aligned across runnable and non-runnable rows. */
-.git-runner-slot {
-    width: 30px; flex-shrink: 0;
-    display: inline-flex; align-items: center; justify-content: center;
-}
-.git-changes {
-    font-size: 0.75rem; color: var(--git-changes); background: var(--git-changes-bg);
-    padding: 1px 8px; border-radius: 8px; font-weight: 500;
-}
-.git-clean { color: var(--git-clean); font-size: 0.95rem; }
-.git-spacer { flex: 1; }
-
-/* Worktree row: same column grid, smaller + muted text, arrow-indented
-   inside the name column (not via row padding) so columns stay aligned. */
-.git-row.git-worktree {
-    padding: 0.3rem 1rem;
-    opacity: 0.85;
-}
-.git-row.git-worktree .git-name {
-    font-weight: 500; font-size: 0.82rem;
+.open-popover[hidden] { display: none; }
+.open-popover-item {
+    display: inline-flex; align-items: center; gap: 0.55rem;
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    font: inherit;
+    font-size: 0.78rem;
     color: var(--text-secondary);
-    padding-left: 1.4rem;
+    text-align: left;
+    cursor: pointer;
 }
-.git-row.git-worktree .git-branch { font-size: 0.78rem; }
-.git-row.git-worktree .git-changes { font-size: 0.7rem; }
-.git-row.git-worktree .git-clean { font-size: 0.82rem; }
+.open-popover-item:hover { background: var(--bg-card-hover); color: var(--text); }
+.open-popover-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; color: var(--text-muted);
+}
+.open-popover-item:hover .open-popover-icon { color: var(--accent); }
 
-/* Family wrapper — groups a parent repo with the subrepos declared
-   under it in repositories.yml. Every family reserves the same left
-   inset (transparent border + padding) so columns align across families
-   with and without subs; only the border color changes when subs are
-   present, turning into the blue accent that ties the group together. */
-.git-family {
-    padding: 0 0 0 0.4rem;
-    border-left: 2px solid transparent;
+/* Runner button, inside a peer-row — override the fixed icon-button
+   base so it reads as a compact pill sitting next to the status cell. */
+.peer-row .b-run .git-action-btn {
+    width: 22px; height: 22px;
+    padding: 0;
+    border-radius: 50%;
 }
-.git-family-with-subs {
-    margin: 0.15rem 0 0.3rem;
-    border-left-color: var(--accent);
-}
-/* Missing-row state: subrepo worktree whose subdir doesn't exist in
-   that worktree. Greyed out, no actions, "missing" pill in the status
-   column. */
-.git-row.git-missing-row { opacity: 0.55; }
-.git-actions-empty { width: 136px; flex-shrink: 0; }
-.git-missing {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    background: var(--btn-bg);
-    border: 1px dashed var(--btn-border);
-    padding: 1px 8px; border-radius: 8px;
-    text-transform: uppercase; letter-spacing: 0.04em;
-}
-
-/* Action buttons — IDEA / VS Code / Terminal, icon-only, left-aligned.
-   Fixed-width container so names/branches/status stay aligned across
-   rows regardless of button state. */
-.git-actions {
-    display: flex; gap: 4px; flex-shrink: 0;
-    width: 136px;
-}
+.peer-row .b-run .git-action-btn svg { width: 11px; height: 11px; }
 .git-action-btn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 30px; height: 26px; padding: 0; border-radius: 6px;
@@ -1677,14 +1842,6 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 .git-action-btn.git-action-runner-stop { color: #d64545; }
 .git-action-btn.git-action-runner-switch { color: #c68b1f; }
 .git-action-btn.git-action-runner:hover { background: var(--accent-bg); }
-
-.git-runner-jump {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 18px; height: 18px; padding: 0; margin: 0 4px 0 -2px;
-    background: transparent; border: none; color: #41a83a; cursor: pointer;
-    vertical-align: middle;
-}
-.git-runner-jump:hover { filter: brightness(1.15); }
 
 .runner-term-mount {
     --runner-term-rows: 18;
@@ -7074,8 +7231,8 @@ function _runnerFindMount(key, checkout) {
 function _runnerRepoNodeIdFor(key, checkout) {
     var mount = _runnerFindMount(key, checkout);
     if (!mount) return null;
-    var repo = mount.closest('.git-family');
-    return repo ? repo.getAttribute('data-node-id') : null;
+    var group = mount.closest('.flat-group');
+    return group ? group.getAttribute('data-node-id') : null;
 }
 
 async function _runnerRefreshRepoNode(repoNodeId) {
@@ -7090,7 +7247,7 @@ function _runnerScheduleRefresh(key, checkout) {
     // confirm-switch flow shouldn't trigger three fragment fetches.
     if (_runnerRefreshPending) clearTimeout(_runnerRefreshPending);
     var repoId = _runnerRepoNodeIdFor(key, checkout)
-        || document.querySelector('.git-family[data-node-id*="/' + key.split('--')[0] + '"]');
+        || document.querySelector('.flat-group[data-node-id*="/' + key.split('--')[0] + '"]');
     if (repoId && repoId.getAttribute) repoId = repoId.getAttribute('data-node-id');
     _runnerRefreshPending = setTimeout(function() {
         _runnerRefreshPending = null;
@@ -7183,11 +7340,38 @@ async function _runnerStopFetch(key) {
     } catch (e) {}
 }
 
+/* ─── Code tab · open-with popover ─────────── */
+
+function gitToggleOpenPopover(ev, btn) {
+    if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+    var grp = btn.closest('.open-grp');
+    if (!grp) return;
+    var popover = grp.querySelector('.open-popover');
+    if (!popover) return;
+    var isOpen = !popover.hidden;
+    gitClosePopovers();
+    if (!isOpen) popover.hidden = false;
+}
+
+function gitClosePopovers(root) {
+    var scope = root || document;
+    scope.querySelectorAll('.open-popover').forEach(function(p) { p.hidden = true; });
+}
+
+document.addEventListener('click', function(ev) {
+    // Clicking outside any .open-grp closes every open popover.
+    if (ev.target && ev.target.closest && ev.target.closest('.open-grp')) return;
+    gitClosePopovers();
+}, true);
+document.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Escape') gitClosePopovers();
+});
+
 function _findRepoNodeIdByKey(key) {
     var repoName = key.indexOf('--') >= 0 ? key.split('--')[0] : key;
     var esc = (window.CSS && CSS.escape) ? CSS.escape : function(s) { return s; };
     // The repo node id is "code/<group>/<repo>". We match by suffix.
-    var nodes = document.querySelectorAll('.git-family[data-node-id]');
+    var nodes = document.querySelectorAll('.flat-group[data-node-id]');
     for (var i = 0; i < nodes.length; i++) {
         var id = nodes[i].getAttribute('data-node-id');
         if (id && id.endsWith('/' + repoName)) return id;
@@ -7197,9 +7381,12 @@ function _findRepoNodeIdByKey(key) {
 
 function runnerJump(ev, btn) {
     if (ev) ev.stopPropagation();
-    var repo = btn.closest('.git-family');
-    if (!repo) return;
-    var mount = repo.querySelector('.runner-term-mount');
+    // The jump arrow lives on a .peer-card foot; the mount lives inside
+    // that same card. Fall back to the enclosing .flat-group so a jump
+    // still works if the card scroll region happens to be empty.
+    var scope = btn.closest('.peer-card') || btn.closest('.flat-group');
+    if (!scope) return;
+    var mount = scope.querySelector('.runner-term-mount');
     if (!mount) return;
     try { mount.scrollIntoView({behavior: 'smooth', block: 'center'}); }
     catch (e) { mount.scrollIntoView(); }

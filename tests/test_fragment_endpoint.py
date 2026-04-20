@@ -122,7 +122,7 @@ def test_fragment_code_repo_unknown_returns_404(cfg: CondashConfig):
 
 
 def test_fragment_code_repo_returns_block(tmp_path: Path, tmp_conception: Path):
-    """A workspace containing a repo surfaces a ``.git-family`` fragment."""
+    """A workspace containing a repo surfaces a ``.flat-group`` fragment."""
     import subprocess as sp
 
     workspace = tmp_path / "workspace"
@@ -152,7 +152,7 @@ def test_fragment_code_repo_returns_block(tmp_path: Path, tmp_conception: Path):
     res = client.get("/fragment", params={"id": "code/Primary/demo"})
     assert res.status_code == 200, res.text
     assert 'data-node-id="code/Primary/demo"' in res.text
-    assert 'class="git-family' in res.text
+    assert 'class="flat-group' in res.text
 
 
 def test_check_updates_returns_nodes_map(cfg: CondashConfig):

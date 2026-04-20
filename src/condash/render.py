@@ -679,6 +679,21 @@ _ICON_SVGS = {
         'stroke-linejoin="round" aria-hidden="true">'
         '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>'
     ),
+    # Small down chevron — caret on the split open-with button.
+    "open_caret": (
+        '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" '
+        'stroke="currentColor" stroke-width="3" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<polyline points="6 9 12 15 18 9"/></svg>'
+    ),
+    # Diagonal arrow — "jump to this peer-card's live runner terminal".
+    "peer_jump": (
+        '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" '
+        'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<line x1="7" y1="17" x2="17" y2="7"/>'
+        '<polyline points="7 7 17 7 17 17"/></svg>'
+    ),
 }
 
 
@@ -705,26 +720,48 @@ def _render_card_actions(item):
     )
 
 
-def _render_git_actions(ctx: RenderCtx, path):
+def _render_open_with(ctx: RenderCtx, path: str) -> str:
+    """Split "Open with" button — primary icon + caret → popover picker.
+
+    The primary icon opens with the first configured slot (``main_ide``).
+    The caret reveals a small menu listing every slot plus an entry for
+    the integrated terminal so keyboard-only or infrequent targets are
+    still reachable without cluttering the row.
+    """
     js_path = json.dumps(path).replace("'", "\\'").replace('"', "'")
-    items_html: list[str] = []
+    primary_slot = "main_ide"
+    primary = ctx.open_with.get(primary_slot)
+    primary_title = primary.label if primary is not None else primary_slot
+    picker_items: list[str] = []
     for slot_key in ("main_ide", "secondary_ide", "terminal"):
         slot = ctx.open_with.get(slot_key)
-        title = slot.label if slot is not None else slot_key
-        items_html.append(
-            f'<button class="git-action-btn git-action-{slot_key}" '
-            f'title="{h(title)}" aria-label="{h(title)}" '
-            f"onclick=\"openPath(event,{js_path},'{slot_key}')\">"
-            f"{_ICON_SVGS[slot_key]}</button>"
+        label = slot.label if slot is not None else slot_key
+        picker_items.append(
+            f'<button type="button" class="open-popover-item" '
+            f"onclick=\"openPath(event,{js_path},'{slot_key}');gitClosePopovers()\">"
+            f'<span class="open-popover-icon">{_ICON_SVGS[slot_key]}</span>'
+            f"<span>{h(label)}</span></button>"
         )
     integrated_title = "Open in integrated terminal"
-    items_html.append(
-        f'<button class="git-action-btn git-action-integrated-terminal" '
-        f'title="{h(integrated_title)}" aria-label="{h(integrated_title)}" '
-        f'onclick="openInTerminal(event,{js_path})">'
-        f"{_ICON_SVGS['integrated_terminal']}</button>"
+    picker_items.append(
+        f'<button type="button" class="open-popover-item" '
+        f'onclick="openInTerminal(event,{js_path});gitClosePopovers()">'
+        f'<span class="open-popover-icon">{_ICON_SVGS["integrated_terminal"]}</span>'
+        f"<span>{h(integrated_title)}</span></button>"
     )
-    return f'<div class="git-actions">{"".join(items_html)}</div>'
+    popover = '<div class="open-popover" role="menu" hidden>' + "".join(picker_items) + "</div>"
+    return (
+        '<div class="open-grp">'
+        f'<button type="button" class="open-primary" title="{h(primary_title)}" '
+        f'aria-label="{h(primary_title)}" '
+        f"onclick=\"openPath(event,{js_path},'{primary_slot}')\">"
+        f"{_ICON_SVGS[primary_slot]}</button>"
+        '<button type="button" class="open-caret" title="Open with…" '
+        'aria-haspopup="menu" aria-label="Open with menu" '
+        'onclick="gitToggleOpenPopover(event,this)">'
+        f"{_ICON_SVGS['open_caret']}</button>"
+        f"{popover}</div>"
+    )
 
 
 def _runner_key(repo_name: str, sub_name: str | None = None) -> str:
@@ -837,116 +874,257 @@ def _status_badge(member_or_wt: dict) -> str:
     return '<span class="git-clean">\u2713</span>'
 
 
-def _render_member_row(
+def _member_live_runner(ctx: RenderCtx, family: dict, member: dict):
+    """Return the live :class:`runners.Session` for this member, or ``None``.
+
+    "Live" = the member has a configured runner key AND the session exists
+    AND the session has not exited. Callers use this to decide whether to
+    emit a jump-to-terminal arrow on the peer-card foot or surface the
+    inline runner mount.
+    """
+    if member.get("missing"):
+        return None
+    key = _runner_key_for_member(family, member)
+    if key not in ctx.repo_run:
+        return None
+    session = runners_mod.get(key)
+    if session is None or session.exit_code is not None:
+        return None
+    return session
+
+
+def _branch_status_cell(info: dict) -> str:
+    """Status cell content for a branch row — ✓ / dirty pill / missing pill."""
+    if info.get("missing"):
+        return '<span class="branch-missing">missing</span>'
+    if info.get("dirty"):
+        return f'<span class="branch-dirty">{info["changed"]}</span>'
+    return '<span class="branch-clean">\u2713</span>'
+
+
+def _branch_dot(info: dict, is_live: bool) -> str:
+    """State dot that leads every branch row — clean / dirty / live / missing."""
+    if is_live:
+        cls = "live"
+    elif info.get("missing"):
+        cls = "missing"
+    elif info.get("dirty"):
+        cls = "dirty"
+    else:
+        cls = "clean"
+    return f'<span class="b-dot b-dot-{cls}"></span>'
+
+
+def _render_branch_row(
+    ctx: RenderCtx,
+    family: dict,
+    member: dict,
+    *,
+    info: dict,
+    checkout_key: str,
+    is_main: bool,
+    node_id: str,
+) -> str:
+    """Render one branch row inside a peer-card.
+
+    ``info`` is either the member dict itself (main checkout) or one of
+    its ``worktrees`` entries. ``checkout_key`` is ``"main"`` for the
+    parent checkout of the family or the worktree ``key`` otherwise — it
+    matches :func:`_render_runner_button` / :func:`_render_runner_mount`.
+    """
+    # Branch label resolution: the main row of a subrepo has no branch of
+    # its own (it inherits the parent checkout's branch), so fall back to
+    # the parent member's branch.
+    if info.get("branch"):
+        branch_label = info["branch"]
+    elif is_main and member.get("is_subrepo"):
+        parent = family["members"][0] if family["members"] else {}
+        branch_label = parent.get("branch", "")
+    else:
+        branch_label = info.get("branch", "")
+    kind_label = "checkout" if is_main else "worktree"
+
+    # Runner pill — only when this member has a configured runner.
+    runner_pill = ""
+    member_key = _runner_key_for_member(family, member)
+    is_live = False
+    if not info.get("missing") and member_key in ctx.repo_run:
+        runner_pill = _render_runner_button(member_key, checkout_key, info["path"])
+        session = runners_mod.get(member_key)
+        is_live = (
+            session is not None
+            and session.exit_code is None
+            and session.checkout_key == checkout_key
+        )
+
+    # Open-with split button (hidden cell when the checkout is missing).
+    if info.get("missing"):
+        open_cell = '<span class="open-grp open-grp-empty" aria-hidden="true"></span>'
+    else:
+        open_cell = _render_open_with(ctx, info["path"])
+
+    row_cls = "peer-row"
+    if is_main:
+        row_cls += " peer-row-main"
+    if info.get("missing"):
+        row_cls += " peer-row-missing"
+    elif is_live and info.get("dirty"):
+        row_cls += " peer-row-dirty peer-row-live"
+    elif is_live:
+        row_cls += " peer-row-live"
+    elif info.get("dirty"):
+        row_cls += " peer-row-dirty"
+
+    return (
+        f'<div class="{row_cls}" data-node-id="{h(node_id)}" '
+        f'title="{h(info.get("path", ""))}">'
+        f"{_branch_dot(info, is_live)}"
+        f'<span class="b-name">{h(branch_label) or "&mdash;"}'
+        f'<span class="b-kind">{h(kind_label)}</span></span>'
+        f'<span class="b-status">{_branch_status_cell(info)}</span>'
+        f'<span class="b-run">{runner_pill}</span>'
+        f"{open_cell}</div>"
+    )
+
+
+def _render_peer_card(
     ctx: RenderCtx,
     family: dict,
     member: dict,
     member_id: str,
-    family_live: bool,
 ) -> str:
-    missing_cls = " git-missing-row" if member.get("missing") else ""
-    dirty_cls = " git-dirty" if member.get("dirty") else ""
-    actions = "" if member.get("missing") else _render_git_actions(ctx, member["path"])
-    if not actions:
-        actions = '<div class="git-actions git-actions-empty"></div>'
-    runner_btn = ""
-    if not member.get("missing"):
+    """Render one peer card — either the parent repo or a promoted sub-repo.
+
+    Contains a head (name + kind badge + status pill), N branch rows (main
+    checkout + one per worktree), an optional inline runner mount, and a
+    foot (path + optional jump-to-terminal arrow).
+    """
+    is_subrepo = bool(member.get("is_subrepo"))
+    live_session = _member_live_runner(ctx, family, member)
+    is_missing = bool(member.get("missing"))
+
+    # Overall state tag shown in the head.
+    dirty_branches = 0
+    if member.get("dirty"):
+        dirty_branches += 1
+    for wt in member.get("worktrees") or []:
+        if wt.get("dirty"):
+            dirty_branches += 1
+    if is_missing:
+        head_tag = '<span class="peer-tag peer-tag-missing">missing</span>'
+    elif dirty_branches:
+        noun = "branch" if dirty_branches == 1 else "branches"
+        head_tag = f'<span class="peer-tag peer-tag-dirty">{dirty_branches} {noun} dirty</span>'
+    else:
+        head_tag = '<span class="peer-tag peer-tag-clean">clean</span>'
+    if live_session is not None:
+        head_tag += '<span class="peer-tag peer-tag-live">live</span>'
+
+    kind_label = "sub-repo" if is_subrepo else "repo"
+
+    card_cls = "peer-card"
+    if is_subrepo:
+        card_cls += " peer-card-sub"
+    else:
+        card_cls += " peer-card-parent"
+    if dirty_branches:
+        card_cls += " peer-card-dirty"
+    if live_session is not None:
+        card_cls += " peer-card-live"
+    if is_missing:
+        card_cls += " peer-card-missing"
+
+    parts: list[str] = [
+        f'<div class="{card_cls}" data-node-id="{h(member_id)}">',
+        '<div class="peer-head">',
+        f'<span class="peer-name">{h(member["name"])}</span>',
+        f"{head_tag}",
+        f'<span class="peer-kind">{h(kind_label)}</span>',
+        "</div>",
+        '<div class="peer-rows">',
+    ]
+
+    # Main checkout row first, then one row per worktree.
+    parts.append(
+        _render_branch_row(
+            ctx,
+            family,
+            member,
+            info=member,
+            checkout_key="main",
+            is_main=True,
+            node_id=f"{member_id}/b:main",
+        )
+    )
+    for wt in member.get("worktrees") or []:
+        wt_id = f"{member_id}/wt:{wt['key']}"
+        parts.append(
+            _render_branch_row(
+                ctx,
+                family,
+                member,
+                info=wt,
+                checkout_key=wt["key"],
+                is_main=False,
+                node_id=wt_id,
+            )
+        )
+    parts.append("</div>")  # /peer-rows
+
+    # Inline runner terminal mount — placed between rows and foot so the
+    # card stays scannable even when the terminal is expanded.
+    if live_session is not None:
         member_key = _runner_key_for_member(family, member)
-        if member_key in ctx.repo_run:
-            runner_btn = _render_runner_button(member_key, "main", member["path"])
-    # Jump-to-terminal arrow on the parent member when the family has a
-    # live runner anywhere — single anchor per family, matches the old
-    # repo-level behaviour.
-    jump_arrow = (
-        f'<button class="git-runner-jump" title="Jump to runner terminal" '
-        f'aria-label="Jump to runner terminal" '
-        f'onclick="runnerJump(event,this)">{_ICON_SVGS["runner_jump"]}</button>'
-        if family_live and not member.get("is_subrepo")
-        else ""
-    )
-    return (
-        f'<div class="git-row{dirty_cls}{missing_cls}" '
-        f'data-node-id="{h(member_id)}" title="{h(member["path"])}">'
-        f"{actions}"
-        f'<span class="git-name">{jump_arrow}{h(member["name"])}</span>'
-        f'<span class="git-runner-slot">{runner_btn}</span>'
-        f'<span class="git-branch">{h(member["branch"])}</span>'
-        f'<span class="git-status">{_status_badge(member)}</span>'
-        f'<span class="git-spacer"></span></div>'
-    )
+        mount = _render_runner_mount(member_key, live_session.checkout_key)
+        if mount:
+            parts.append(f'<div class="peer-term">{mount}</div>')
+
+    # Foot: repo path + jump-arrow if the card has a live runner.
+    foot_path = member.get("path") or ""
+    foot_bits: list[str] = [f'<span class="peer-foot-path">{h(foot_path)}</span>']
+    if live_session is not None:
+        foot_bits.append(
+            f'<button type="button" class="peer-jump" '
+            f'title="Jump to live terminal" aria-label="Jump to live terminal" '
+            f'onclick="runnerJump(event,this)">{_ICON_SVGS["peer_jump"]}</button>'
+        )
+    parts.append(f'<div class="peer-foot">{"".join(foot_bits)}</div>')
+
+    parts.append("</div>")  # /peer-card
+    return "\n".join(parts)
 
 
-def _render_worktree_row(
-    ctx: RenderCtx,
-    family: dict,
-    member: dict,
-    wt: dict,
-    wt_id: str,
-) -> str:
-    missing_cls = " git-missing-row" if wt.get("missing") else ""
-    dirty_cls = " git-dirty" if wt.get("dirty") else ""
-    actions = "" if wt.get("missing") else _render_git_actions(ctx, wt["path"])
-    if not actions:
-        actions = '<div class="git-actions git-actions-empty"></div>'
-    runner_btn = ""
-    if not wt.get("missing"):
-        member_key = _runner_key_for_member(family, member)
-        if member_key in ctx.repo_run:
-            runner_btn = _render_runner_button(member_key, wt["key"], wt["path"])
-    return (
-        f'<div class="git-row git-worktree{dirty_cls}{missing_cls}" '
-        f'data-node-id="{h(wt_id)}" title="{h(wt["path"])}">'
-        f"{actions}"
-        f'<span class="git-name">\u21b3 {h(wt["key"])}</span>'
-        f'<span class="git-runner-slot">{runner_btn}</span>'
-        f'<span class="git-branch">{h(wt["branch"])}</span>'
-        f'<span class="git-status">{_status_badge(wt)}</span>'
-        f'<span class="git-spacer"></span></div>'
-    )
+def _render_flat_group(ctx: RenderCtx, family: dict, group_id: str) -> str:
+    """Render one family into the bucket grid.
 
-
-def _render_git_family_block(ctx: RenderCtx, family: dict, group_id: str) -> str:
-    """Render one ``.git-family`` block (every member row + worktree rows
-    + inline runner mounts).
-
-    Factored out so ``/fragment`` can return a single family's HTML for
-    localized reloads when runner state changes — otherwise a Run/Stop
-    click would force a full dash refresh.
+    Both solo and compound families use ``display: contents`` on the
+    wrapper so their peer-cards become direct items of the bucket grid
+    — preserving column alignment across solo and compound families
+    (no sub-grid, no row span, no offset shift). Compound families
+    prepend a full-row ornament label that sits above their cards to
+    identify the grouping without framing it.
     """
     family_id = f"{group_id}/{family['name']}"
-    family_live = _family_has_live_runner(ctx, family)
-    family_cls = "git-family"
-    if family["has_subrepos"]:
-        family_cls += " git-family-with-subs"
-    if family_live:
-        family_cls += " git-family-runner-live"
-    parts: list[str] = [f'<div class="{family_cls}" data-node-id="{h(family_id)}">']
-    for member in family["members"]:
+    members = family["members"]
+    is_compound = len(members) > 1
+
+    cls = "flat-group flat-group-compound" if is_compound else "flat-group flat-group-solo"
+    parts: list[str] = [f'<div class="{cls}" data-node-id="{h(family_id)}">']
+    if is_compound:
+        parts.append(f'<div class="flat-group-ornament">{h(family["name"])}</div>')
+    for member in members:
         member_id = f"{family_id}/m:{member['name']}"
-        parts.append(_render_member_row(ctx, family, member, member_id, family_live))
-        member_key = _runner_key_for_member(family, member)
-        if not member.get("missing") and member_key in ctx.repo_run:
-            mount = _render_runner_mount(member_key, "main")
-            if mount:
-                parts.append(mount)
-        for wt in member.get("worktrees") or []:
-            wt_id = f"{member_id}/wt:{wt['key']}"
-            parts.append(_render_worktree_row(ctx, family, member, wt, wt_id))
-            if not wt.get("missing") and member_key in ctx.repo_run:
-                mount = _render_runner_mount(member_key, wt["key"])
-                if mount:
-                    parts.append(mount)
-    parts.append("</div>")  # /git-family
+        parts.append(_render_peer_card(ctx, family, member, member_id))
+    parts.append("</div>")  # /flat-group
     return "\n".join(parts)
 
 
 def render_git_repo_fragment(ctx: RenderCtx, node_id: str) -> str | None:
-    """Return the HTML for the ``.git-family`` block matching ``node_id``.
+    """Return the HTML for the ``.flat-group`` block matching ``node_id``.
 
-    ``node_id`` shape: ``code/<group-label>/<family-name>``. Family name is
-    the parent repo name, so old callers passing ``code/<group>/<repo>``
-    still resolve. Returns ``None`` when the id doesn't match a known
-    family — the ``/fragment`` caller then falls back to a global reload.
+    ``node_id`` shape: ``code/<group-label>/<family-name>``. Returns
+    ``None`` when the id doesn't match a known family — the ``/fragment``
+    caller then falls back to a global reload.
     """
     prefix = "code/"
     if not node_id.startswith(prefix):
@@ -960,32 +1138,31 @@ def render_git_repo_fragment(ctx: RenderCtx, node_id: str) -> str | None:
             continue
         for family in families:
             if family["name"] == family_name:
-                return _render_git_family_block(ctx, family, f"code/{label}")
+                return _render_flat_group(ctx, family, f"code/{label}")
     return None
 
 
 def _render_git_repos(ctx: RenderCtx, groups):
-    """Render the Code-tab repo strip.
+    """Render the Code tab.
 
-    Each ``group`` (primary / secondary / Others) holds families. A family
-    is a parent repo plus the subrepos declared under it in
-    ``repositories.yml``. Members render as top-level rows; each member's
-    worktrees nest directly underneath. When a family carries subrepos a
-    blue accent left-border wraps the whole family so the eye groups them
-    visually.
+    Each bucket (primary / secondary / Others) becomes a labelled section
+    holding a grid of peer-cards. Solo families flow directly into the
+    grid; compound families (parent + promoted sub-repos) tie their
+    cards together under a small family ornament.
     """
     if not groups:
         return ""
     out = []
     for label, families in groups:
         group_id = f"code/{label}"
-        out.append(f'<div class="git-group" data-node-id="{h(group_id)}">')
-        out.append(f'<div class="git-group-header">{h(label)}</div>')
-        out.append('<div class="git-group-body">')
+        out.append(
+            f'<section class="flat-bucket" data-node-id="{h(group_id)}">'
+            f'<h3 class="flat-bucket-heading">{h(label)}</h3>'
+            f'<div class="flat-bucket-body">'
+        )
         for family in families:
-            out.append(_render_git_family_block(ctx, family, group_id))
-        out.append("</div>")  # /git-group-body
-        out.append("</div>")  # /git-group
+            out.append(_render_flat_group(ctx, family, group_id))
+        out.append("</div></section>")
     return "\n".join(out)
 
 
