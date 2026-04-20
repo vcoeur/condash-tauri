@@ -291,6 +291,14 @@ body {
 .config-toggle svg { display: block; }
 .about-toggle { padding: 4px 8px; }
 .about-toggle svg { display: block; }
+/* Phase 6: SSE-dropped indicator. Quiet pill next to the header
+   actions; surfaces only while /events is disconnected. */
+.reconnecting-pill {
+    padding: 3px 10px; font-size: 0.75rem; border-radius: 12px;
+    background: #fdd; color: #000; border: 1px solid #e99;
+    user-select: none; cursor: default;
+}
+.reconnecting-pill[hidden] { display: none !important; }
 
 /* --- About modal --- */
 .about-modal { width: min(420px, 96vw); height: auto; max-height: min(640px, 90vh); }
@@ -1862,6 +1870,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
         <div class="tab" data-tab="history" onclick="switchTab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
     </div>
     <div class="header-actions">
+        <span id="reconnecting-pill" class="reconnecting-pill" hidden title="Lost connection to the dashboard backend — retrying…">Reconnecting…</span>
         <button id="refresh-all-btn" class="theme-toggle" onclick="refreshAll()" title="Refresh everything (escape hatch — clears all dirty markers)" aria-label="Refresh everything">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
@@ -4816,6 +4825,60 @@ function _idInTab(id, tab) {
     return id === prefix || id.indexOf(prefix + '/') === 0;
 }
 
+/* --- SSE event stream (Phase 6) ---
+   Replaces the 5s polling loop. Every event from /events triggers a
+   reconcile call to /check-updates; the real dirty-set computation
+   lives there, unchanged. On drop, _setReconnecting(true) surfaces
+   the pill and an exponential-backoff retry loop tries to reopen. */
+var _eventSource = null;
+var _eventReconnectTimer = null;
+var _eventReconnectDelay = 1000;
+
+function _startEventStream() {
+    if (typeof EventSource !== 'function') return;  // no push, stick with boot checkUpdates
+    try {
+        _eventSource = new EventSource('/events');
+    } catch (e) {
+        _setReconnecting(true);
+        _scheduleEventReconnect();
+        return;
+    }
+    _eventSource.addEventListener('hello', function() {
+        _setReconnecting(false);
+        _eventReconnectDelay = 1000;
+        // Reconcile: the stream may have missed changes during the
+        // gap. checkUpdates diffs fingerprints and picks them up.
+        checkUpdates();
+    });
+    _eventSource.addEventListener('ping', function() { /* keepalive */ });
+    _eventSource.onmessage = function() {
+        // Any non-typed message is a staleness hint. Reconcile.
+        checkUpdates();
+    };
+    _eventSource.onerror = function() {
+        _setReconnecting(true);
+        try { _eventSource.close(); } catch (e) {}
+        _eventSource = null;
+        _scheduleEventReconnect();
+    };
+}
+
+function _scheduleEventReconnect() {
+    if (_eventReconnectTimer) return;
+    _eventReconnectTimer = setTimeout(function() {
+        _eventReconnectTimer = null;
+        _eventReconnectDelay = Math.min(_eventReconnectDelay * 2, 30000);
+        _startEventStream();
+    }, _eventReconnectDelay);
+}
+
+function _setReconnecting(on) {
+    var pill = document.getElementById('reconnecting-pill');
+    if (!pill) return;
+    if (on) pill.removeAttribute('hidden');
+    else pill.setAttribute('hidden', '');
+}
+
 function _autoReloadActiveTab(freshIds) {
     var freshInActive = [];
     freshIds.forEach(function(id) {
@@ -6258,8 +6321,13 @@ _loadTermShortcuts();
     });
 })();
 
+// Phase 6: event-driven staleness. /events streams tab-level hints;
+// checkUpdates() runs on connect + every hint to reconcile the real
+// node-level dirty set. The 5s poll is gone. If the SSE connection
+// drops, a visible indicator surfaces and reconnect logic re-runs
+// checkUpdates() as soon as the stream is back.
 checkUpdates();
-setInterval(checkUpdates, 5000);
+_startEventStream();
 
 /* On first load, detect an unset conception_path and surface the setup
    banner + auto-open the config modal so the user lands on the editor. */

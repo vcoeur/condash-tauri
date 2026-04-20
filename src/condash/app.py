@@ -23,11 +23,12 @@ from importlib.resources import files as _package_files
 from pathlib import Path
 
 from fastapi import Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from nicegui import app as _ng_app
 from nicegui import ui
 
 from . import config as config_mod
+from . import events as events_mod
 from . import runners as runners_mod
 from .config import (
     OPEN_WITH_SLOT_KEYS,
@@ -92,6 +93,13 @@ log = logging.getLogger(__name__)
 _RUNTIME_CFG: CondashConfig | None = None
 _RUNTIME_CTX: RenderCtx | None = None
 
+# Phase 6: filesystem-driven staleness push. The bus collects events
+# from the watchdog worker thread; ``/events`` fans them out to every
+# connected SSE client. A single observer is spun up in :func:`run`
+# and torn down on shutdown.
+_EVENT_BUS = events_mod.EventBus()
+_EVENT_OBSERVER = None
+
 # Vendored Mozilla PDF.js. Served as-is from inside the package under
 # /vendor/pdfjs/... — the in-modal viewer loads pdf.mjs + pdf.worker.mjs
 # from here so we never rely on the webview's built-in PDF handling
@@ -122,6 +130,20 @@ def _ctx() -> RenderCtx:
     if _RUNTIME_CTX is None:
         raise RuntimeError("condash.app: _RUNTIME_CTX not initialised")
     return _RUNTIME_CTX
+
+
+def _stop_event_observer() -> None:
+    """NiceGUI shutdown hook: halt the watchdog observer cleanly."""
+    global _EVENT_OBSERVER
+    obs = _EVENT_OBSERVER
+    _EVENT_OBSERVER = None
+    if obs is None:
+        return
+    try:
+        obs.stop()
+        obs.join(timeout=2.0)
+    except Exception:
+        log.exception("failed to stop watchdog observer")
 
 
 # --- Pty session registry --------------------------------------------------
@@ -283,6 +305,48 @@ def _register_routes() -> None:
             "git_fingerprint": _git_fingerprint(ctx),
             "nodes": nodes,
         }
+
+    @_ng_app.get("/events")
+    async def events(request: Request):
+        """SSE stream of filesystem-driven staleness events.
+
+        Each message is a JSON payload with at least a ``tab`` field
+        (``projects`` / ``knowledge`` / ``code``). The frontend treats
+        any event as a trigger to re-run ``/check-updates`` — the event
+        content is a hint, not authoritative state.
+
+        A ``ping`` event fires every 30 seconds so reverse proxies
+        (and the browser's EventSource) keep the connection open and
+        reconnection logic has a signal to latch onto.
+        """
+        _EVENT_BUS.bind_loop(asyncio.get_running_loop())
+        queue = _EVENT_BUS.subscribe()
+
+        async def stream():
+            try:
+                # Opening hello so EventSource.onopen fires immediately —
+                # the UI needs this to clear its "reconnecting" pill.
+                yield "event: hello\ndata: {}\n\n"
+                while True:
+                    if await request.is_disconnected():
+                        return
+                    try:
+                        payload = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    except TimeoutError:
+                        yield "event: ping\ndata: {}\n\n"
+                        continue
+                    yield f"data: {json.dumps(payload)}\n\n"
+            finally:
+                _EVENT_BUS.unsubscribe(queue)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @_ng_app.get("/fragment", response_class=HTMLResponse)
     def fragment(id: str = ""):
@@ -1754,10 +1818,16 @@ def _pick_free_port() -> int:
 
 def run(cfg: CondashConfig) -> None:
     """Launch the condash dashboard (native window or browser, per config)."""
-    global _RUNTIME_CFG, _RUNTIME_CTX
+    global _RUNTIME_CFG, _RUNTIME_CTX, _EVENT_OBSERVER
     _RUNTIME_CFG = cfg
     _RUNTIME_CTX = build_ctx(cfg)
     _register_routes()
+    # Filesystem → SSE bridge. The observer runs on its own worker
+    # thread and publishes to the module-level bus; /events streams
+    # from there. Stopped on NiceGUI shutdown.
+    _EVENT_OBSERVER = events_mod.start_watcher(_RUNTIME_CTX, _EVENT_BUS)
+    if _EVENT_OBSERVER is not None:
+        _ng_app.on_shutdown(_stop_event_observer)
     port = _pick_free_port() if cfg.port == 0 else cfg.port
     kwargs: dict = {
         "native": cfg.native,
