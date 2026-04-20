@@ -1207,6 +1207,12 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
 .note-modal[data-mode="view"] .note-pane-view {
     display: block; overflow: auto;
     padding: 1.2rem 1.6rem;
+    /* Match the edit pane's soft-wrap behaviour: long prose lines and
+       inline tokens (URLs, inline code) should break at the pane edge
+       instead of forcing a horizontal scrollbar. `<pre>` blocks keep
+       `white-space: pre` + their own `overflow: auto`, so code stays
+       on one line with its own local scroll. */
+    overflow-wrap: anywhere;
 }
 /* When the view pane hosts the PDF viewer, it fills the pane edge-to-edge
    and owns its own scrolling — strip the pane's padding + outer scrollbar
