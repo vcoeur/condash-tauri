@@ -866,6 +866,74 @@ def _register_routes() -> None:
             "config": _config_to_payload(new_cfg),
         }
 
+    @_ng_app.post("/config/yaml")
+    async def post_config_yaml(req: Request):
+        """Save a single YAML file verbatim (split-pane modal write path).
+
+        Payload ``{"file": "repositories" | "preferences", "body": <yaml>}``.
+        Parses the YAML into a dict, overlays it onto the live config,
+        then runs through the same :func:`config_mod.save` + ``build_ctx``
+        path as the form-based ``POST /config`` so the on-disk state and
+        runtime state stay in lockstep.
+
+        Unlike the form path this writes only the matching YAML file
+        (the TOML stays untouched) — but ``config_mod.save`` always writes
+        both YAMLs from the in-memory config, so the sibling YAML is
+        rewritten byte-identically from the current state. That's fine
+        and keeps the data flow uniform.
+        """
+        global _RUNTIME_CFG, _RUNTIME_CTX
+        if _RUNTIME_CFG is None:
+            return _error(500, "config not initialised")
+        try:
+            data = await req.json()
+        except ValueError:
+            return _error(400, "bad JSON")
+        if not isinstance(data, dict):
+            return _error(400, "payload must be an object")
+        which = str(data.get("file") or "").strip()
+        body = data.get("body")
+        if which not in ("repositories", "preferences"):
+            return _error(400, "file must be 'repositories' or 'preferences'")
+        if not isinstance(body, str):
+            return _error(400, "body must be a string")
+        if _RUNTIME_CFG.conception_path is None:
+            return _error(400, "conception_path is unset — set it in General first")
+        # Parse + validate before touching disk. Reuse the loader helpers
+        # so we get the same shape errors the file-based path reports.
+        import yaml
+
+        try:
+            parsed = yaml.safe_load(body)
+        except yaml.YAMLError as exc:
+            return _error(400, f"malformed YAML: {exc}")
+        if parsed is None:
+            parsed = {}
+        if not isinstance(parsed, dict):
+            return _error(400, "top-level YAML must be a mapping")
+        # Clone the current config so a bad payload can't leave it
+        # half-applied if _apply_* raises deep into the parse.
+        import copy
+
+        draft = copy.deepcopy(_RUNTIME_CFG)
+        try:
+            if which == "repositories":
+                target = config_mod.repositories_yaml_path(draft.conception_path)
+                config_mod._apply_repositories_yaml(draft, parsed, target)  # noqa: SLF001
+            else:
+                target = config_mod.preferences_yaml_path(draft.conception_path)
+                config_mod._apply_preferences_yaml(draft, parsed, target)  # noqa: SLF001
+        except config_mod.ConfigIncompleteError as exc:
+            return _error(400, str(exc))
+        # Stamp self-writes so the file watcher doesn't echo back.
+        expiry = time.time() + _CONFIG_SELF_WRITE_TTL
+        _CONFIG_SELF_WRITE["repositories.yml"] = expiry
+        _CONFIG_SELF_WRITE["preferences.yml"] = expiry
+        config_mod.save(draft)
+        _RUNTIME_CTX = build_ctx(draft)
+        _RUNTIME_CFG = draft
+        return {"ok": True, "config": _config_to_payload(draft)}
+
     @_ng_app.post("/api/runner/start")
     async def runner_start(req: Request):
         """Spawn a dev-server runner for ``{key, checkout_key, path}``.
@@ -1508,6 +1576,22 @@ def _repo_entries(
     return out
 
 
+def _read_yaml_body(target: Path | None) -> str:
+    """Read the raw bytes of a YAML file for the modal's split-pane view.
+
+    Returns an empty string when the path is ``None`` or the file is
+    missing / unreadable — the modal renders a placeholder in that case.
+    Kept tiny on purpose so it can be called on every ``GET /config``
+    without a cache.
+    """
+    if target is None:
+        return ""
+    try:
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def _config_to_payload(cfg: CondashConfig) -> dict:
     """Serialise the live config to JSON for ``GET /config``.
 
@@ -1516,7 +1600,13 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
     when it exists, empty when conception_path is unset or the YAML
     hasn't been written yet (first-run migration state). The matching
     ``_expected_path`` fields report the future write target.
+
+    ``repositories_yaml_body`` / ``preferences_yaml_body`` carry the raw
+    file contents so the split-pane modal can show the live YAML
+    alongside the form without a second request.
     """
+    repos_yaml_target = config_mod.repositories_yaml_path(cfg.conception_path)
+    prefs_yaml_target = config_mod.preferences_yaml_path(cfg.conception_path)
     return {
         "conception_path": str(cfg.conception_path) if cfg.conception_path else "",
         "workspace_path": str(cfg.workspace_path) if cfg.workspace_path else "",
@@ -1530,17 +1620,11 @@ def _config_to_payload(cfg: CondashConfig) -> dict:
             cfg.repositories_secondary, cfg.repo_submodules, cfg.repo_run
         ),
         "repositories_yaml_source": str(cfg.yaml_source) if cfg.yaml_source else "",
-        "repositories_yaml_expected_path": (
-            str(config_mod.repositories_yaml_path(cfg.conception_path))
-            if cfg.conception_path
-            else ""
-        ),
+        "repositories_yaml_expected_path": (str(repos_yaml_target) if repos_yaml_target else ""),
+        "repositories_yaml_body": _read_yaml_body(cfg.yaml_source or repos_yaml_target),
         "preferences_yaml_source": (str(cfg.preferences_source) if cfg.preferences_source else ""),
-        "preferences_yaml_expected_path": (
-            str(config_mod.preferences_yaml_path(cfg.conception_path))
-            if cfg.conception_path
-            else ""
-        ),
+        "preferences_yaml_expected_path": (str(prefs_yaml_target) if prefs_yaml_target else ""),
+        "preferences_yaml_body": _read_yaml_body(cfg.preferences_source or prefs_yaml_target),
         "terminal": {
             "shell": cfg.terminal.shell or "",
             "shortcut": cfg.terminal.shortcut,

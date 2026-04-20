@@ -33,6 +33,49 @@ def test_config_get(cfg: CondashConfig):
     assert body["conception_path"] == str(cfg.conception_path)
     assert body["port"] == 0
     assert body["native"] is False
+    # Split-pane modal needs raw YAML bodies alongside the parsed form data.
+    assert "repositories_yaml_body" in body
+    assert "preferences_yaml_body" in body
+
+
+def test_config_yaml_post_writes_repositories(cfg: CondashConfig):
+    """POST /config/yaml applies a raw YAML body and rewrites the file."""
+    client = _client(cfg)
+    # Seed a minimal repositories.yml so the loader has something to overlay.
+    (cfg.conception_path / "config").mkdir(parents=True, exist_ok=True)
+    body = (
+        "workspace_path: /tmp/ws\n"
+        "repositories:\n"
+        "  primary:\n"
+        "    - alpha\n"
+        "    - beta\n"
+        "  secondary: []\n"
+        "open_with:\n"
+        "  main_ide: {label: 'Open in main IDE', commands: ['idea {path}']}\n"
+        "  secondary_ide: {label: 'Open in secondary IDE', commands: ['code {path}']}\n"
+        "  terminal: {label: 'Open terminal here', commands: ['xterm']}\n"
+    )
+    response = client.post("/config/yaml", json={"file": "repositories", "body": body})
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    on_disk = (cfg.conception_path / "config" / "repositories.yml").read_text(encoding="utf-8")
+    assert "- alpha" in on_disk
+    assert "- beta" in on_disk
+
+
+def test_config_yaml_post_rejects_malformed_yaml(cfg: CondashConfig):
+    client = _client(cfg)
+    response = client.post(
+        "/config/yaml", json={"file": "repositories", "body": "foo: [unterminated"}
+    )
+    assert response.status_code == 400
+    assert "malformed" in response.json()["error"].lower()
+
+
+def test_config_yaml_post_rejects_unknown_file(cfg: CondashConfig):
+    client = _client(cfg)
+    response = client.post("/config/yaml", json={"file": "bogus", "body": "a: 1"})
+    assert response.status_code == 400
 
 
 def test_toggle_flips_checkbox(cfg: CondashConfig):

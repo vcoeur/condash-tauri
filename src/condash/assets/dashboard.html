@@ -315,6 +315,42 @@ body {
 
 /* --- Config modal form --- */
 .config-modal { max-width: 720px; }
+/* Widen for YAML-backed tabs whose body is a split pane. */
+.config-modal.config-modal-wide { max-width: 1080px; }
+
+/* Split-pane layout used inside YAML-backed tabs: left YAML editor,
+   right form fieldsets. Stacks on narrow viewports. */
+.config-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+}
+@media (max-width: 820px) { .config-split { grid-template-columns: 1fr; } }
+.config-split-pane { min-width: 0; }
+.config-split-pane-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin: 0 0 0.4rem; font-size: 0.75rem; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+}
+.config-split-pane-head .config-split-status::before {
+    content: '●'; color: var(--accent); margin-right: 0.35rem;
+    font-size: 0.6em; vertical-align: middle;
+}
+.config-yaml-editor {
+    width: 100%;
+    min-height: 380px;
+    background: var(--bg-card); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    font-family: ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; line-height: 1.55;
+    tab-size: 2;
+    resize: vertical;
+}
+.config-yaml-editor:focus { outline: none; border-color: var(--accent); }
+.config-yaml-editor.config-yaml-dirty { border-color: var(--accent); }
+.config-yaml-editor[readonly] { opacity: 0.85; cursor: default; }
 
 /* Segmented radio groups in the New-item modal. Uses flex-wrap so
    small (3-option) and wider (6-option) groups share one row on
@@ -2079,6 +2115,19 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                 </div>
                 <div class="config-tab-pane" data-config-pane="repositories">
                     <p id="config-repositories-source" class="config-yaml-source" style="display:none"></p>
+                    <div class="config-split">
+                        <div class="config-split-pane">
+                            <div class="config-split-pane-head">
+                                <span>repositories.yml</span>
+                                <span class="config-split-status" data-yaml-status="repositories">synced</span>
+                            </div>
+                            <textarea class="config-yaml-editor"
+                                      data-yaml-file="repositories"
+                                      spellcheck="false"
+                                      aria-label="repositories.yml raw contents"></textarea>
+                            <small class="config-help">Edit the YAML directly and click <b>Save &amp; reload</b>. The form on the right stays in sync with the parsed content.</small>
+                        </div>
+                        <div class="config-split-pane">
                     <fieldset class="config-fieldset">
                         <legend>Workspace</legend>
                         <label>workspace_path
@@ -2128,9 +2177,24 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                             </label>
                         </div>
                     </fieldset>
+                        </div>
+                    </div>
                 </div>
                 <div class="config-tab-pane" data-config-pane="preferences">
                     <p id="config-preferences-source" class="config-yaml-source" style="display:none"></p>
+                    <div class="config-split">
+                        <div class="config-split-pane">
+                            <div class="config-split-pane-head">
+                                <span>preferences.yml</span>
+                                <span class="config-split-status" data-yaml-status="preferences">synced</span>
+                            </div>
+                            <textarea class="config-yaml-editor"
+                                      data-yaml-file="preferences"
+                                      spellcheck="false"
+                                      aria-label="preferences.yml raw contents"></textarea>
+                            <small class="config-help">Edit the YAML directly and click <b>Save &amp; reload</b>. The form on the right stays in sync with the parsed content.</small>
+                        </div>
+                        <div class="config-split-pane">
                     <fieldset class="config-fieldset">
                         <legend>PDF viewer</legend>
                         <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path; if the command has no <code>{path}</code>, the path is appended as the last argument (so <code>evince</code> behaves the same as <code>evince {path}</code>). Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
@@ -2157,6 +2221,8 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
                             <small>Pastes the absolute path of the newest image (.png, .jpg, .jpeg, .webp) in the screenshot directory into the active terminal tab — no Enter, you confirm.</small>
                         </label>
                     </fieldset>
+                        </div>
+                    </div>
                 </div>
                 <div id="config-error" class="config-error" style="display:none"></div>
                 <div id="config-restart-warning" class="config-restart-warning" style="display:none"></div>
@@ -2345,6 +2411,12 @@ function switchConfigTab(name) {
     panes.forEach(function(p){
         p.classList.toggle('active', p.getAttribute('data-config-pane') === name);
     });
+    // Widen the modal on YAML-backed tabs (split pane wants ~1080px).
+    // The General tab stays at the original 720px for a less empty feel.
+    var modal = document.querySelector('#config-modal .config-modal');
+    if (modal) {
+        modal.classList.toggle('config-modal-wide', name !== 'general');
+    }
 }
 
 function _setYamlSourceHint(elId, source, expected, label) {
@@ -2417,10 +2489,56 @@ async function openConfigModal() {
             cfg.preferences_yaml_expected_path,
             'config/preferences.yml',
         );
+        _populateYamlEditor('repositories', cfg.repositories_yaml_body || '');
+        _populateYamlEditor('preferences', cfg.preferences_yaml_body || '');
     } catch (e) {
         errEl.textContent = 'Could not load config: ' + e;
         errEl.style.display = 'block';
     }
+}
+
+/* Split-pane YAML pane: populate the textarea with raw YAML and stash
+   its pristine value so saveConfig can detect local edits. The status
+   badge flips to "edited" on input and back to "synced" once the diff
+   against pristine is zero. When ``preserveDirty`` is true and the
+   user has unsaved edits, we don't overwrite — an external live-reload
+   event would otherwise blow away their in-flight work. */
+function _populateYamlEditor(which, body, preserveDirty) {
+    var ta = document.querySelector('#config-form textarea[data-yaml-file="' + which + '"]');
+    if (!ta) return;
+    var dirty = ta.classList.contains('config-yaml-dirty');
+    if (preserveDirty && dirty) return;
+    ta.value = body;
+    ta.dataset.pristine = body;
+    ta.classList.remove('config-yaml-dirty');
+    _setYamlStatus(which, 'synced');
+    if (!ta.dataset.boundInput) {
+        ta.addEventListener('input', function() {
+            var pristine = ta.dataset.pristine || '';
+            if (ta.value !== pristine) {
+                ta.classList.add('config-yaml-dirty');
+                _setYamlStatus(which, 'edited — unsaved');
+            } else {
+                ta.classList.remove('config-yaml-dirty');
+                _setYamlStatus(which, 'synced');
+            }
+        });
+        ta.dataset.boundInput = '1';
+    }
+}
+
+function _setYamlStatus(which, label) {
+    var badge = document.querySelector('[data-yaml-status="' + which + '"]');
+    if (badge) badge.textContent = label;
+}
+
+function _getDirtyYamlFile() {
+    var dirtyTa = document.querySelector('#config-form textarea.config-yaml-editor.config-yaml-dirty');
+    if (!dirtyTa) return null;
+    return {
+        file: dirtyTa.getAttribute('data-yaml-file'),
+        body: dirtyTa.value,
+    };
 }
 
 function closeConfigModal() {
@@ -2598,6 +2716,33 @@ async function saveConfig(ev) {
     var warnEl = document.getElementById('config-restart-warning');
     errEl.style.display = 'none';
     warnEl.style.display = 'none';
+    // Prefer the raw-YAML path when the user has edited the YAML pane —
+    // it's the more honest "YAML is source of truth" route and preserves
+    // exact formatting / comments the form can't round-trip.
+    var dirtyYaml = _getDirtyYamlFile();
+    if (dirtyYaml) {
+        try {
+            var yres = await fetch('/config/yaml', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(dirtyYaml),
+            });
+            var ybody = await yres.json().catch(function(){return {};});
+            if (!yres.ok) {
+                errEl.textContent = ybody.error || ('HTTP ' + yres.status);
+                errEl.style.display = 'block';
+                return;
+            }
+            _loadTermShortcuts();
+            closeConfigModal();
+            setTimeout(_reloadInPlace, 200);
+            return;
+        } catch (e) {
+            errEl.textContent = 'Save failed: ' + e;
+            errEl.style.display = 'block';
+            return;
+        }
+    }
     var payload = {
         conception_path: _getField(form, 'conception_path'),
         workspace_path: _getField(form, 'workspace_path'),
@@ -5042,13 +5187,27 @@ var _eventReconnectDelay = 1000;
 var _configReloadTimer = null;
 function _onConfigChanged(payload) {
     if (_configReloadTimer) clearTimeout(_configReloadTimer);
-    _configReloadTimer = setTimeout(function() {
+    _configReloadTimer = setTimeout(async function() {
         _configReloadTimer = null;
         var modal = document.getElementById('config-modal');
         var modalOpen = modal && modal.style.display !== 'none' && modal.style.display !== '';
-        if (modalOpen && typeof openConfigModal === 'function') {
-            // Re-populate the form from disk, preserving modal visibility.
-            openConfigModal();
+        if (modalOpen) {
+            // Reload the /config payload and push it through the
+            // populators, but keep the user's dirty YAML edits if
+            // any — clobbering an unsaved edit on every external
+            // write would be a foot-gun.
+            try {
+                var res = await fetch('/config', {cache: 'no-store'});
+                if (res.ok) {
+                    var cfg = await res.json();
+                    _populateYamlEditor('repositories', cfg.repositories_yaml_body || '', true);
+                    _populateYamlEditor('preferences', cfg.preferences_yaml_body || '', true);
+                    // Only refresh form fields when the YAML pane isn't dirty —
+                    // otherwise the form stays as-is and the dirty YAML drives
+                    // the upcoming save.
+                    if (!_getDirtyYamlFile()) openConfigModal();
+                }
+            } catch (e) { /* leave modal as-is on transient fetch error */ }
         }
         // Always refresh shortcut specs — they live outside the modal
         // and bind global key handlers.
