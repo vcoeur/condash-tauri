@@ -17,8 +17,16 @@ CM_VIEW_VERSION               := 6.41.1
 CM_COMMANDS_VERSION           := 6.7.0
 CM_LANGUAGE_VERSION           := 6.10.3
 CM_LANG_YAML_VERSION          := 6.1.1
+CM_LANG_MARKDOWN_VERSION      := 6.5.0
 CM_THEME_ONE_DARK_VERSION     := 6.1.2
 ESBUILD_VERSION               := 0.24.0
+
+# Vendored Mermaid version — bumped by `make update-mermaid`. The live
+# bundle is the upstream-published UMD file at
+# src/condash/assets/vendor/mermaid/mermaid.min.js, served by app.py's
+# /vendor/mermaid route and loaded unconditionally by dashboard.html
+# so the note preview modal can render mermaid code blocks offline.
+MERMAID_VERSION               := 11.14.0
 # NOTE: state/view versions must match what @codemirror/lint and
 # @codemirror/search (transitive deps of basicSetup) require at top
 # level — otherwise npm nests a second copy and the bundle loads two
@@ -66,13 +74,21 @@ update-pdfjs: ## Re-vendor Mozilla PDF.js at $(PDFJS_VERSION) into src/condash/a
 	unzip -q "$$WORK/pdfjs.zip" -d "$$WORK/extracted"; \
 	rm -rf "$$DEST"; \
 	mkdir -p "$$DEST/build"; \
-	cp "$$WORK/extracted/build/pdf.mjs" "$$WORK/extracted/build/pdf.worker.mjs" "$$DEST/build/"; \
 	cp -r "$$WORK/extracted/web/cmaps" "$$WORK/extracted/web/standard_fonts" \
 	      "$$WORK/extracted/web/wasm" "$$WORK/extracted/web/iccs" "$$DEST/"; \
 	cp "$$WORK/extracted/LICENSE" "$$DEST/"; \
 	find "$$DEST" -name '*.map' -delete; \
+	echo "Minifying pdf.mjs + pdf.worker.mjs via esbuild"; \
+	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
+	    "$$WORK/extracted/build/pdf.mjs" \
+	    --bundle --minify --format=esm --target=es2022 --legal-comments=none \
+	    --outfile="$$DEST/build/pdf.mjs" --log-level=warning; \
+	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
+	    "$$WORK/extracted/build/pdf.worker.mjs" \
+	    --bundle --minify --format=esm --target=es2022 --legal-comments=none \
+	    --outfile="$$DEST/build/pdf.worker.mjs" --log-level=warning; \
 	rm -rf "$$WORK"; \
-	echo "Vendored PDF.js $(PDFJS_VERSION):"; \
+	echo "Vendored PDF.js $(PDFJS_VERSION) (minified):"; \
 	du -sh "$$DEST"
 
 update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/codemirror/
@@ -90,6 +106,7 @@ update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/code
 	  '@codemirror/commands':'$(CM_COMMANDS_VERSION)',\
 	  '@codemirror/language':'$(CM_LANGUAGE_VERSION)',\
 	  '@codemirror/lang-yaml':'$(CM_LANG_YAML_VERSION)',\
+	  '@codemirror/lang-markdown':'$(CM_LANG_MARKDOWN_VERSION)',\
 	  '@codemirror/theme-one-dark':'$(CM_THEME_ONE_DARK_VERSION)'},\
 	 'devDependencies':{'esbuild':'$(ESBUILD_VERSION)'}},indent=2))"; \
 	cp "$$ENTRY" "$$WORK/entry.js"; \
@@ -104,7 +121,8 @@ update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/code
 	    echo ""; \
 	    echo "Built from the following packages (version pins in condash/Makefile):"; \
 	    for pkg in codemirror @codemirror/state @codemirror/view @codemirror/commands \
-	               @codemirror/language @codemirror/lang-yaml @codemirror/theme-one-dark; do \
+	               @codemirror/language @codemirror/lang-yaml @codemirror/lang-markdown \
+	               @codemirror/theme-one-dark; do \
 	        echo "  - $$pkg"; \
 	    done; \
 	    echo ""; \
@@ -115,4 +133,21 @@ update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/code
 	echo "Vendored CodeMirror 6:"; \
 	du -sh "$$DEST"
 
-.PHONY: help install dev-install run test test-e2e test-all coverage lint format update-pdfjs update-codemirror
+update-mermaid: ## Re-vendor Mermaid at $(MERMAID_VERSION) into src/condash/assets/vendor/mermaid/
+	@set -e; \
+	URL="https://cdn.jsdelivr.net/npm/mermaid@$(MERMAID_VERSION)/dist/mermaid.min.js"; \
+	DEST=src/condash/assets/vendor/mermaid; \
+	rm -rf "$$DEST"; \
+	mkdir -p "$$DEST"; \
+	echo "Downloading $$URL"; \
+	curl -sSL -o "$$DEST/mermaid.min.js" "$$URL"; \
+	{ \
+	    echo "Mermaid $(MERMAID_VERSION) — MIT License"; \
+	    echo "https://github.com/mermaid-js/mermaid"; \
+	    echo ""; \
+	    echo "Vendored from https://cdn.jsdelivr.net/npm/mermaid@$(MERMAID_VERSION)/dist/mermaid.min.js"; \
+	} > "$$DEST/LICENSE"; \
+	echo "Vendored Mermaid $(MERMAID_VERSION):"; \
+	du -sh "$$DEST"
+
+.PHONY: help install dev-install run test test-e2e test-all coverage lint format update-pdfjs update-codemirror update-mermaid

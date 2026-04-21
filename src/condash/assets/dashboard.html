@@ -20,9 +20,7 @@
     }
 })();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11.14.0/dist/mermaid.min.js"
-        integrity="sha384-1CMXl090wj8Dd6YfnzSQUOgWbE6suWCaenYG7pox5AX7apTpY3PmJMeS2oPql4Gk"
-        crossorigin="anonymous" defer></script>
+<script src="/vendor/mermaid/mermaid.min.js" defer></script>
 <link rel="stylesheet" href="/vendor/xterm/css/xterm.min.css">
 <script src="/vendor/xterm/lib/xterm.min.js" defer></script>
 <script src="/vendor/xterm/lib/xterm-addon-fit.min.js" defer></script>
@@ -8110,83 +8108,71 @@ window.addEventListener('resize', function() {
 })();
 </script>
 
-<script type="module">
-/* Bootstrap CodeMirror 6 from esm.sh (no bundler, pinned versions).
-   Exposes window.__cm6 once the module graph resolves so the classic
-   <script> above can lazily mount editors on demand. If the CDN is
-   unreachable we leave __cm6 unset; the "Edit" toggle stays disabled
-   and users fall back to the plain textarea.
+<script>
+/* Mount the markdown-pane surface (window.__cm6) on top of the vendored
+   CodeMirror 6 bundle (window.CondashCM) loaded via /vendor/codemirror/.
+   The bundle's classic <script> tag is `defer`, so by the time this
+   (also-classic, also-deferred) script runs the global is populated.
+   If the bundle failed to load (should only happen on broken install)
+   we leave __cm6 unset — the "Edit" toggle stays disabled and users
+   fall back to the plain textarea.
 
-   `?deps=` pins @codemirror/state and @codemirror/view to matching
-   versions across every bundle so esm.sh serves a single deduped URL
-   per package. Without it, `codemirror` and `@codemirror/lang-markdown`
-   each ship their own copy of state/view, and extensions registered
-   via `basicSetup` carry Compartment/StateField objects from a
-   different module graph than `EditorView` — editor mounts empty.
-   Versions must be recent enough for the transitive @codemirror/search
-   and @codemirror/autocomplete (pulled in by basicSetup at `^6.0.0`)
-   to find their imports — notably `showDialog`, added in view@6.37.0. */
-(async function() {
-    const DEPS = '?deps=@codemirror/state@6.6.0,@codemirror/view@6.41.0';
-    try {
-        const [core, lang, viewMod, stateMod] = await Promise.all([
-            import('https://esm.sh/codemirror@6.0.2' + DEPS),
-            import('https://esm.sh/@codemirror/lang-markdown@6.5.0' + DEPS),
-            import('https://esm.sh/@codemirror/view@6.41.0?deps=@codemirror/state@6.6.0'),
-            import('https://esm.sh/@codemirror/state@6.6.0'),
-        ]);
-        const {EditorView, basicSetup} = core;
-        const {markdown} = lang;
-        const {keymap} = viewMod;
-        const {EditorState, Compartment} = stateMod;
-
-        /* Build a theme bound to condash's CSS variables so the editor
-           stays aligned with dark/light without a second theme system.
-           Passing {dark: true/false} flips CM's semantic colours
-           (selection, cursor) for the right palette. */
-        function buildTheme(isDark) {
-            const styles = getComputedStyle(document.documentElement);
-            const v = (name, fb) => (styles.getPropertyValue(name).trim() || fb);
-            const bg = v('--bg-card', isDark ? '#18181b' : '#fff');
-            const fg = v('--text', isDark ? '#e4e4e7' : '#18181b');
-            const accent = v('--accent', '#2563eb');
-            const accentBg = v('--accent-bg', 'rgba(37,99,235,0.1)');
-            const pillBg = v('--pill-bg', isDark ? '#27272a' : '#f4f4f5');
-            const border = v('--border', isDark ? '#3f3f46' : '#e4e4e7');
-            const muted = v('--text-muted', '#a1a1aa');
-            return EditorView.theme({
-                '&': {color: fg, backgroundColor: bg, height: '100%'},
-                '.cm-content': {caretColor: accent},
-                '&.cm-focused': {outline: 'none'},
-                '.cm-gutters': {
-                    backgroundColor: pillBg, color: muted,
-                    borderRight: '1px solid ' + border,
-                },
-                '.cm-activeLineGutter, .cm-activeLine': {
-                    backgroundColor: accentBg,
-                },
-                '.cm-selectionMatch, ::selection': {backgroundColor: accentBg},
-                '.cm-cursor, .cm-dropCursor': {borderLeftColor: accent},
-                '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-                    backgroundColor: accentBg,
-                },
-            }, {dark: isDark});
-        }
-
-        window.__cm6 = {
-            EditorView: EditorView,
-            EditorState: EditorState,
-            Compartment: Compartment,
-            keymap: keymap,
-            basicSetup: basicSetup,
-            markdown: markdown,
-            buildTheme: buildTheme,
-        };
-        // Re-enable the Edit (CM6) toggle if the modal is already open.
-        if (typeof _syncModeControls === 'function') _syncModeControls();
-    } catch (err) {
-        console.warn('[condash] CodeMirror 6 failed to load:', err);
+   The markdown pane reuses CondashCM.EditorView / EditorState /
+   Compartment / basicSetup / keymap and consumes the new
+   CondashCM.markdownLang entry; all dedup happens at bundle build
+   time via npm's flat tree, so no `?deps=` trick is needed here. */
+(function() {
+    if (!window.CondashCM) {
+        console.warn('[condash] CodeMirror 6 bundle missing — note editor stays as plain textarea.');
+        return;
     }
+    var CM = window.CondashCM;
+    var EditorView = CM.EditorView;
+
+    /* Build a theme bound to condash's CSS variables so the editor
+       stays aligned with dark/light without a second theme system.
+       Passing {dark: true/false} flips CM's semantic colours
+       (selection, cursor) for the right palette. */
+    function buildTheme(isDark) {
+        var styles = getComputedStyle(document.documentElement);
+        var v = function(name, fb) { return styles.getPropertyValue(name).trim() || fb; };
+        var bg = v('--bg-card', isDark ? '#18181b' : '#fff');
+        var fg = v('--text', isDark ? '#e4e4e7' : '#18181b');
+        var accent = v('--accent', '#2563eb');
+        var accentBg = v('--accent-bg', 'rgba(37,99,235,0.1)');
+        var pillBg = v('--pill-bg', isDark ? '#27272a' : '#f4f4f5');
+        var border = v('--border', isDark ? '#3f3f46' : '#e4e4e7');
+        var muted = v('--text-muted', '#a1a1aa');
+        return EditorView.theme({
+            '&': {color: fg, backgroundColor: bg, height: '100%'},
+            '.cm-content': {caretColor: accent},
+            '&.cm-focused': {outline: 'none'},
+            '.cm-gutters': {
+                backgroundColor: pillBg, color: muted,
+                borderRight: '1px solid ' + border,
+            },
+            '.cm-activeLineGutter, .cm-activeLine': {
+                backgroundColor: accentBg,
+            },
+            '.cm-selectionMatch, ::selection': {backgroundColor: accentBg},
+            '.cm-cursor, .cm-dropCursor': {borderLeftColor: accent},
+            '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+                backgroundColor: accentBg,
+            },
+        }, {dark: isDark});
+    }
+
+    window.__cm6 = {
+        EditorView: EditorView,
+        EditorState: CM.EditorState,
+        Compartment: CM.Compartment,
+        keymap: CM.keymap,
+        basicSetup: CM.basicSetup,
+        markdown: CM.markdownLang,
+        buildTheme: buildTheme,
+    };
+    // Re-enable the Edit (CM6) toggle if the modal is already open.
+    if (typeof _syncModeControls === 'function') _syncModeControls();
 })();
 </script>
 </body>
