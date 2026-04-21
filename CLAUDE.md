@@ -25,7 +25,11 @@ condash/
   cli.py       <- Typer app (default launches the window; subcommands: init, install-desktop, uninstall-desktop, config show/path/edit)
   config.py    <- TOML loader + writer (tomlkit round-trip) + CondashConfig dataclass + DEFAULT_CONFIG_TEMPLATE
   context.py   <- RenderCtx dataclass + build_ctx(cfg) + favicon loader
-  app.py       <- NiceGUI bootstrap + FastAPI route registration (`/`, `/toggle`, `/add-step`, `/config`, …). Holds _RUNTIME_CFG + _RUNTIME_CTX so the in-app editor can mutate both without a restart.
+  state.py     <- AppState dataclass: live cfg + ctx + event bus + observer + PTY registry + config self-write TTL stamps
+  app.py       <- NiceGUI bootstrap, lifecycle hooks, run(cfg). Owns the module-level `state = AppState(...)` instance everything else closes over.
+  routes/      <- HTTP + WebSocket route subpackage. Each module exposes `build_router(state) -> APIRouter`; `routes.register_all(app, state)` wires them all onto NiceGUI's FastAPI app. Files: static, updates, fragments, notes, items, files, steps, clipboard, openers, config_, runners, terminals.
+  pty.py       <- Embedded-terminal PTY lifecycle: PtySession dataclass, spawn_session, pump_session, attach_ws, reap_all
+  clipboard.py <- Cross-platform clipboard (QClipboard → wl/xclip/xsel) + the pywebview JS bridge
   paths.py     <- Path-traversal-safe validators for every user-supplied rel_path
   wikilinks.py <- `[[target]]` / `[[target|label]]` resolution + pre-pandoc rewrite
   parser.py    <- README parsing + knowledge-tree scanning + fingerprint check
@@ -38,7 +42,7 @@ condash/
     vendor/pdfjs/  <- Mozilla PDF.js library (pdfjs-dist legacy build) used by the in-modal PDF viewer; bump via `make update-pdfjs`
 ```
 
-Import direction: `cli` → `app` → {`context`, `render`, `mutations`, `git_scan`, `openers`} → {`parser`, `wikilinks`, `paths`} → `context`. No module globals populated by `init`; every helper that needs config takes a `RenderCtx` parameter. `git_scan._git_cache` is a module-level cache (not config-derived).
+Import direction: `cli` → `app` → `routes/*` → {`context`, `render`, `mutations`, `git_scan`, `openers`, `pty`, `clipboard`} → {`parser`, `wikilinks`, `paths`} → {`state`, `context`}. No module globals populated by `init`; runtime state lives on the single `app.state` AppState instance, every helper that needs config takes a `RenderCtx` parameter. `git_scan._git_cache` is a module-level cache (not config-derived).
 
 ## Config
 
@@ -93,8 +97,8 @@ The CLI honours `CONDASH_LOG_LEVEL` (default `INFO`) for the root logger; set to
 ## Key code locations
 
 - CLI entrypoint: `src/condash/cli.py` — Typer app with a root callback that launches the window and a `config` sub-app for `show / edit / path`.
-- FastAPI routes: `src/condash/app.py::_register_routes` — all the endpoints `dashboard.html` talks to, registered on NiceGUI's embedded FastAPI instance. Reads the live context via `_ctx()` which returns `_RUNTIME_CTX`.
-- Runtime context: `src/condash/context.py::RenderCtx` + `build_ctx(cfg)`. Frozen dataclass carrying `base_dir`, `workspace`, `worktrees`, `repo_structure`, `open_with`, `pdf_viewer`, `template`. Rebuilt on every `/config` POST.
+- FastAPI routes: `src/condash/routes/*.py` — one file per concern, each exporting `build_router(state) -> APIRouter`. `app.py::_register_routes` calls `routes.register_all(_ng_app, state)` to wire them all on; the live RenderCtx is read via `state.get_ctx()`.
+- Runtime state: `src/condash/state.py::AppState` (single per-process instance at `app.state`) + `src/condash/context.py::RenderCtx` + `build_ctx(cfg)`. Frozen RenderCtx carries `base_dir`, `workspace`, `worktrees`, `repo_structure`, `open_with`, `pdf_viewer`, `template`. Rebuilt on every `/config` POST.
 - Path validators: `src/condash/paths.py::_safe_resolve` is the shared traversal guard; every route-facing validator composes regex gates on top of it.
 - Parsers + renderers: `src/condash/parser.py` (README + knowledge tree), `src/condash/render.py` (HTML for cards / notes / knowledge / git strip / page).
 - History search: `src/condash/search.py::search_items` — token-AND scan of each project's README body, note/text-file content and filenames. Exposed as `GET /search-history?q=…`; the History tab's input switches to a query-mode results list (`dashboard.html::filterHistory` / `_runHistorySearch`) with a jump-to-project button.
