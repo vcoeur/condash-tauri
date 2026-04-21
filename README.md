@@ -64,7 +64,8 @@ Full schema: [Config files reference](https://condash.vcoeur.com/reference/confi
 - **A repo strip** (the Code tab) with per-repo dirty counts, worktree nesting, and per-repo inline runners. Each repo gets vendor-neutral `main_ide`, `secondary_ide`, and `terminal` launcher buttons wired to your own commands via a fallback chain.
 - **A knowledge tree** (optional `knowledge/` sibling of `projects/`) rendered as a browsable tab — the right place for durable reference material that outlives any one project.
 - **Wikilinks** (`[[slug]]`) between items, resolved by short-slug match across the whole tree.
-- **A vendored PDF viewer** (Mozilla PDF.js) for `## Deliverables` — no OS handler involved, theme-aware toolbar.
+- **A vendored PDF viewer** (Mozilla PDF.js, minified) for `## Deliverables` — no OS handler involved, theme-aware toolbar.
+- **Fully offline**: every browser dependency (PDF.js, xterm.js, CodeMirror 6 with YAML + Markdown, Mermaid) is vendored under `src/condash/assets/vendor/` and served from `/vendor/…`. Minified-where-possible; no runtime fetch to a CDN.
 - **Fingerprinted auto-refresh** so edits made in your external editor surface in the dashboard within 5 seconds without flickering the page.
 
 All of it is thin — condash is a FastAPI + NiceGUI layer over a directory of Markdown files, and the design is mostly about keeping it that way as features accumulate.

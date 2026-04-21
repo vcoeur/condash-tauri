@@ -2,9 +2,9 @@
 
 Serves the dashboard shell at ``/`` (HTML rendered by :mod:`render`),
 favicons, and the vendored frontend libraries (Mozilla PDF.js, xterm.js,
-CodeMirror 6) under ``/vendor/<lib>/{rel_path}``. Each vendor route is a
-narrow read-only window into the package's ``assets/vendor/<lib>/`` tree
-with a regex-free traversal guard.
+CodeMirror 6, Mermaid) under ``/vendor/<lib>/{rel_path}``. Each vendor
+route is a narrow read-only window into the package's
+``assets/vendor/<lib>/`` tree with a regex-free traversal guard.
 """
 
 from __future__ import annotations
@@ -33,6 +33,10 @@ _PDFJS_MIME = {
 _XTERM_MIME = {
     ".js": "text/javascript",
     ".css": "text/css",
+}
+
+_MERMAID_MIME = {
+    ".js": "text/javascript",
 }
 
 
@@ -102,7 +106,12 @@ def build_router(state: AppState) -> APIRouter:
 
     @router.get("/vendor/codemirror/{rel_path:path}")
     def codemirror_asset(rel_path: str):
-        """Serve the vendored CodeMirror 6 IIFE bundle to the config modal."""
+        """Serve the vendored CodeMirror 6 IIFE bundle (config modal + note editor)."""
         return _serve_vendor("codemirror", rel_path)
+
+    @router.get("/vendor/mermaid/{rel_path:path}")
+    def mermaid_asset(rel_path: str):
+        """Serve the vendored Mermaid UMD bundle to the note preview modal."""
+        return _serve_vendor("mermaid", rel_path, _MERMAID_MIME)
 
     return router

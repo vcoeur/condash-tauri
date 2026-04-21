@@ -7,6 +7,7 @@ Built from the following packages (version pins in condash/Makefile):
   - @codemirror/commands
   - @codemirror/language
   - @codemirror/lang-yaml
+  - @codemirror/lang-markdown
   - @codemirror/theme-one-dark
 
 ======= codemirror LICENSE =======
