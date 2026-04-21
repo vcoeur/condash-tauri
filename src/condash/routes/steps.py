@@ -24,6 +24,17 @@ from ._common import error
 def build_router(state: AppState) -> APIRouter:
     router = APIRouter()
 
+    def _flush_items_cache() -> None:
+        """Drop the cached item list after a README mutation.
+
+        Explicit invalidation closes the race between the write and the
+        watchdog echo — in tests there is no observer, and in production
+        the observer's debounce window could otherwise serve a stale
+        fingerprint to an immediate ``/check-updates`` follow-up.
+        """
+        if state.cache is not None:
+            state.cache.invalidate_items()
+
     @router.post("/toggle")
     async def toggle(req: Request):
         data = await req.json()
@@ -33,6 +44,7 @@ def build_router(state: AppState) -> APIRouter:
         status = _toggle_checkbox(full, data.get("line", -1))
         if status is None:
             return error(400, "not a checkbox line")
+        _flush_items_cache()
         return {"ok": True, "status": status}
 
     @router.post("/remove-step")
@@ -42,6 +54,7 @@ def build_router(state: AppState) -> APIRouter:
         if not full:
             return error(400, "invalid path")
         if _remove_step(full, data.get("line", -1)):
+            _flush_items_cache()
             return {"ok": True}
         return error(400, "cannot remove")
 
@@ -55,6 +68,7 @@ def build_router(state: AppState) -> APIRouter:
         if not full:
             return error(400, "invalid path")
         if _edit_step(full, data.get("line", -1), text):
+            _flush_items_cache()
             return {"ok": True}
         return error(400, "cannot edit")
 
@@ -68,6 +82,7 @@ def build_router(state: AppState) -> APIRouter:
         if not full:
             return error(400, "invalid path")
         line = _add_step(full, text, data.get("section"))
+        _flush_items_cache()
         return {"ok": True, "line": line}
 
     @router.post("/set-priority")
@@ -78,6 +93,7 @@ def build_router(state: AppState) -> APIRouter:
             return error(400, "invalid path")
         priority = data.get("priority", "")
         if _set_priority(full, priority):
+            _flush_items_cache()
             return {"ok": True, "priority": priority}
         return error(400, "invalid priority")
 
@@ -89,6 +105,7 @@ def build_router(state: AppState) -> APIRouter:
             return error(400, "invalid path")
         order = data.get("order") or []
         if _reorder_all(full, order):
+            _flush_items_cache()
             return {"ok": True}
         return error(400, "cannot reorder")
 

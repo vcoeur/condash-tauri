@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .cache import WorkspaceCache
     from .config import CondashConfig
     from .context import RenderCtx
     from .events import EventBus
@@ -40,6 +41,7 @@ class AppState:
     ctx: RenderCtx | None = None
     event_bus: EventBus | None = None
     event_observer: object = None
+    cache: WorkspaceCache | None = None
     pty_sessions: dict[str, PtySession] = field(default_factory=dict)
     # leaf → expiry timestamp. A stamped leaf suppresses the next
     # watchdog-driven reload so POST /config doesn't echo its own save back.

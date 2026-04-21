@@ -18,8 +18,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from ..mutations import read_note_raw
 from ..parser import (
     _note_kind,
-    collect_items,
-    collect_knowledge,
     find_knowledge_card,
     find_knowledge_node,
 )
@@ -38,6 +36,8 @@ from ._common import error
 
 def build_router(state: AppState) -> APIRouter:
     router = APIRouter()
+    assert state.cache is not None, "state.cache must be initialised before routing"
+    cache = state.cache
 
     @router.get("/fragment", response_class=HTMLResponse)
     def fragment(id: str = ""):
@@ -58,7 +58,7 @@ def build_router(state: AppState) -> APIRouter:
             if len(parts) != 3:
                 return error(404, "not a card id")
             slug = parts[2]
-            for item in collect_items(ctx):
+            for item in cache.get_items(ctx):
                 if item["slug"] == slug:
                     return HTMLResponse(content=render_card_fragment(item))
             return error(404, "card not found")
@@ -77,7 +77,7 @@ def build_router(state: AppState) -> APIRouter:
                 return error(404, "repo not found")
             return HTMLResponse(content=html)
         if id.startswith("knowledge/"):
-            tree = collect_knowledge(ctx)
+            tree = cache.get_knowledge(ctx)
             # File cards have an extension (e.g. ".md"); directories do not.
             if id.endswith(".md"):
                 card = find_knowledge_card(tree, id)
@@ -96,7 +96,7 @@ def build_router(state: AppState) -> APIRouter:
         filenames. Returns a list of per-project hits shaped by
         :func:`search.search_items`. Empty query → ``[]``."""
         ctx = state.get_ctx()
-        items = collect_items(ctx)
+        items = cache.get_items(ctx)
         return JSONResponse(search_items(ctx, items, q))
 
     @router.get("/note")
@@ -105,7 +105,7 @@ def build_router(state: AppState) -> APIRouter:
         full = validate_note_path(ctx, path)
         if full is None:
             return Response(status_code=403)
-        return HTMLResponse(content=_render_note(ctx, full))
+        return HTMLResponse(content=_render_note(ctx, full, cache=cache))
 
     @router.get("/note-raw")
     def get_note_raw(path: str = ""):

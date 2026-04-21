@@ -18,8 +18,6 @@ from fastapi.responses import StreamingResponse
 from ..git_scan import _git_fingerprint, compute_git_node_fingerprints
 from ..parser import (
     _compute_fingerprint,
-    collect_items,
-    collect_knowledge,
     compute_knowledge_node_fingerprints,
     compute_project_node_fingerprints,
 )
@@ -28,12 +26,14 @@ from ..state import AppState
 
 def build_router(state: AppState) -> APIRouter:
     router = APIRouter()
+    assert state.cache is not None, "state.cache must be initialised before routing"
+    cache = state.cache
 
     @router.get("/check-updates")
     def check_updates():
         ctx = state.get_ctx()
-        items = collect_items(ctx)
-        knowledge = collect_knowledge(ctx)
+        items = cache.get_items(ctx)
+        knowledge = cache.get_knowledge(ctx)
         nodes: dict[str, str] = {}
         nodes.update(compute_project_node_fingerprints(items))
         nodes.update(compute_knowledge_node_fingerprints(knowledge))

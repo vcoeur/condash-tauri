@@ -38,6 +38,11 @@ def build_router(state: AppState) -> APIRouter:
             reason = result.get("reason", "create failed")
             status = 409 if "already exists" in reason else 400
             return JSONResponse(status_code=status, content=result)
+        # Flush the items cache so the next GET sees the new folder
+        # without waiting for the watchdog's debounce window — the
+        # round-trip is explicit here, not filesystem-observed.
+        if state.cache is not None:
+            state.cache.invalidate_items()
         return result
 
     return router

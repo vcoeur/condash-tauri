@@ -27,6 +27,13 @@ from ._common import error
 def build_router(state: AppState) -> APIRouter:
     router = APIRouter()
 
+    def _flush_items_cache() -> None:
+        """Drop cached items/wikilinks after a note write — parser walks
+        the item tree for the file list and wikilink resolutions point
+        at possibly-renamed targets."""
+        if state.cache is not None:
+            state.cache.invalidate_items()
+
     @router.post("/note")
     async def post_note(req: Request):
         """Atomically overwrite a note file with the editor's content."""
@@ -43,6 +50,7 @@ def build_router(state: AppState) -> APIRouter:
         result = write_note(full, content, data.get("expected_mtime"))
         if not result.get("ok"):
             return JSONResponse(status_code=409, content=result)
+        _flush_items_cache()
         return result
 
     @router.post("/note/rename")
@@ -57,6 +65,7 @@ def build_router(state: AppState) -> APIRouter:
         )
         if not result.get("ok"):
             return error(400, result.get("reason", "rename failed"))
+        _flush_items_cache()
         return result
 
     @router.post("/note/create")
@@ -72,6 +81,7 @@ def build_router(state: AppState) -> APIRouter:
         )
         if not result.get("ok"):
             return error(400, result.get("reason", "create failed"))
+        _flush_items_cache()
         return result
 
     @router.post("/note/mkdir")
@@ -87,6 +97,7 @@ def build_router(state: AppState) -> APIRouter:
         if not result.get("ok"):
             status = 409 if result.get("reason") == "exists" else 400
             return JSONResponse(status_code=status, content=result)
+        _flush_items_cache()
         return result
 
     @router.post("/note/upload")
@@ -113,6 +124,7 @@ def build_router(state: AppState) -> APIRouter:
         result = store_uploads(ctx, item_readme, subdir, uploads)
         if not result.get("ok"):
             return error(400, result.get("reason", "upload failed"))
+        _flush_items_cache()
         return result
 
     return router

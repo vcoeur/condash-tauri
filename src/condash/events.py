@@ -47,6 +47,7 @@ class EventBus:
 
     def __init__(self) -> None:
         self._subscribers: list[asyncio.Queue] = []
+        self._sync_subscribers: list[Callable[[dict], None]] = []
         self._lock = Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -66,6 +67,17 @@ class EventBus:
             except ValueError:
                 pass
 
+    def subscribe_sync(self, callback: Callable[[dict], None]) -> None:
+        """Register a synchronous callback invoked on every published event.
+
+        Sync subscribers run inline on the event loop thread (inside
+        ``_fanout``) before the asyncio queues are filled, so a cache
+        invalidator can flip cached state *before* SSE clients see the
+        event and re-poll ``/check-updates``.
+        """
+        with self._lock:
+            self._sync_subscribers.append(callback)
+
     def publish_threadsafe(self, payload: dict) -> None:
         loop = self._loop
         if loop is None or loop.is_closed():
@@ -75,6 +87,12 @@ class EventBus:
     def _fanout(self, payload: dict) -> None:
         with self._lock:
             subs = list(self._subscribers)
+            sync_subs = list(self._sync_subscribers)
+        for callback in sync_subs:
+            try:
+                callback(payload)
+            except Exception:
+                logger.exception("EventBus: sync subscriber raised")
         for queue in subs:
             try:
                 queue.put_nowait(payload)

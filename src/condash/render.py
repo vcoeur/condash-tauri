@@ -17,6 +17,7 @@ import subprocess
 from datetime import datetime
 from itertools import groupby
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import __version__
 from . import runners as runners_mod
@@ -29,6 +30,9 @@ from .parser import (
     collect_knowledge,
 )
 from .wikilinks import _preprocess_wikilinks
+
+if TYPE_CHECKING:
+    from .cache import WorkspaceCache
 
 log = logging.getLogger(__name__)
 
@@ -57,13 +61,13 @@ def _rewrite_img_src(html, note_dir_rel):
     return _IMG_SRC_RE.sub(sub, html)
 
 
-def _render_markdown(ctx: RenderCtx, full_path, note_dir_rel):
+def _render_markdown(ctx: RenderCtx, full_path, note_dir_rel, cache: WorkspaceCache | None = None):
     try:
         text = full_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         log.warning("render_markdown: could not read %s: %s", full_path, exc)
         return '<p class="note-error">Unable to read note.</p>'
-    text = _preprocess_wikilinks(ctx, text)
+    text = _preprocess_wikilinks(ctx, text, cache=cache)
     try:
         out = subprocess.run(
             ["pandoc", "--from=gfm", "--to=html", "--no-highlight"],
@@ -79,7 +83,7 @@ def _render_markdown(ctx: RenderCtx, full_path, note_dir_rel):
     return f'<pre class="note-raw">{h(text)}</pre>'
 
 
-def _render_note(ctx: RenderCtx, full_path: Path) -> str:
+def _render_note(ctx: RenderCtx, full_path: Path, cache: WorkspaceCache | None = None) -> str:
     """Dispatch preview rendering by file kind — see ``_note_kind``."""
     kind = _note_kind(full_path)
     try:
@@ -89,7 +93,7 @@ def _render_note(ctx: RenderCtx, full_path: Path) -> str:
     file_rel = str(full_path.relative_to(ctx.base_dir))
 
     if kind == "md":
-        return _render_markdown(ctx, full_path, note_dir_rel)
+        return _render_markdown(ctx, full_path, note_dir_rel, cache=cache)
 
     if kind == "pdf":
         # Mount point for the custom PDF.js viewer defined in dashboard.html.
@@ -1182,7 +1186,7 @@ def render_knowledge_group_fragment(node: dict) -> str:
     return _render_knowledge_group(node)
 
 
-def render_page(ctx: RenderCtx, items):
+def render_page(ctx: RenderCtx, items, cache: WorkspaceCache | None = None):
     """Load the HTML template and inject rendered cards."""
     all_items = sorted(
         items,
@@ -1217,7 +1221,7 @@ def render_page(ctx: RenderCtx, items):
     git_html = _render_git_repos(ctx, git_groups)
     count_repos = sum(len(repos) for _, repos in git_groups)
 
-    knowledge_root = collect_knowledge(ctx)
+    knowledge_root = cache.get_knowledge(ctx) if cache is not None else collect_knowledge(ctx)
     knowledge_html = _render_knowledge(knowledge_root)
     count_knowledge = knowledge_root["count"] if knowledge_root else 0
 

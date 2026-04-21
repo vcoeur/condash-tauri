@@ -25,6 +25,7 @@ from . import events as events_mod
 from . import pty as pty_mod
 from . import routes as routes_pkg
 from . import runners as runners_mod
+from .cache import WorkspaceCache
 from .clipboard import ClipboardBridge
 from .config import CondashConfig
 from .context import RenderCtx, build_ctx
@@ -37,7 +38,7 @@ log = logging.getLogger(__name__)
 # is called. Module-level so routes (defined inside the routes package)
 # can close over it, and tests can poke ``state.cfg`` / ``state.ctx``
 # directly.
-state = AppState(event_bus=events_mod.EventBus())
+state = AppState(event_bus=events_mod.EventBus(), cache=WorkspaceCache())
 
 
 def _ctx() -> RenderCtx:
@@ -88,6 +89,8 @@ def _reload_runtime_config_from_disk(leaf: str) -> None:
     new_ctx = build_ctx(new_cfg)
     state.cfg = new_cfg
     state.ctx = new_ctx
+    if state.cache is not None:
+        state.cache.invalidate_all()
     log.info("live config reload: %s applied", leaf)
 
 
@@ -175,6 +178,16 @@ def run(cfg: CondashConfig) -> None:
     """Launch the condash dashboard (native window or browser, per config)."""
     state.cfg = cfg
     state.ctx = build_ctx(cfg)
+    if state.cache is None:
+        state.cache = WorkspaceCache()
+    else:
+        state.cache.invalidate_all()
+    # Wire the cache as a sync subscriber on the event bus before the
+    # watcher starts — this way cache slices flip to stale in the same
+    # asyncio tick as the SSE fanout, so the client's follow-up
+    # ``/check-updates`` call reads from the refreshed cache rather than
+    # a racing stale snapshot.
+    state.event_bus.subscribe_sync(state.cache.on_event)
     _register_routes()
     # Filesystem → SSE bridge. The observer runs on its own worker
     # thread and publishes to the bus on state; /events streams from

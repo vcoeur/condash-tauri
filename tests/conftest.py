@@ -6,7 +6,23 @@ from pathlib import Path
 
 import pytest
 
+from condash import app as app_mod
 from condash.config import CondashConfig, OpenWithSlot
+
+
+@pytest.fixture(autouse=True)
+def _reset_workspace_cache():
+    """Flush the module-level WorkspaceCache between tests.
+
+    ``app_mod.state`` is a singleton reused across tests, so without a
+    flush the second test would see the first test's parsed items
+    instead of its own tmp-conception tree.
+    """
+    if app_mod.state.cache is not None:
+        app_mod.state.cache.invalidate_all()
+    yield
+    if app_mod.state.cache is not None:
+        app_mod.state.cache.invalidate_all()
 
 
 @pytest.fixture

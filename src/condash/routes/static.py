@@ -16,7 +16,6 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, Response
 
 from ..context import favicon_bytes
-from ..parser import collect_items
 from ..render import render_page
 from ..state import AppState
 
@@ -69,8 +68,9 @@ def build_router(state: AppState) -> APIRouter:
     @router.get("/", response_class=HTMLResponse)
     def index():
         ctx = state.get_ctx()
-        items = collect_items(ctx)
-        return HTMLResponse(content=render_page(ctx, items))
+        assert state.cache is not None
+        items = state.cache.get_items(ctx)
+        return HTMLResponse(content=render_page(ctx, items, cache=state.cache))
 
     @router.get("/favicon.svg")
     def favicon_svg():

@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import html as html_mod
 import re
+from typing import TYPE_CHECKING
 
 from .context import RenderCtx
+
+if TYPE_CHECKING:
+    from .cache import WorkspaceCache
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]\|\n]+?)(?:\|([^\]\n]+?))?\]\]")
 
@@ -46,8 +50,13 @@ def _find_item_dir(ctx: RenderCtx, target: str) -> str | None:
     return max(candidates)  # sorts by date thanks to the YYYY-MM[-DD] prefix
 
 
-def _resolve_wikilink(ctx: RenderCtx, target: str) -> str | None:
-    """Resolve a ``[[target]]`` to a conception-relative path, if it exists."""
+def _resolve_wikilink_uncached(ctx: RenderCtx, target: str) -> str | None:
+    """Resolve a ``[[target]]`` to a conception-relative path, if it exists.
+
+    This is the always-walk implementation. :class:`cache.WorkspaceCache`
+    wraps it with memoization; callers without a cache should prefer
+    :func:`_resolve_wikilink` so future caching layers can hook in.
+    """
     target = target.strip()
     if not target:
         return None
@@ -80,7 +89,16 @@ def _resolve_wikilink(ctx: RenderCtx, target: str) -> str | None:
     return None
 
 
-def _preprocess_wikilinks(ctx: RenderCtx, text: str) -> str:
+def _resolve_wikilink(
+    ctx: RenderCtx, target: str, cache: WorkspaceCache | None = None
+) -> str | None:
+    """Resolve a wikilink, using ``cache`` when supplied."""
+    if cache is not None:
+        return cache.resolve_wikilink(ctx, target)
+    return _resolve_wikilink_uncached(ctx, target)
+
+
+def _preprocess_wikilinks(ctx: RenderCtx, text: str, cache: WorkspaceCache | None = None) -> str:
     """Rewrite ``[[target]]`` / ``[[target|label]]`` into raw-HTML anchors."""
 
     def esc(s: str) -> str:
@@ -89,7 +107,7 @@ def _preprocess_wikilinks(ctx: RenderCtx, text: str) -> str:
     def repl(match: re.Match) -> str:
         target = match.group(1).strip()
         label = (match.group(2) or target).strip()
-        resolved = _resolve_wikilink(ctx, target)
+        resolved = _resolve_wikilink(ctx, target, cache=cache)
         if resolved:
             return (
                 f'<a class="wikilink" href="{esc(resolved)}" '
