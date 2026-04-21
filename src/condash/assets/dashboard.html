@@ -2102,7 +2102,7 @@ body[data-term-open="1"] #note-modal.note-modal-backdrop {
     </div>
     <div class="header-actions">
         <span id="reconnecting-pill" class="reconnecting-pill" hidden title="Lost connection to the dashboard backend — retrying…">Reconnecting…</span>
-        <button id="refresh-all-btn" class="theme-toggle" onclick="refreshAll()" title="Refresh everything (escape hatch — clears all dirty markers)" aria-label="Refresh everything">
+        <button id="refresh-all-btn" class="theme-toggle" onclick="refreshAll()" title="Hard refresh — clear cached state and re-scan from disk" aria-label="Hard refresh">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
                 <polyline points="1 20 1 14 7 14"/>
@@ -3375,12 +3375,25 @@ document.addEventListener('click', function(e) {
      after swap.
    Falls back to location.reload() on any error so the user never ends
    up looking at a half-swapped DOM. */
+var _reloadInPlaceInFlight = false;
+var _reloadInPlacePending = false;
 async function _reloadInPlace() {
-    // Phase 4: consume the shadow cache when present so a tab click
-    // that landed right after a background prefetch doesn't re-issue
-    // the same fetch. Any other path falls back to a live fetch.
-    var prefetched = _consumeShadowCache();
+    // Single-flight with trailing coalesce. Two _reloadInPlace calls
+    // racing (e.g. a rapid burst of SSE events) used to swap #dash-main
+    // twice — and if the responses completed out-of-order (request 1
+    // from an older server snapshot resolving after request 2 from a
+    // newer one), the older snapshot would land last and briefly render
+    // a card in no column / with a stale priority until the next poll
+    // fixed it. Queue a trailing run so the last caller's intent still
+    // executes, then coalesces. condash#14 (project vanishes after
+    // reload / file change).
+    if (_reloadInPlaceInFlight) { _reloadInPlacePending = true; return; }
+    _reloadInPlaceInFlight = true;
     try {
+        // Phase 4: consume the shadow cache when present so a tab click
+        // that landed right after a background prefetch doesn't re-issue
+        // the same fetch. Any other path falls back to a live fetch.
+        var prefetched = _consumeShadowCache();
         var html = prefetched;
         if (!html) {
             var res = await fetch('/', {cache: 'no-store'});
@@ -3398,9 +3411,22 @@ async function _reloadInPlace() {
             _pendingReloadInPlace = true;
             return;
         }
+        // A successful global swap is authoritative. Clear any residual
+        // dirty entries synchronously so the _renderStale inside
+        // switchTab (called from _rebindDashHandlers below) doesn't paint
+        // a dot based on ids the server just re-rendered for us. The
+        // async updateBaseline() that follows confirms the empty set
+        // against a fresh /check-updates. condash#14.
+        _dirtyNodes = new Set();
         _rebindDashHandlers();
     } catch (e) {
         location.reload();
+    } finally {
+        _reloadInPlaceInFlight = false;
+        if (_reloadInPlacePending) {
+            _reloadInPlacePending = false;
+            _reloadInPlace();
+        }
     }
 }
 
@@ -5596,11 +5622,21 @@ async function updateBaseline() {
     } catch (e) {}
 }
 
-/* Global refresh — escape hatch. Swaps #dash-main wholesale and clears
-   every dirty marker. Use when localized reload isn't enough (e.g. a
-   change the user hasn't localised, or a layout-level refresh is wanted). */
+/* Hard refresh — last-resort escape hatch. Throws away every piece of
+   client-side cached state (baseline, dirty set, shadow cache, pending
+   reloads) and does a full `location.reload()` so the browser re-parses
+   the page from scratch. Used when the soft in-place reload can't shake
+   the UI out of a bad state — e.g. a project rendered in no column, or a
+   stuck stale-dot on a tab. Tracked: condash#14. */
 function refreshAll() {
-    _reloadInPlace();
+    _nodeBaseline = null;
+    _dirtyNodes = new Set();
+    _shadowCache = null;
+    _pendingReloadNodes.clear();
+    _pendingReloadInPlace = false;
+    _lastFingerprint = null;
+    _lastGitFingerprint = null;
+    location.reload();
 }
 
 /* --- Local subtree reload ---
@@ -5843,15 +5879,26 @@ async function reloadNode(nodeId) {
         // so a per-key restore is needed after the swap.
         restoreNotesTreeState();
 
-        // Drop this node and all its descendants from the dirty set,
-        // then refresh the baseline hashes for those ids.
+        // Refresh baseline BEFORE dropping dirty entries: otherwise a
+        // checkUpdates poll landing in the await-gap below would compare
+        // the post-swap current hash against the pre-swap baseline, see
+        // a diff, re-add the id to _dirtyNodes, and strand the dot on
+        // the tab forever. Updating the baseline first means a racing
+        // poll sees baseline == current and short-circuits with no diff.
+        // condash#14 (stale tab-dot after tab-away-and-back).
+        await _refreshBaselineFor(nodeId);
         var prefix = nodeId + '/';
         var dropped = [];
         _dirtyNodes.forEach(function(id) {
             if (id === nodeId || id.indexOf(prefix) === 0) dropped.push(id);
         });
         dropped.forEach(function(id) { _dirtyNodes.delete(id); });
-        await _refreshBaselineFor(nodeId);
+        // The server-rendered fragment is always visible (no .hidden class).
+        // Re-apply the active subtab filter so a card whose priority falls
+        // outside the current subtab slides back into its proper hidden
+        // state — and one whose priority just entered the current subtab
+        // becomes visible.
+        if (_activeTab === 'projects') _applySubtab(_activeSubtab);
         _renderStale();
     } catch (e) {
         _reloadInPlace();
