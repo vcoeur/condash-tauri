@@ -37,8 +37,13 @@ dev-install: ## Install dev dependencies too
 run: ## Run the condash CLI (pass args after --, e.g. make run -- init)
 	uv run condash
 
-test: ## Run pytest
+test: ## Run the fast in-process pytest suite (skips tests/e2e/)
 	uv run pytest; RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi
+
+test-e2e: ## Run the Playwright browser smoke tests (uses system Chrome)
+	uv run --extra e2e pytest tests/e2e -v; RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi
+
+test-all: test test-e2e ## Run both suites
 
 coverage: ## Run pytest with line-coverage report
 	uv run pytest --cov=condash --cov-report=term-missing --cov-report=html
@@ -110,4 +115,4 @@ update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/code
 	echo "Vendored CodeMirror 6:"; \
 	du -sh "$$DEST"
 
-.PHONY: help install dev-install run test coverage lint format update-pdfjs update-codemirror
+.PHONY: help install dev-install run test test-e2e test-all coverage lint format update-pdfjs update-codemirror

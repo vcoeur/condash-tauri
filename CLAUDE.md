@@ -15,7 +15,8 @@ The name is a contraction of *conception dashboard*. The package distributes on 
 - Python 3.11+, `uv`-managed
 - Typer (CLI) + NiceGUI + FastAPI (routes on NiceGUI's embedded FastAPI instance) + pywebview[qt] (native window) + tomlkit (config round-trip preserving comments)
 - No ORM. `app.py` mixes sync (rendering + mutation helpers) and async (FastAPI routes + the WebSocket pty session) — sync helpers must not call `asyncio.run`; async handlers must not block on subprocess without `run_in_executor`.
-- Smoke test suite under `tests/` (CLI + FastAPI integration); run via `make test`.
+- Fast in-process smoke suite under `tests/` (CLI + FastAPI `TestClient`); run via `make test`.
+- Playwright browser-driven smoke suite under `tests/e2e/`; run via `make test-e2e` (uses system Chrome via `channel="chrome"`; override with `CONDASH_E2E_CHANNEL`). `make test-all` runs both.
 
 ## Architecture
 
@@ -64,8 +65,10 @@ We deliberately do **not** use `<iframe src="*.pdf">` with Chromium's built-in P
 ## Commands
 
 ```bash
-make dev-install                # uv sync --all-extras (install runtime + dev deps)
-make test                       # uv run pytest
+make dev-install                # uv sync --all-extras (install runtime + dev + e2e deps)
+make test                       # fast in-process pytest suite (tests/, skips tests/e2e/)
+make test-e2e                   # Playwright browser suite (tests/e2e/) against real condash subprocess
+make test-all                   # both suites
 make lint                       # uv run ruff check + format --check
 make format                     # uv run ruff check --fix + format
 make run                        # uv run condash (native window)

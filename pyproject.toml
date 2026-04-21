@@ -41,6 +41,9 @@ dev = [
     "ruff>=0.5",
     "httpx>=0.27",
 ]
+e2e = [
+    "playwright>=1.40",
+]
 
 [project.scripts]
 condash = "condash.cli:main"
@@ -61,6 +64,13 @@ include = [
     "LICENSE",
     "pyproject.toml",
 ]
+
+[tool.pytest.ini_options]
+# `make test` runs the fast in-process suite. The Playwright e2e tests live
+# under tests/e2e/ and run via `make test-e2e` (they need a real browser +
+# subprocess launch).
+testpaths = ["tests"]
+norecursedirs = ["tests/e2e"]
 
 [tool.ruff]
 line-length = 100
