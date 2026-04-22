@@ -5096,7 +5096,9 @@ Object.assign(window, {
     closeConfigModal, closeNewItemModal, closeAboutModal, closeNotePreview,
     toggleTheme, toggleTerminal, termNewTab, termNewLauncherTab,
     switchTab, switchSubtab, switchConfigTab, refreshAll, setNoteMode,
-    noteSearchStep, noteSearchClose, saveEdit, noteNavBack,
+    noteSearchStep, noteSearchRun, noteSearchClose, saveEdit, noteNavBack,
     jumpToProject, _openHistoryHit,
     _noteReconcileDismiss, _noteReconcileReload,
+    termDragStart, termSplitStart,
+    filterHistory, filterKnowledge, saveConfig, submitNewItem, _setDirty,
 });

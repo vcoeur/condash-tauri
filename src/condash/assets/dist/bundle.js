@@ -69,8 +69,37 @@ var Condash = (() => {
     if (el.type === "checkbox") el.checked = !!value;
     else el.value = value == null ? "" : value;
   }
+  function _getField(form, name) {
+    var el = form.elements[name];
+    if (!el) return null;
+    if (el.type === "checkbox") return el.checked;
+    if (el.type === "number") return el.value === "" ? 0 : Number(el.value);
+    return el.value;
+  }
+  function _linesToList(text) {
+    return (text || "").split("\n").map(function(s) {
+      return s.trim();
+    }).filter(function(s) {
+      return s.length;
+    });
+  }
   function _listToLines(list) {
     return (list || []).join("\n");
+  }
+  function _linesToRepos(text) {
+    return _linesToList(text).map(function(line) {
+      var idx = line.indexOf(":");
+      if (idx < 0) return { name: line, submodules: [] };
+      var name = line.slice(0, idx).trim();
+      var subs = line.slice(idx + 1).split(",").map(function(s) {
+        return s.trim();
+      }).filter(function(s) {
+        return s.length;
+      });
+      return { name, submodules: subs };
+    }).filter(function(entry) {
+      return entry.name.length;
+    });
   }
   function _reposToLines(entries) {
     return (entries || []).map(function(entry) {
@@ -86,6 +115,14 @@ var Condash = (() => {
     if (!container || !slot) return;
     container.querySelector('[data-field="label"]').value = slot.label || "";
     container.querySelector('[data-field="commands"]').value = _listToLines(slot.commands);
+  }
+  function _readSlotFields(form, slotKey) {
+    var container = form.querySelector('[data-slot="' + slotKey + '"]');
+    if (!container) return null;
+    return {
+      label: container.querySelector('[data-field="label"]').value || "",
+      commands: _linesToList(container.querySelector('[data-field="commands"]').value)
+    };
   }
   function switchConfigTab(name) {
     var tabs = document.querySelectorAll("#config-form .config-tab");
@@ -295,6 +332,12 @@ var Condash = (() => {
   function _deriveSlug(title) {
     return (title || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
+  function _newItemSubtab(status) {
+    if (status === "now" || status === "review") return "current";
+    if (status === "soon") return "next";
+    if (status === "done") return "done";
+    return "backlog";
+  }
   function openNewItemModal() {
     var modal = document.getElementById("new-item-modal");
     var form = document.getElementById("new-item-form");
@@ -345,6 +388,159 @@ var Condash = (() => {
       }
     });
   })();
+  async function submitNewItem(ev) {
+    ev.preventDefault();
+    var form = document.getElementById("new-item-form");
+    var errEl = document.getElementById("new-item-error");
+    errEl.style.display = "none";
+    var kind = (form.querySelector('input[name="kind"]:checked') || {}).value || "project";
+    var status = (form.querySelector('input[name="status"]:checked') || {}).value || "now";
+    var environment = (form.querySelector('input[name="environment"]:checked') || {}).value || "";
+    var severity = (form.querySelector('input[name="severity"]:checked') || {}).value || "";
+    var payload = {
+      kind,
+      status,
+      title: form.elements["title"].value.trim(),
+      slug: form.elements["slug"].value.trim(),
+      apps: (form.elements["apps"] || {}).value || "",
+      environment: kind === "incident" ? environment : "",
+      severity: kind === "incident" ? severity : "",
+      languages: kind === "document" ? (form.elements["languages"] || {}).value || "" : ""
+    };
+    var submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      var res = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      var data = {};
+      try {
+        data = await res.json();
+      } catch (e) {
+        data = {};
+      }
+      if (!res.ok || !data.ok) {
+        errEl.textContent = data.reason || "Create failed (HTTP " + res.status + ")";
+        errEl.style.display = "block";
+        return;
+      }
+      closeNewItemModal();
+      try {
+        switchTab("projects");
+      } catch (e) {
+      }
+      try {
+        switchSubtab(_newItemSubtab(status));
+      } catch (e) {
+      }
+      if (typeof refreshAll === "function") refreshAll();
+      var target = data.folder_name || data.slug;
+      setTimeout(function() {
+        _expandCardBySlug(target);
+      }, 500);
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+  function _expandCardBySlug(slug) {
+    if (!slug) return;
+    var cards = document.querySelectorAll(".card");
+    for (var i = 0; i < cards.length; i++) {
+      var c = cards[i];
+      if ((c.id || "").indexOf(slug) >= 0) {
+        c.classList.remove("collapsed");
+        c.scrollIntoView({ block: "start", behavior: "smooth" });
+        return;
+      }
+    }
+  }
+  async function saveConfig(ev) {
+    ev.preventDefault();
+    var form = document.getElementById("config-form");
+    var errEl = document.getElementById("config-error");
+    var warnEl = document.getElementById("config-restart-warning");
+    errEl.style.display = "none";
+    warnEl.style.display = "none";
+    var dirtyYaml = _getDirtyYamlFile();
+    if (dirtyYaml) {
+      try {
+        var yres = await fetch("/config/yaml", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(dirtyYaml)
+        });
+        var ybody = await yres.json().catch(function() {
+          return {};
+        });
+        if (!yres.ok) {
+          errEl.textContent = ybody.error || "HTTP " + yres.status;
+          errEl.style.display = "block";
+          return;
+        }
+        _loadTermShortcuts();
+        closeConfigModal();
+        setTimeout(_reloadInPlace, 200);
+        return;
+      } catch (e) {
+        errEl.textContent = "Save failed: " + e;
+        errEl.style.display = "block";
+        return;
+      }
+    }
+    var payload = {
+      conception_path: _getField(form, "conception_path"),
+      workspace_path: _getField(form, "workspace_path"),
+      worktrees_path: _getField(form, "worktrees_path"),
+      port: _getField(form, "port"),
+      native: _getField(form, "native"),
+      repositories_primary: _linesToRepos(form.elements["repositories_primary"].value),
+      repositories_secondary: _linesToRepos(form.elements["repositories_secondary"].value),
+      pdf_viewer: _linesToList(form.elements["pdf_viewer"].value),
+      terminal: {
+        shell: _getField(form, "terminal_shell"),
+        shortcut: _getField(form, "terminal_shortcut"),
+        screenshot_dir: _getField(form, "terminal_screenshot_dir"),
+        screenshot_paste_shortcut: _getField(form, "terminal_screenshot_paste_shortcut")
+      },
+      open_with: {
+        main_ide: _readSlotFields(form, "main_ide"),
+        secondary_ide: _readSlotFields(form, "secondary_ide"),
+        terminal: _readSlotFields(form, "terminal")
+      }
+    };
+    try {
+      var res = await fetch("/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      var body = await res.json().catch(function() {
+        return {};
+      });
+      if (!res.ok) {
+        errEl.textContent = body.error || "HTTP " + res.status;
+        errEl.style.display = "block";
+        return;
+      }
+      var restart = body && body.restart_required || [];
+      _loadTermShortcuts();
+      if (restart.length) {
+        warnEl.textContent = "Saved. The following changes need a condash restart to take effect: " + restart.join(", ") + ". Reloading\u2026";
+        warnEl.style.display = "block";
+      } else {
+        closeConfigModal();
+      }
+      var refresh = restart.length ? function() {
+        location.reload();
+      } : _reloadInPlace;
+      setTimeout(refresh, restart.length ? 1500 : 200);
+    } catch (e) {
+      errEl.textContent = "Save failed: " + e;
+      errEl.style.display = "block";
+    }
+  }
   async function openPath(ev, path, tool) {
     ev.stopPropagation();
     var btn = ev.currentTarget;
@@ -3460,7 +3656,62 @@ var Condash = (() => {
   window.addEventListener("resize", function() {
     _termSendResizeAll();
   });
+  var _termSplitDrag = null;
+  function termSplitStart(ev) {
+    var body = document.querySelector(".term-body");
+    var leftEl = _termSideEl("left", "side");
+    var rightEl = _termSideEl("right", "side");
+    _termSplitDrag = {
+      startX: ev.clientX,
+      totalW: body.clientWidth,
+      leftW: leftEl.offsetWidth,
+      leftEl,
+      rightEl
+    };
+    document.addEventListener("mousemove", _termSplitMove);
+    document.addEventListener("mouseup", _termSplitEnd);
+    ev.preventDefault();
+  }
+  function _termSplitMove(ev) {
+    if (!_termSplitDrag) return;
+    var d = _termSplitDrag;
+    var dx = ev.clientX - d.startX;
+    var newLeft = Math.max(d.totalW * 0.15, Math.min(d.totalW * 0.85, d.leftW + dx));
+    var leftRatio = newLeft / d.totalW;
+    d.leftEl.style.flex = leftRatio + " 1 0";
+    d.rightEl.style.flex = 1 - leftRatio + " 1 0";
+  }
+  function _termSplitEnd() {
+    document.removeEventListener("mousemove", _termSplitMove);
+    document.removeEventListener("mouseup", _termSplitEnd);
+    if (!_termSplitDrag) return;
+    var leftRatio = _termSplitDrag.leftEl.offsetWidth / _termSplitDrag.totalW;
+    localStorage.setItem("term-split-ratio", String(leftRatio.toFixed(3)));
+    _termSplitDrag = null;
+    _termSendResizeAll();
+  }
   var _termDrag = null;
+  function termDragStart(ev) {
+    _termDrag = { startY: ev.clientY, startH: document.getElementById("term-pane").offsetHeight };
+    document.addEventListener("mousemove", _termDragMove);
+    document.addEventListener("mouseup", _termDragEnd);
+    ev.preventDefault();
+  }
+  function _termDragMove(ev) {
+    if (!_termDrag) return;
+    var dy = _termDrag.startY - ev.clientY;
+    var h = Math.max(140, Math.min(window.innerHeight - 80, _termDrag.startH + dy));
+    document.documentElement.style.setProperty("--term-height", h + "px");
+  }
+  function _termDragEnd() {
+    document.removeEventListener("mousemove", _termDragMove);
+    document.removeEventListener("mouseup", _termDragEnd);
+    if (!_termDrag) return;
+    _termDrag = null;
+    var h = document.getElementById("term-pane").offsetHeight;
+    localStorage.setItem("term-height", h + "px");
+    _termSendResizeAll();
+  }
   function _parseShortcut(spec) {
     if (!spec || typeof spec !== "string") return null;
     var parts = spec.split("+").map(function(s) {
@@ -4161,13 +4412,21 @@ var Condash = (() => {
     refreshAll,
     setNoteMode,
     noteSearchStep,
+    noteSearchRun,
     noteSearchClose,
     saveEdit,
     noteNavBack,
     jumpToProject,
     _openHistoryHit,
     _noteReconcileDismiss,
-    _noteReconcileReload
+    _noteReconcileReload,
+    termDragStart,
+    termSplitStart,
+    filterHistory,
+    filterKnowledge,
+    saveConfig,
+    submitNewItem,
+    _setDirty
   });
 
   // src/condash/assets/src/js/cm6-mount.js
