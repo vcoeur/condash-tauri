@@ -15,8 +15,24 @@ use anyhow::{Context, Result};
 use condash_lib::{assets, build_ctx_for_bin, load_template_for_bin, resolve_conception_path};
 use condash_state::WorkspaceCache;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // Scrub AppImage-injected env vars before tokio spawns any worker
+    // thread — worker threads inherit the process env, and once they
+    // exist we can't mutate env safely. See env_hygiene.rs.
+    #[cfg(target_os = "linux")]
+    condash_lib::env_hygiene::scrub_appimage_leaks();
+
+    // Hand off to the async body on a runtime we build ourselves so
+    // the scrub above is guaranteed to happen before any tokio thread
+    // starts.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     // Headless binary: env var → ~/.config/condash/settings.yaml →
     // hard error. No folder picker, no hard-coded default.
     let conception_path = resolve_conception_path().map_err(|e| anyhow::anyhow!("{e}"))?;

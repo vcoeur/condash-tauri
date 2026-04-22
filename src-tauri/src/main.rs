@@ -3,6 +3,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // Strip AppImageKit AppRun's env-var injections before anything else
+    // runs — any thread spawn or Command::new after this point would
+    // inherit the contaminated env. See env_hygiene.rs for the full
+    // rationale.
+    #[cfg(target_os = "linux")]
+    condash_lib::env_hygiene::scrub_appimage_leaks();
+
     // Linux rendering hygiene — both fixes must run before any GTK
     // init, i.e. before tauri::Builder touches wry.
     #[cfg(target_os = "linux")]

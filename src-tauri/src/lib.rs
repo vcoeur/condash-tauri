@@ -14,6 +14,7 @@ use tauri::Manager;
 
 pub mod assets;
 pub mod config;
+pub mod env_hygiene;
 pub mod events;
 pub mod openers;
 pub mod paths;
