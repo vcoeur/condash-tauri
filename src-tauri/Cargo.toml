@@ -1,7 +1,7 @@
 [package]
 name = "condash"
-version = "1.0.3"
-description = "Conception dashboard — Tauri port (Phase 0 scaffold)"
+version = "1.0.4"
+description = "A dashboard for the Markdown you already write."
 authors = ["Alice Voland <alice@vcoeur.com>"]
 license = "MIT"
 edition = "2021"
