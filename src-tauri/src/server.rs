@@ -68,7 +68,6 @@
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -108,11 +107,13 @@ use tokio::net::TcpListener as TokioTcpListener;
 pub struct AppState {
     pub ctx: Arc<RenderCtx>,
     pub cache: Arc<WorkspaceCache>,
-    /// On-disk directory containing `dashboard.html`, `favicon.svg`,
-    /// `dist/`, and `vendor/`. Dev builds point at the Python package
-    /// tree; production builds would bundle this via `rust-embed`
-    /// (Phase 5 work).
-    pub asset_dir: Arc<PathBuf>,
+    /// Source of the dashboard shell (`dashboard.html`),
+    /// `favicon.{svg,ico}`, `dist/`, and `vendor/`. Production binaries
+    /// use [`assets::AssetSource::Embedded`]; dev runs can flip to
+    /// [`assets::AssetSource::Disk`] via the `CONDASH_ASSET_DIR` env
+    /// var. Phase 5 step 1 landed the embedded variant so the binary
+    /// is self-contained.
+    pub assets: crate::assets::AssetSource,
     /// Version string stamped into the dashboard shell at `{{VERSION}}`.
     pub version: Arc<String>,
     /// Fan-out for filesystem-driven staleness events. Cloneable — each
@@ -1315,36 +1316,48 @@ async fn search_history(
 }
 
 async fn favicon_svg(State(state): State<AppState>) -> impl IntoResponse {
-    serve_fixed(&state.asset_dir.join("favicon.svg"), "image/svg+xml")
+    serve_embedded(&state.assets, "favicon.svg")
 }
 
 async fn favicon_ico(State(state): State<AppState>) -> impl IntoResponse {
     // Python serves the SVG for .ico too — the Tauri webview accepts
     // it as a window icon without complaint.
-    serve_fixed(&state.asset_dir.join("favicon.svg"), "image/svg+xml")
+    serve_embedded(&state.assets, "favicon.svg")
 }
 
 async fn vendor_asset(
     State(state): State<AppState>,
     axum::extract::Path(rel_path): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    serve_under(&state.asset_dir.join("vendor"), &rel_path, None)
+    serve_embedded(&state.assets, &format!("vendor/{rel_path}"))
 }
 
 async fn dist_asset(
     State(state): State<AppState>,
     axum::extract::Path(rel_path): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    let mime = match std::path::Path::new(&rel_path)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        Some("js") => Some("text/javascript"),
-        Some("css") => Some("text/css"),
-        Some("map") => Some("application/json"),
-        _ => None,
-    };
-    serve_under(&state.asset_dir.join("dist"), &rel_path, mime)
+    serve_embedded(&state.assets, &format!("dist/{rel_path}"))
+}
+
+/// Serve a file from the [`assets::AssetSource`] — embedded or on-disk.
+/// Same traversal guards + caching headers the old `serve_fixed`
+/// applied; differs only in the byte source.
+fn serve_embedded(source: &crate::assets::AssetSource, rel_path: &str) -> Response {
+    match source.load(rel_path) {
+        Some((bytes, mime)) => {
+            let mime = mime
+                .parse::<HeaderValue>()
+                .ok()
+                .unwrap_or_else(|| HeaderValue::from_static("application/octet-stream"));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, mime)
+                .header(header::CACHE_CONTROL, "public, max-age=86400")
+                .body(Body::from(bytes.into_owned()))
+                .unwrap()
+        }
+        None => error(StatusCode::NOT_FOUND, "no such asset"),
+    }
 }
 
 async fn conception_asset(

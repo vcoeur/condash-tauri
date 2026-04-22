@@ -83,10 +83,7 @@ struct OpenWithSlotYaml {
 /// into `ctx.template`. The template itself lives next to the Python
 /// package's `assets/` directory; `template_path` points the loader at
 /// it explicitly so the Tauri binary can be launched from anywhere.
-pub fn build_ctx(conception_path: &Path, template_path: &Path) -> Result<RenderCtx> {
-    let template = fs::read_to_string(template_path)
-        .with_context(|| format!("reading dashboard template at {}", template_path.display()))?;
-
+pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> {
     let yaml_path = conception_path.join("config").join("repositories.yml");
     let mut ctx = RenderCtx {
         base_dir: conception_path.to_path_buf(),

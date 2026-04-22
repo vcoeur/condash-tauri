@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use condash_lib::{build_ctx_for_bin, resolve_asset_dir_for_bin};
+use condash_lib::{assets, build_ctx_for_bin, load_template_for_bin};
 use condash_state::WorkspaceCache;
 
 #[tokio::main]
@@ -25,10 +25,10 @@ async fn main() -> Result<()> {
             PathBuf::from(home).join("src/vcoeur/conception")
         }
     };
-    let asset_dir = resolve_asset_dir_for_bin();
-    let template_path = asset_dir.join("dashboard.html");
+    let asset_source = assets::pick_from_env();
+    let template = load_template_for_bin(&asset_source)?;
 
-    let ctx = Arc::new(build_ctx_for_bin(&conception_path, &template_path)?);
+    let ctx = Arc::new(build_ctx_for_bin(&conception_path, template)?);
     let cache = Arc::new(WorkspaceCache::new());
     // Synchronous warm-up: the first HTTP hit pays the cost anyway, and
     // warming here makes the first request fast.
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
     let state = condash_lib::server::AppState {
         ctx,
         cache,
-        asset_dir: Arc::new(asset_dir),
+        assets: asset_source,
         version: Arc::new(env!("CARGO_PKG_VERSION").to_string()),
         event_bus,
         pty_registry: condash_lib::pty::PtyRegistry::new(),

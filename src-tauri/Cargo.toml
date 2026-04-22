@@ -27,6 +27,8 @@ serde_yaml_ng = "0.10"
 axum = { version = "0.8", features = ["multipart", "ws"] }
 portable-pty = "0.8"
 rand = "0.8"
+rust-embed = { version = "8", features = ["mime-guess"] }
+mime_guess = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
 tower-http = { version = "0.6", features = ["fs"] }
 notify = "8"

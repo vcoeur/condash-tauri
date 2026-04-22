@@ -35,7 +35,7 @@ fn harness_with(initial: &str) -> Harness {
     let state = AppState {
         ctx,
         cache,
-        asset_dir: Arc::new(PathBuf::from("/nonexistent")),
+        assets: condash_lib::assets::AssetSource::Embedded,
         version: Arc::new("test".into()),
         event_bus: condash_lib::events::EventBus::default(),
         pty_registry: condash_lib::pty::PtyRegistry::new(),

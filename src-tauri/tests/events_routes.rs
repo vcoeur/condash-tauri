@@ -28,7 +28,7 @@ fn state_with_bus() -> (TempDir, AppState, EventBus) {
     let state = AppState {
         ctx,
         cache,
-        asset_dir: Arc::new(PathBuf::from("/nonexistent")),
+        assets: condash_lib::assets::AssetSource::Embedded,
         version: Arc::new("test".into()),
         event_bus: bus.clone(),
         pty_registry: condash_lib::pty::PtyRegistry::new(),

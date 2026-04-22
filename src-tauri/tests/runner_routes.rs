@@ -52,7 +52,7 @@ fn harness_with(templates: Vec<(&str, &str)>) -> Harness {
     let state = AppState {
         ctx: Arc::new(ctx),
         cache: Arc::new(WorkspaceCache::new()),
-        asset_dir: Arc::new(PathBuf::from("/nonexistent")),
+        assets: condash_lib::assets::AssetSource::Embedded,
         version: Arc::new("test".into()),
         event_bus: EventBus::default(),
         pty_registry: PtyRegistry::new(),

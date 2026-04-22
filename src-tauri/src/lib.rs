@@ -12,6 +12,7 @@ use std::sync::Arc;
 use condash_state::WorkspaceCache;
 use tauri::Manager;
 
+pub mod assets;
 pub mod config;
 pub mod events;
 pub mod paths;
@@ -23,33 +24,37 @@ pub mod server;
 /// and asset resolution the Tauri host uses).
 pub use config::build_ctx as build_ctx_for_bin;
 
-pub fn resolve_asset_dir_for_bin() -> PathBuf {
-    resolve_asset_dir()
-}
-
 /// Environment variable the dev build reads to locate the conception
 /// tree. Production builds will ship a richer config layer (Phase 5).
 const CONCEPTION_ENV: &str = "CONDASH_CONCEPTION_PATH";
 
-/// Environment variable that overrides the on-disk `assets/` directory.
-/// Defaults to the path baked in at build time so `cargo tauri dev` out
-/// of the worktree Just Works.
-const ASSET_DIR_ENV: &str = "CONDASH_ASSET_DIR";
-
-/// Compile-time default asset dir — resolved from the src-tauri crate
-/// manifest, so a binary built from `cargo tauri dev` can locate
-/// `dashboard.html` + `favicon.svg` + `dist/` + `vendor/` without
-/// needing rust-embed (that's Phase 5 packaging work).
-const DEFAULT_ASSET_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/condash/assets");
+/// Load the dashboard HTML template from the configured asset source.
+/// Fails loudly when it's missing — the dashboard is unusable without
+/// it, and the embedded variant ships it unconditionally, so a failure
+/// here signals a bad `CONDASH_ASSET_DIR` override.
+pub fn load_template_for_bin(source: &assets::AssetSource) -> anyhow::Result<String> {
+    let (bytes, _mime) = source.load("dashboard.html").ok_or_else(|| {
+        anyhow::anyhow!(
+            "asset 'dashboard.html' missing from {:?}",
+            source
+                .disk_root()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "embedded".into()),
+        )
+    })?;
+    Ok(String::from_utf8(bytes.into_owned())
+        .map_err(|e| anyhow::anyhow!("dashboard.html is not valid UTF-8: {e}"))?)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let conception_path = resolve_conception_path()?;
-            let asset_dir = resolve_asset_dir();
-            let template_path = asset_dir.join("dashboard.html");
-            let ctx = config::build_ctx(&conception_path, &template_path)
+            let asset_source = assets::pick_from_env();
+            let template =
+                load_template_for_bin(&asset_source).map_err(|e| format!("load template: {e}"))?;
+            let ctx = config::build_ctx(&conception_path, template)
                 .map_err(|e| format!("build_ctx: {e}"))?;
             let ctx = Arc::new(ctx);
 
@@ -69,7 +74,7 @@ pub fn run() {
             let state = server::AppState {
                 ctx: ctx.clone(),
                 cache,
-                asset_dir: Arc::new(asset_dir),
+                assets: asset_source,
                 version: Arc::new(env!("CARGO_PKG_VERSION").to_string()),
                 event_bus: event_bus.clone(),
                 pty_registry: pty_registry.clone(),
@@ -130,11 +135,4 @@ fn resolve_conception_path() -> Result<PathBuf, String> {
             "no conception path configured. Set {CONCEPTION_ENV} or ensure ~/src/vcoeur/conception exists."
         )),
     }
-}
-
-fn resolve_asset_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os(ASSET_DIR_ENV) {
-        return PathBuf::from(dir);
-    }
-    PathBuf::from(DEFAULT_ASSET_DIR)
 }
