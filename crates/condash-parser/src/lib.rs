@@ -14,6 +14,7 @@
 
 pub mod collect;
 pub mod deliverables;
+pub mod fingerprint;
 pub mod knowledge;
 pub mod note_kind;
 pub mod readme;
@@ -23,6 +24,10 @@ pub mod tree;
 
 pub use collect::{collect_items, parse_readme, Item};
 pub use deliverables::{parse_deliverables, Deliverable};
+pub use fingerprint::{
+    compute_fingerprint, compute_knowledge_node_fingerprints, compute_project_node_fingerprints,
+    hash, PyValue,
+};
 pub use knowledge::{
     collect_knowledge, collect_tree, find_card, find_node, knowledge_title_and_desc, KnowledgeCard,
     KnowledgeNode,

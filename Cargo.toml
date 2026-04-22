@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "src-tauri",
     "crates/condash-parser",
+    "crates/condash-state",
 ]
 
 # Lints live at the workspace level so every member crate inherits them

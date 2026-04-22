@@ -14,7 +14,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use condash_parser::{collect_items, collect_knowledge, parse_readme};
+use condash_parser::{
+    collect_items, collect_knowledge, compute_fingerprint, compute_knowledge_node_fingerprints,
+    compute_project_node_fingerprints, parse_readme,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -31,6 +34,7 @@ struct Args {
 enum Mode {
     PerReadme,
     Collect,
+    Fingerprints,
 }
 
 fn parse_args() -> Args {
@@ -51,6 +55,7 @@ fn parse_args() -> Args {
                 mode = match v.as_str() {
                     "per-readme" => Mode::PerReadme,
                     "collect" => Mode::Collect,
+                    "fingerprints" => Mode::Fingerprints,
                     _ => {
                         eprintln!("unknown mode: {v}");
                         std::process::exit(2);
@@ -166,35 +171,6 @@ fn run_python_per_readme(
     Ok(map)
 }
 
-/// Spawn the Python driver in `collect` mode, wait for the single JSON
-/// document on stdout.
-fn run_python_collect(
-    python: &str,
-    driver: &Path,
-    condash_src: &Path,
-    base_dir: &Path,
-) -> std::io::Result<Value> {
-    let output = Command::new(python)
-        .arg(driver)
-        .arg("--condash-src")
-        .arg(condash_src)
-        .arg("--base-dir")
-        .arg(base_dir)
-        .arg("--mode")
-        .arg("collect")
-        .stderr(Stdio::inherit())
-        .output()?;
-    if !output.status.success() {
-        return Err(std::io::Error::other(format!(
-            "python driver exited with {}",
-            output.status
-        )));
-    }
-    let parsed: Value = serde_json::from_slice(&output.stdout)
-        .unwrap_or_else(|e| panic!("driver emitted malformed JSON: {e}"));
-    Ok(parsed)
-}
-
 fn parse_in_rust(path: &Path, base_dir: &Path) -> (String, Option<Value>) {
     let rel = path
         .strip_prefix(base_dir)
@@ -262,11 +238,12 @@ fn run_per_readme(args: &Args) -> i32 {
 fn run_collect(args: &Args) -> i32 {
     eprintln!("diff(collect): running collect_items + collect_knowledge");
 
-    let py = run_python_collect(
+    let py = run_python_single_mode(
         &args.python,
         &args.driver,
         &args.condash_src,
         &args.conception,
+        "collect",
     )
     .expect("python driver failed");
 
@@ -314,11 +291,159 @@ fn run_collect(args: &Args) -> i32 {
     }
 }
 
+fn run_python_single_mode(
+    python: &str,
+    driver: &Path,
+    condash_src: &Path,
+    base_dir: &Path,
+    mode: &str,
+) -> std::io::Result<Value> {
+    let output = Command::new(python)
+        .arg(driver)
+        .arg("--condash-src")
+        .arg(condash_src)
+        .arg("--base-dir")
+        .arg(base_dir)
+        .arg("--mode")
+        .arg(mode)
+        .stderr(Stdio::inherit())
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "python driver exited with {}",
+            output.status
+        )));
+    }
+    let parsed: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|e| panic!("driver emitted malformed JSON: {e}"));
+    Ok(parsed)
+}
+
+fn run_fingerprints(args: &Args) -> i32 {
+    eprintln!("diff(fingerprints): running compute_fingerprint + compute_*_node_fingerprints");
+
+    let py = run_python_single_mode(
+        &args.python,
+        &args.driver,
+        &args.condash_src,
+        &args.conception,
+        "fingerprints",
+    )
+    .expect("python driver failed");
+
+    let items = collect_items(&args.conception);
+    let knowledge = collect_knowledge(&args.conception);
+    let overall = compute_fingerprint(&items);
+    let project_nodes = compute_project_node_fingerprints(&items);
+    let knowledge_nodes = compute_knowledge_node_fingerprints(knowledge.as_ref());
+
+    let mut failed = false;
+
+    match py.get("overall").and_then(|v| v.as_str()) {
+        Some(py_overall) if py_overall == overall => {
+            eprintln!("  overall: OK ({overall})");
+        }
+        Some(py_overall) => {
+            failed = true;
+            eprintln!("  overall: MISMATCH — py={py_overall} rs={overall}");
+        }
+        None => {
+            failed = true;
+            eprintln!("  overall: missing from Python output");
+        }
+    }
+
+    let py_project = py
+        .get("project_nodes")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let mut project_mismatches = 0usize;
+    let mut project_only_rs = 0usize;
+    for (k, v) in &project_nodes {
+        match py_project.get(k).and_then(|pv| pv.as_str()) {
+            Some(pv) if pv == v => {}
+            Some(pv) => {
+                project_mismatches += 1;
+                eprintln!("    project_nodes[{k}]: MISMATCH py={pv} rs={v}");
+            }
+            None => {
+                project_only_rs += 1;
+                eprintln!("    project_nodes[{k}]: ONLY-RS rs={v}");
+            }
+        }
+    }
+    let mut project_only_py = 0usize;
+    for k in py_project.keys() {
+        if !project_nodes.contains_key(k) {
+            project_only_py += 1;
+            eprintln!(
+                "    project_nodes[{k}]: ONLY-PY py={}",
+                py_project.get(k).and_then(|v| v.as_str()).unwrap_or("?")
+            );
+        }
+    }
+    if project_mismatches == 0 && project_only_rs == 0 && project_only_py == 0 {
+        eprintln!(
+            "  project_nodes: OK ({} entries match)",
+            project_nodes.len()
+        );
+    } else {
+        failed = true;
+    }
+
+    let py_knowledge = py
+        .get("knowledge_nodes")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let mut k_mismatches = 0usize;
+    let mut k_only_rs = 0usize;
+    for (k, v) in &knowledge_nodes {
+        match py_knowledge.get(k).and_then(|pv| pv.as_str()) {
+            Some(pv) if pv == v => {}
+            Some(pv) => {
+                k_mismatches += 1;
+                eprintln!("    knowledge_nodes[{k}]: MISMATCH py={pv} rs={v}");
+            }
+            None => {
+                k_only_rs += 1;
+                eprintln!("    knowledge_nodes[{k}]: ONLY-RS rs={v}");
+            }
+        }
+    }
+    let mut k_only_py = 0usize;
+    for k in py_knowledge.keys() {
+        if !knowledge_nodes.contains_key(k) {
+            k_only_py += 1;
+            eprintln!(
+                "    knowledge_nodes[{k}]: ONLY-PY py={}",
+                py_knowledge.get(k).and_then(|v| v.as_str()).unwrap_or("?")
+            );
+        }
+    }
+    if k_mismatches == 0 && k_only_rs == 0 && k_only_py == 0 {
+        eprintln!(
+            "  knowledge_nodes: OK ({} entries match)",
+            knowledge_nodes.len()
+        );
+    } else {
+        failed = true;
+    }
+
+    if failed {
+        1
+    } else {
+        0
+    }
+}
+
 fn main() {
     let args = parse_args();
     let code = match args.mode {
         Mode::PerReadme => run_per_readme(&args),
         Mode::Collect => run_collect(&args),
+        Mode::Fingerprints => run_fingerprints(&args),
     };
     std::process::exit(code);
 }

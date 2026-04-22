@@ -1,0 +1,17 @@
+[package]
+name = "condash-state"
+version = "0.1.0"
+description = "Runtime context + workspace cache for condash. Rust port of context.py + cache.py."
+authors = ["Alice Voland <alice@vcoeur.com>"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[dependencies]
+condash-parser = { path = "../condash-parser" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

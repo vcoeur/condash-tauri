@@ -78,21 +78,67 @@ def _run_collect(condash_src: str, base_dir: Path) -> int:
     return 0
 
 
+def _run_fingerprints(condash_src: str, base_dir: Path) -> int:
+    """Emit {overall, project_nodes, knowledge_nodes} for fingerprint diff.
+
+    Python's fingerprint helpers all hash ``repr(data)`` bytes via MD5
+    truncated to 16 hex chars. The Rust port reproduces Python's
+    ``repr`` output verbatim for the limited value universe in use here
+    (tuples, strings, ints). This mode lets the diff harness confirm
+    the two sides emit byte-identical fingerprint dicts against the
+    live corpus.
+    """
+    ctx = _build_ctx(condash_src, base_dir)
+    from condash.parser import (  # noqa: E402
+        _compute_fingerprint,
+        collect_items,
+        collect_knowledge,
+        compute_knowledge_node_fingerprints,
+        compute_project_node_fingerprints,
+    )
+
+    items = collect_items(ctx)
+    knowledge = collect_knowledge(ctx)
+    out = {
+        "overall": _compute_fingerprint(items),
+        "project_nodes": compute_project_node_fingerprints(items),
+        "knowledge_nodes": compute_knowledge_node_fingerprints(knowledge),
+    }
+    json.dump(out, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    print(
+        (
+            f"driver: fingerprints overall={out['overall']}"
+            f" project_nodes={len(out['project_nodes'])}"
+            f" knowledge_nodes={len(out['knowledge_nodes'])}"
+        ),
+        file=sys.stderr,
+    )
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--condash-src", required=True, help="path to condash's src/ directory")
     ap.add_argument("--base-dir", required=True, help="conception base_dir for RenderCtx")
     ap.add_argument(
         "--mode",
-        choices=("per-readme", "collect"),
+        choices=("per-readme", "collect", "fingerprints"),
         default="per-readme",
-        help="per-readme = stream one {path,data} per line; collect = emit a single {items,knowledge} doc",
+        help=(
+            "per-readme = stream one {path,data} per line; "
+            "collect = emit a single {items,knowledge} doc; "
+            "fingerprints = emit {overall, project_nodes, knowledge_nodes} hashes"
+        ),
     )
     args = ap.parse_args()
 
     base_dir = Path(args.base_dir).resolve()
     if args.mode == "collect":
         return _run_collect(args.condash_src, base_dir)
+    if args.mode == "fingerprints":
+        return _run_fingerprints(args.condash_src, base_dir)
     return _run_per_readme(args.condash_src, base_dir)
 
 
