@@ -209,6 +209,13 @@ jobs:
           if [ -f "${HERE}/apprun-hooks/linuxdeploy-plugin-gtk.sh" ]; then
               . "${HERE}/apprun-hooks/linuxdeploy-plugin-gtk.sh"
           fi
+          # chdir into $APPDIR/usr so the bundled libwebkit2gtk-4.1's
+          # relative LIBEXECDIR resolves: WebKit spawns its helper as
+          # "./lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitNetworkProcess"
+          # and dies with "No such file or directory" if CWD is the
+          # directory the user launched the AppImage from. The stock
+          # AppImageKit AppRun.wrapped we replaced did this chdir too.
+          cd "${HERE}/usr"
           exec "${HERE}/usr/bin/condash" "$@"
           SH
           chmod +x "$WORK/squashfs-root/AppRun"
