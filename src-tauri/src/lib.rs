@@ -13,6 +13,7 @@ use condash_state::WorkspaceCache;
 use tauri::Manager;
 
 pub mod config;
+pub mod paths;
 pub mod server;
 
 /// Re-exports for the standalone `condash-serve` binary (same config

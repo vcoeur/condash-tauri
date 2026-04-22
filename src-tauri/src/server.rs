@@ -18,9 +18,19 @@
 //! - `GET /asset/<path>` — any file under the conception tree
 //!   (notes, deliverables, file-tree previews)
 //!
+//! Phase 3 slice 2 added the step-mutation surface:
+//!
+//! - `POST /toggle`         — flip one checkbox's state
+//! - `POST /add-step`       — insert a new `- [ ]` line
+//! - `POST /remove-step`    — drop a checkbox line
+//! - `POST /edit-step`      — rewrite a checkbox's body
+//! - `POST /set-priority`   — update the `**Status**` metadata line
+//! - `POST /reorder-all`    — shuffle checkboxes within their section
+//!
 //! Routes *not* ported here (Phase 3+ territory): `/events` (SSE),
-//! `/note`, `/note-raw`, all mutations (`/add-step`, `/update`, …),
-//! runners (`/ws/runner/…`), terminal WebSockets.
+//! `/note`, `/note-raw`, file-level mutations (`/update`, `/rename`,
+//! `/create-note`, `/create-item`, uploads), runners (`/ws/runner/…`),
+//! terminal WebSockets.
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
@@ -32,8 +42,11 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::Router;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use condash_mutations::{
+    add_step, edit_step, remove_step, reorder_all, set_priority, toggle_checkbox,
+};
 use condash_parser::{
     compute_fingerprint, compute_knowledge_node_fingerprints, compute_project_node_fingerprints,
 };
@@ -89,7 +102,7 @@ pub async fn start_on(state: AppState, port: u16) -> Result<u16> {
     Ok(port)
 }
 
-fn build_router(state: AppState) -> Router {
+pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/fragment", get(fragment))
@@ -100,7 +113,204 @@ fn build_router(state: AppState) -> Router {
         .route("/vendor/{*path}", get(vendor_asset))
         .route("/assets/dist/{*path}", get(dist_asset))
         .route("/asset/{*path}", get(conception_asset))
+        // Phase 3 slice 2 — step mutations.
+        .route("/toggle", post(toggle))
+        .route("/add-step", post(add_step_route))
+        .route("/remove-step", post(remove_step_route))
+        .route("/edit-step", post(edit_step_route))
+        .route("/set-priority", post(set_priority_route))
+        .route("/reorder-all", post(reorder_all_route))
         .with_state(state)
+}
+
+// ---------------------------------------------------------------------
+// Phase 3 slice 2: step-mutation handlers.
+// Shape matches `src/condash/routes/steps.py` — each handler validates
+// the README path with `paths::validate_readme_path`, delegates to the
+// matching helper in `condash-mutations`, and — on success — flushes
+// the items cache so the next `/check-updates` sees a fresh fingerprint.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct TogglePayload {
+    file: String,
+    line: i64,
+}
+
+async fn toggle(State(state): State<AppState>, Json(p): Json<TogglePayload>) -> impl IntoResponse {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+        return error_json(StatusCode::BAD_REQUEST, "invalid path");
+    };
+    if p.line < 0 {
+        return error_json(StatusCode::BAD_REQUEST, "not a checkbox line");
+    }
+    match toggle_checkbox(&full, p.line as usize) {
+        Ok(Some(status)) => {
+            state.cache.invalidate_items();
+            json_response(&serde_json::json!({
+                "ok": true,
+                "status": status,
+            }))
+        }
+        Ok(None) => error_json(StatusCode::BAD_REQUEST, "not a checkbox line"),
+        Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("toggle: {e}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AddStepPayload {
+    file: String,
+    text: Option<String>,
+    #[serde(default)]
+    section: Option<String>,
+}
+
+async fn add_step_route(
+    State(state): State<AppState>,
+    Json(p): Json<AddStepPayload>,
+) -> impl IntoResponse {
+    let text = p.text.unwrap_or_default();
+    let text = text.trim();
+    if text.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "empty text");
+    }
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+        return error_json(StatusCode::BAD_REQUEST, "invalid path");
+    };
+    let section = p.section.as_deref();
+    match add_step(&full, text, section) {
+        Ok(line) => {
+            state.cache.invalidate_items();
+            json_response(&serde_json::json!({"ok": true, "line": line}))
+        }
+        Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("add-step: {e}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RemoveStepPayload {
+    file: String,
+    line: i64,
+}
+
+async fn remove_step_route(
+    State(state): State<AppState>,
+    Json(p): Json<RemoveStepPayload>,
+) -> impl IntoResponse {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+        return error_json(StatusCode::BAD_REQUEST, "invalid path");
+    };
+    if p.line < 0 {
+        return error_json(StatusCode::BAD_REQUEST, "cannot remove");
+    }
+    match remove_step(&full, p.line as usize) {
+        Ok(true) => {
+            state.cache.invalidate_items();
+            json_response(&serde_json::json!({"ok": true}))
+        }
+        Ok(false) => error_json(StatusCode::BAD_REQUEST, "cannot remove"),
+        Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("remove: {e}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct EditStepPayload {
+    file: String,
+    line: i64,
+    text: Option<String>,
+}
+
+async fn edit_step_route(
+    State(state): State<AppState>,
+    Json(p): Json<EditStepPayload>,
+) -> impl IntoResponse {
+    let text = p.text.unwrap_or_default();
+    let text = text.trim();
+    if text.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "empty text");
+    }
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+        return error_json(StatusCode::BAD_REQUEST, "invalid path");
+    };
+    if p.line < 0 {
+        return error_json(StatusCode::BAD_REQUEST, "cannot edit");
+    }
+    match edit_step(&full, p.line as usize, text) {
+        Ok(true) => {
+            state.cache.invalidate_items();
+            json_response(&serde_json::json!({"ok": true}))
+        }
+        Ok(false) => error_json(StatusCode::BAD_REQUEST, "cannot edit"),
+        Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("edit: {e}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SetPriorityPayload {
+    file: String,
+    priority: String,
+}
+
+async fn set_priority_route(
+    State(state): State<AppState>,
+    Json(p): Json<SetPriorityPayload>,
+) -> impl IntoResponse {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+        return error_json(StatusCode::BAD_REQUEST, "invalid path");
+    };
+    match set_priority(&full, &p.priority) {
+        Ok(true) => {
+            state.cache.invalidate_items();
+            json_response(&serde_json::json!({
+                "ok": true,
+                "priority": p.priority,
+            }))
+        }
+        Ok(false) => error_json(StatusCode::BAD_REQUEST, "invalid priority"),
+        Err(e) => error_json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("set-priority: {e}"),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ReorderAllPayload {
+    file: String,
+    order: Vec<i64>,
+}
+
+async fn reorder_all_route(
+    State(state): State<AppState>,
+    Json(p): Json<ReorderAllPayload>,
+) -> impl IntoResponse {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+        return error_json(StatusCode::BAD_REQUEST, "invalid path");
+    };
+    if p.order.iter().any(|&n| n < 0) {
+        return error_json(StatusCode::BAD_REQUEST, "cannot reorder");
+    }
+    let order: Vec<usize> = p.order.iter().map(|&n| n as usize).collect();
+    match reorder_all(&full, &order) {
+        Ok(true) => {
+            state.cache.invalidate_items();
+            json_response(&serde_json::json!({"ok": true}))
+        }
+        Ok(false) => error_json(StatusCode::BAD_REQUEST, "cannot reorder"),
+        Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("reorder: {e}")),
+    }
+}
+
+/// JSON error response matching `routes/_common.error()` — a
+/// `{"error": <msg>}` body plus the given status code.
+fn error_json(code: StatusCode, msg: &str) -> Response {
+    let body = serde_json::json!({"error": msg});
+    let bytes = serde_json::to_vec(&body).unwrap_or_default();
+    Response::builder()
+        .status(code)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(bytes))
+        .unwrap()
 }
 
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
