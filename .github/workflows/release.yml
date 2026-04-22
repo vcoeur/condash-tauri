@@ -169,11 +169,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          APPIMAGE=$(ls src-tauri/target/release/bundle/appimage/condash_*_amd64.AppImage | head -n1)
-          if [[ -z "$APPIMAGE" || ! -f "$APPIMAGE" ]]; then
+          # This repo is a Cargo workspace (workspace root = repo root),
+          # so tauri-action's bundler writes to `./target/...`, not
+          # `src-tauri/target/...` — the latter only exists for
+          # standalone tauri projects. Glob the workspace target dir.
+          shopt -s nullglob
+          matches=(target/release/bundle/appimage/condash_*_amd64.AppImage)
+          shopt -u nullglob
+          if [[ ${#matches[@]} -eq 0 ]]; then
               echo "No AppImage found to sanitize" >&2
               exit 1
           fi
+          APPIMAGE="${matches[0]}"
           echo "Sanitizing $APPIMAGE"
 
           WORK=$(mktemp -d)
