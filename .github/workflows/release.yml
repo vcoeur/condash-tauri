@@ -96,6 +96,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # `.cargo/config.toml` wraps rustc with `sccache` for fast local
+      # rebuilds across branch switches. CI runners don't have sccache
+      # installed, so without this override every rustc invocation
+      # fails with "could not execute process sccache" before any
+      # compilation happens. Swatinem/rust-cache below already caches
+      # cargo artifacts across CI runs, so stacking sccache on top
+      # would be redundant — we just unset the wrapper here.
+      - name: Disable sccache wrapper on CI
+        shell: bash
+        run: echo "CARGO_BUILD_RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:

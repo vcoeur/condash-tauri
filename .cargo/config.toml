@@ -6,5 +6,14 @@
 #
 # Install once: `cargo install sccache` (or via a prebuilt binary).
 # Verify the cache is active with `sccache --show-stats` after a build.
+#
+# CI runners don't have sccache pre-installed. The release workflow
+# sets `CARGO_BUILD_RUSTC_WRAPPER=""` to override this file on CI —
+# Swatinem/rust-cache already caches cargo artifacts across runs, so
+# stacking sccache on top adds nothing. Local developers who don't
+# install sccache must apply the same override (e.g.
+# `export CARGO_BUILD_RUSTC_WRAPPER=""` or their own
+# `~/.cargo/config.toml`) — otherwise every rustc invocation fails
+# with "could not execute process sccache".
 [build]
 rustc-wrapper = "sccache"
