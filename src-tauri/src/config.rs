@@ -129,6 +129,36 @@ pub fn configuration_path(conception_path: &Path) -> PathBuf {
     conception_path.join("configuration.yml")
 }
 
+/// Parse `body` as a well-formed `configuration.yml`. Returns Ok on
+/// success. The config modal calls this before writing so invalid YAML
+/// never hits disk.
+pub fn validate_configuration_yaml(body: &str) -> Result<()> {
+    let _: ConfigurationYaml =
+        serde_yaml_ng::from_str(body).with_context(|| "parsing configuration.yml body")?;
+    Ok(())
+}
+
+/// Atomically write `body` as `<conception>/configuration.yml`. Rejects
+/// invalid YAML; on success, the file on disk is replaced in a single
+/// rename so a crash mid-write cannot truncate the user's config.
+pub fn write_configuration(conception_path: &Path, body: &str) -> Result<PathBuf> {
+    validate_configuration_yaml(body)?;
+    let path = configuration_path(conception_path);
+    let tmp = {
+        let mut p = path.to_path_buf();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "configuration.yml".into());
+        p.set_file_name(format!(".{name}.tmp"));
+        p
+    };
+    fs::write(&tmp, body.as_bytes()).with_context(|| format!("writing {}", tmp.display()))?;
+    fs::rename(&tmp, &path)
+        .with_context(|| format!("renaming {} -> {}", tmp.display(), path.display()))?;
+    Ok(path)
+}
+
 /// Build a [`RenderCtx`] for the conception tree at `conception_path`.
 ///
 /// Reads `<conception>/configuration.yml` when present; falls back to

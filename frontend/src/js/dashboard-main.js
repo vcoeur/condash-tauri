@@ -141,65 +141,23 @@ function _setYamlSourceHint(elId, source, expected, label) {
 
 async function openConfigModal() {
     var modal = document.getElementById('config-modal');
-    var form = document.getElementById('config-form');
+    var ta = document.getElementById('config-yaml');
     var errEl = document.getElementById('config-error');
-    var warnEl = document.getElementById('config-restart-warning');
+    var okEl = document.getElementById('config-saved');
+    var pathEl = document.getElementById('config-file-path');
     errEl.style.display = 'none';
-    warnEl.style.display = 'none';
-    switchConfigTab('general');
+    okEl.style.display = 'none';
     modal.style.display = 'flex';
     try {
-        var res = await fetch('/config');
+        var res = await fetch('/configuration');
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        var cfg = await res.json();
-        _setField(form, 'conception_path', cfg.conception_path);
-        _setField(form, 'workspace_path', cfg.workspace_path);
-        _setField(form, 'worktrees_path', cfg.worktrees_path);
-        _setField(form, 'port', cfg.port);
-        _setField(form, 'native', cfg.native);
-        form.elements['repositories_primary'].value = _reposToLines(cfg.repositories_primary);
-        form.elements['repositories_secondary'].value = _reposToLines(cfg.repositories_secondary);
-        var ow = cfg.open_with || {};
-        _setSlotFields(form, 'main_ide', ow.main_ide);
-        _setSlotFields(form, 'secondary_ide', ow.secondary_ide);
-        _setSlotFields(form, 'terminal', ow.terminal);
-        form.elements['pdf_viewer'].value = _listToLines(cfg.pdf_viewer || []);
-        var term = cfg.terminal || {};
-        _setField(form, 'terminal_shell', term.shell);
-        _setField(form, 'terminal_shortcut', term.shortcut);
-        _setField(form, 'terminal_screenshot_dir', term.screenshot_dir);
-        _setField(form, 'terminal_screenshot_paste_shortcut', term.screenshot_paste_shortcut);
-        var resolvedNote = document.getElementById('term-shell-resolved');
-        if (resolvedNote) {
-            resolvedNote.textContent = term.resolved_shell
-                ? 'Currently resolved: ' + term.resolved_shell
-                : '';
-        }
-        var resolvedDirNote = document.getElementById('term-screenshot-dir-resolved');
-        if (resolvedDirNote) {
-            resolvedDirNote.textContent = term.resolved_screenshot_dir
-                ? 'Currently resolved: ' + term.resolved_screenshot_dir
-                : '';
-        }
-        // Stash the loaded port/native so we can detect changes on save.
-        form.dataset.loadedPort = String(cfg.port);
-        form.dataset.loadedNative = String(cfg.native);
-        _setYamlSourceHint(
-            'config-repositories-source',
-            cfg.repositories_yaml_source,
-            cfg.repositories_yaml_expected_path,
-            'config/repositories.yml',
-        );
-        _setYamlSourceHint(
-            'config-preferences-source',
-            cfg.preferences_yaml_source,
-            cfg.preferences_yaml_expected_path,
-            'config/preferences.yml',
-        );
-        _populateYamlEditor('repositories', cfg.repositories_yaml_body || '');
-        _populateYamlEditor('preferences', cfg.preferences_yaml_body || '');
+        ta.value = await res.text();
+        var path = res.headers.get('X-Condash-Config-Path');
+        if (path && pathEl) pathEl.textContent = path;
+        // Defer focus so the modal is laid out before we position the cursor.
+        setTimeout(function() { ta.focus(); ta.setSelectionRange(0, 0); }, 0);
     } catch (e) {
-        errEl.textContent = 'Could not load config: ' + e;
+        errEl.textContent = 'Could not load configuration.yml: ' + e;
         errEl.style.display = 'block';
     }
 }
@@ -502,92 +460,25 @@ function _expandCardBySlug(slug) {
 
 async function saveConfig(ev) {
     ev.preventDefault();
-    var form = document.getElementById('config-form');
+    var ta = document.getElementById('config-yaml');
     var errEl = document.getElementById('config-error');
-    var warnEl = document.getElementById('config-restart-warning');
+    var okEl = document.getElementById('config-saved');
     errEl.style.display = 'none';
-    warnEl.style.display = 'none';
-    // Prefer the raw-YAML path when the user has edited the YAML pane —
-    // it's the more honest "YAML is source of truth" route and preserves
-    // exact formatting / comments the form can't round-trip.
-    var dirtyYaml = _getDirtyYamlFile();
-    if (dirtyYaml) {
-        try {
-            var yres = await fetch('/config/yaml', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(dirtyYaml),
-            });
-            var ybody = await yres.json().catch(function(){return {};});
-            if (!yres.ok) {
-                errEl.textContent = ybody.error || ('HTTP ' + yres.status);
-                errEl.style.display = 'block';
-                return;
-            }
-            _loadTermShortcuts();
-            closeConfigModal();
-            setTimeout(_reloadInPlace, 200);
-            return;
-        } catch (e) {
-            errEl.textContent = 'Save failed: ' + e;
-            errEl.style.display = 'block';
-            return;
-        }
-    }
-    var payload = {
-        conception_path: _getField(form, 'conception_path'),
-        workspace_path: _getField(form, 'workspace_path'),
-        worktrees_path: _getField(form, 'worktrees_path'),
-        port: _getField(form, 'port'),
-        native: _getField(form, 'native'),
-        repositories_primary: _linesToRepos(form.elements['repositories_primary'].value),
-        repositories_secondary: _linesToRepos(form.elements['repositories_secondary'].value),
-        pdf_viewer: _linesToList(form.elements['pdf_viewer'].value),
-        terminal: {
-            shell: _getField(form, 'terminal_shell'),
-            shortcut: _getField(form, 'terminal_shortcut'),
-            screenshot_dir: _getField(form, 'terminal_screenshot_dir'),
-            screenshot_paste_shortcut: _getField(form, 'terminal_screenshot_paste_shortcut'),
-        },
-        open_with: {
-            main_ide: _readSlotFields(form, 'main_ide'),
-            secondary_ide: _readSlotFields(form, 'secondary_ide'),
-            terminal: _readSlotFields(form, 'terminal'),
-        },
-    };
+    okEl.style.display = 'none';
     try {
-        var res = await fetch('/config', {
+        var res = await fetch('/configuration', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload),
+            headers: {'Content-Type': 'text/yaml; charset=utf-8'},
+            body: ta.value,
         });
-        var body = await res.json().catch(function(){return {};});
-        if (!res.ok) {
-            errEl.textContent = body.error || ('HTTP ' + res.status);
-            errEl.style.display = 'block';
-            return;
-        }
-        var restart = (body && body.restart_required) || [];
-        // Refresh the cached shortcut specs so terminal-toggle and
-        // screenshot-paste keybindings pick up the new config without a
-        // full reload (when no restart is required).
-        _loadTermShortcuts();
-        if (restart.length) {
-            warnEl.textContent = 'Saved. The following changes need a condash restart to take effect: ' + restart.join(', ') + '. Reloading…';
-            warnEl.style.display = 'block';
+        if (res.ok) {
+            okEl.textContent = 'Saved. Close and reopen condash for changes to take effect.';
+            okEl.style.display = 'block';
         } else {
-            // No restart needed → close the modal immediately so the user
-            // sees the refreshed dashboard, not a modal sitting in front
-            // of it. (_reloadInPlace swaps #dash-main, but modals are
-            // siblings and stay put otherwise.)
-            closeConfigModal();
+            var msg = await res.text();
+            errEl.textContent = 'Save rejected (' + res.status + '): ' + msg;
+            errEl.style.display = 'block';
         }
-        // Brief pause so the user sees the warning, then refresh. When a
-        // restart is required (port change, etc.) we need a real reload so
-        // the browser talks to the new process; otherwise an in-place
-        // swap is enough and preserves terminal state.
-        var refresh = restart.length ? function(){ location.reload(); } : _reloadInPlace;
-        setTimeout(refresh, restart.length ? 1500 : 200);
     } catch (e) {
         errEl.textContent = 'Save failed: ' + e;
         errEl.style.display = 'block';
@@ -3060,10 +2951,9 @@ function _startEventStream() {
         // existing staleness pipeline.
         var payload = null;
         try { payload = JSON.parse(ev.data || '{}'); } catch (e) { payload = {}; }
-        if (payload && payload.tab === 'config') {
-            _onConfigChanged(payload);
-            return;
-        }
+        // Config changes no longer stream over SSE — the watcher on
+        // config/*.yml was removed; the modal's Save path handles
+        // everything explicitly.
         // Any other non-typed message is a staleness hint. Debounced so
         // a burst of watcher events collapses into a single fetch + swap.
         _scheduleCheckUpdates();

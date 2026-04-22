@@ -208,159 +208,33 @@
     </div>
 </div>
 <div id="config-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeConfigModal()">
-    <div class="note-modal config-modal">
+    <div class="note-modal config-modal config-modal-wide">
         <div class="note-modal-header">
             <span class="note-modal-title">Configuration</span>
             <button class="note-modal-close" onclick="closeConfigModal()" aria-label="Close">&times;</button>
         </div>
         <div class="note-modal-body">
             <form id="config-form" onsubmit="saveConfig(event)">
-                <div class="config-tabs" role="tablist">
-                    <button type="button" class="config-tab active" data-config-tab="general" onclick="switchConfigTab('general')">General</button>
-                    <button type="button" class="config-tab" data-config-tab="repositories" onclick="switchConfigTab('repositories')">Repositories</button>
-                    <button type="button" class="config-tab" data-config-tab="preferences" onclick="switchConfigTab('preferences')">Preferences</button>
-                </div>
-                <div class="config-tab-pane active" data-config-pane="general">
-                    <fieldset class="config-fieldset">
-                        <legend>Paths</legend>
-                        <label>conception_path
-                            <input type="text" name="conception_path" placeholder="/path/to/conception">
-                            <small>Absolute path to the directory holding your <code>projects/</code> tree. Repositories + preferences live under <code>&lt;conception_path&gt;/config/*.yml</code>.</small>
-                        </label>
-                    </fieldset>
-                    <fieldset class="config-fieldset">
-                        <legend>Server <span class="config-restart-hint">— restart required after change</span></legend>
-                        <label>port
-                            <input type="number" name="port" min="0" max="65535">
-                            <small>0 picks a free port in 11111–12111.</small>
-                        </label>
-                        <label class="config-checkbox">
-                            <input type="checkbox" name="native">
-                            Open in native window (uncheck for browser mode)
-                        </label>
-                    </fieldset>
-                </div>
-                <div class="config-tab-pane" data-config-pane="repositories">
-                    <p id="config-repositories-source" class="config-yaml-source" style="display:none"></p>
-                    <div class="config-split">
-                        <div class="config-split-pane">
-                            <div class="config-split-pane-head">
-                                <span>repositories.yml</span>
-                                <span class="config-split-status" data-yaml-status="repositories">synced</span>
-                            </div>
-                            <textarea class="config-yaml-editor"
-                                      data-yaml-file="repositories"
-                                      spellcheck="false"
-                                      aria-label="repositories.yml raw contents"></textarea>
-                            <small class="config-help">Edit the YAML directly and click <b>Save &amp; reload</b>. The form on the right stays in sync with the parsed content.</small>
-                        </div>
-                        <div class="config-split-pane">
-                    <fieldset class="config-fieldset">
-                        <legend>Workspace</legend>
-                        <label>workspace_path
-                            <input type="text" name="workspace_path">
-                            <small>Directory condash scans for repos. Depth-1 hits (<code>&lt;workspace&gt;/&lt;repo&gt;/.git</code>) become repo rows; depth-2 hits (<code>&lt;workspace&gt;/&lt;org&gt;/&lt;repo&gt;/.git</code>) become rows named <code>&lt;org&gt;/&lt;repo&gt;</code>. Empty = repo strip hidden.</small>
-                        </label>
-                        <label>worktrees_path
-                            <input type="text" name="worktrees_path">
-                            <small>Extra git-worktrees sandbox for "open in IDE".</small>
-                        </label>
-                    </fieldset>
-                    <fieldset class="config-fieldset">
-                        <legend>Repositories</legend>
-                        <p class="config-help">One repo per line. Slashed names (<code>myorg/backend</code>) match depth-2 scan hits. Append submodules as <code>reponame: sub/one, sub/two</code>. <code>/pr</code> resolves the default base branch from <code>origin/HEAD</code> on the main checkout at call time; no per-repo override is stored here.</p>
-                        <label>primary
-                            <textarea name="repositories_primary" rows="4" placeholder="knoten&#10;vcoeur.com: apps/web, apps/api"></textarea>
-                        </label>
-                        <label>secondary
-                            <textarea name="repositories_secondary" rows="3" placeholder="conception"></textarea>
-                        </label>
-                    </fieldset>
-                    <fieldset class="config-fieldset">
-                        <legend>Open with</legend>
-                        <p class="config-help">Each slot is a fallback chain of shell-style commands (one per line). The literal <code>{path}</code> is replaced with the repo's absolute path. The first command that starts is used.</p>
-                        <div data-slot="main_ide">
-                            <label>main_ide — label
-                                <input type="text" data-field="label">
-                            </label>
-                            <label>main_ide — commands
-                                <textarea data-field="commands" rows="4" placeholder="idea {path}&#10;idea.sh {path}"></textarea>
-                            </label>
-                        </div>
-                        <div data-slot="secondary_ide">
-                            <label>secondary_ide — label
-                                <input type="text" data-field="label">
-                            </label>
-                            <label>secondary_ide — commands
-                                <textarea data-field="commands" rows="4" placeholder="code {path}&#10;codium {path}"></textarea>
-                            </label>
-                        </div>
-                        <div data-slot="terminal">
-                            <label>terminal — label
-                                <input type="text" data-field="label">
-                            </label>
-                            <label>terminal — commands
-                                <textarea data-field="commands" rows="4" placeholder="ghostty --working-directory={path}&#10;gnome-terminal --working-directory {path}"></textarea>
-                            </label>
-                        </div>
-                    </fieldset>
-                        </div>
-                    </div>
-                </div>
-                <div class="config-tab-pane" data-config-pane="preferences">
-                    <p id="config-preferences-source" class="config-yaml-source" style="display:none"></p>
-                    <div class="config-split">
-                        <div class="config-split-pane">
-                            <div class="config-split-pane-head">
-                                <span>preferences.yml</span>
-                                <span class="config-split-status" data-yaml-status="preferences">synced</span>
-                            </div>
-                            <textarea class="config-yaml-editor"
-                                      data-yaml-file="preferences"
-                                      spellcheck="false"
-                                      aria-label="preferences.yml raw contents"></textarea>
-                            <small class="config-help">Edit the YAML directly and click <b>Save &amp; reload</b>. The form on the right stays in sync with the parsed content.</small>
-                        </div>
-                        <div class="config-split-pane">
-                    <fieldset class="config-fieldset">
-                        <legend>PDF viewer</legend>
-                        <p class="config-help">Fallback chain of shell-style commands tried for <code>*.pdf</code> files (one per line). The literal <code>{path}</code> is replaced with the file's absolute path; if the command has no <code>{path}</code>, the path is appended as the last argument (so <code>evince</code> behaves the same as <code>evince {path}</code>). Leave empty to use the OS default (<code>xdg-open</code> / <code>open</code> / <code>startfile</code>). Images and Markdown always use the OS default.</p>
-                        <label>commands
-                            <textarea name="pdf_viewer" rows="3" placeholder="evince {path}&#10;okular {path}"></textarea>
-                        </label>
-                    </fieldset>
-                    <fieldset class="config-fieldset">
-                        <legend>Embedded terminal</legend>
-                        <label>shell
-                            <input type="text" name="terminal_shell" placeholder="(defaults to $SHELL, then /bin/bash)">
-                            <small id="term-shell-resolved"></small>
-                        </label>
-                        <label>toggle shortcut
-                            <input type="text" name="terminal_shortcut" placeholder="Ctrl+`">
-                            <small>Modifiers: Ctrl, Shift, Alt, Meta. Key names: single chars or KeyboardEvent.key names (Enter, Escape, …).</small>
-                        </label>
-                        <label>screenshot directory
-                            <input type="text" name="terminal_screenshot_dir" placeholder="(defaults to $XDG_PICTURES_DIR/Screenshots, then ~/Pictures/Screenshots)">
-                            <small id="term-screenshot-dir-resolved"></small>
-                        </label>
-                        <label>screenshot paste shortcut
-                            <input type="text" name="terminal_screenshot_paste_shortcut" placeholder="Ctrl+Shift+V">
-                            <small>Pastes the absolute path of the newest image (.png, .jpg, .jpeg, .webp) in the screenshot directory into the active terminal tab — no Enter, you confirm.</small>
-                        </label>
-                    </fieldset>
-                        </div>
-                    </div>
-                </div>
+                <p class="config-help">
+                    Plain-text editor of <code id="config-file-path">&lt;conception&gt;/configuration.yml</code>.
+                    Save validates the YAML; changes take effect the next time condash launches.
+                </p>
+                <textarea id="config-yaml"
+                          spellcheck="false"
+                          rows="28"
+                          style="width:100%;font-family:ui-monospace,monospace;font-size:13px;"
+                          aria-label="configuration.yml raw contents"></textarea>
                 <div id="config-error" class="config-error" style="display:none"></div>
-                <div id="config-restart-warning" class="config-restart-warning" style="display:none"></div>
+                <div id="config-saved" class="config-saved" style="display:none;color:#2a7a2a;margin-top:8px"></div>
                 <div class="config-actions">
                     <button type="button" onclick="closeConfigModal()">Cancel</button>
-                    <button type="submit" class="config-save">Save &amp; reload</button>
+                    <button type="submit" class="config-save">Save</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
+
 
 <div id="new-item-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNewItemModal()">
     <div class="note-modal config-modal" style="max-width:560px">
