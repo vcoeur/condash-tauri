@@ -121,7 +121,8 @@ enum SubmoduleYaml {
 struct OpenWithSlotYaml {
     #[serde(default)]
     label: Option<String>,
-    // commands: skipped for Phase 2 — consumed by the mutations layer.
+    #[serde(default)]
+    commands: Vec<String>,
 }
 
 /// Path to the merged configuration file inside a conception tree.
@@ -220,7 +221,13 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
             .into_iter()
             .map(|(key, slot)| {
                 let label = slot.label.unwrap_or_else(|| key.clone());
-                (key, OpenWithSlot { label })
+                (
+                    key,
+                    OpenWithSlot {
+                        label,
+                        commands: slot.commands,
+                    },
+                )
             })
             .collect();
     }

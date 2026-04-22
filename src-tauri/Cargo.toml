@@ -1,6 +1,6 @@
 [package]
 name = "condash"
-version = "1.0.2"
+version = "1.0.3"
 description = "Conception dashboard — Tauri port (Phase 0 scaffold)"
 authors = ["Alice Voland <alice@vcoeur.com>"]
 license = "MIT"

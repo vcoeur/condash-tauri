@@ -1,17 +1,16 @@
 //! Git-strip rendering — Rust port of render.py's peer-card / branch-row
 //! / runner-button / open-with helpers.
 //!
-//! Phase 2 scope: the readers. Runner sessions don't exist yet in the
-//! Rust build (Phase 4 territory), so `_render_runner_button` always
-//! takes the "no session" branch (green "Start" button) and
-//! `_render_runner_mount` returns an empty string. The fingerprint
-//! layer already emits `|run:off` for configured rows — the rendered
-//! HTML here matches what Python emits when `runners.registry()` is
-//! empty, which is the Phase 2 invariant on both sides.
-//!
-//! The string-concat style mirrors Python's render.py one-for-one so
-//! the byte-for-byte diff tool can prove they agree on the live
-//! workspace.
+//! The public entry points take a [`LiveRunners`] map keyed by runner
+//! key. Each entry records the checkout that owns the session and the
+//! exit code (or `None` if still live). Three visible bits of UI lean
+//! on this: the peer-card "live" tag, the `.runner-term-mount` div the
+//! frontend attaches xterm + WebSocket to (only emitted on the row
+//! that owns the session), and the tri-state Start / Stop / Switch
+//! button on every row of the same runner. The Rust server builds the
+//! map from `state.runner_registry`; tests pass an empty map.
+
+use std::collections::HashMap;
 
 use condash_state::{Checkout, Family, Group, Member, RenderCtx};
 
@@ -43,6 +42,24 @@ pub fn runner_key(repo_name: &str, sub_name: Option<&str>) -> String {
         Some(s) => format!("{repo_name}--{s}"),
     }
 }
+
+/// Snapshot of a runner session as far as the renderer is concerned.
+/// The server builds one of these per live-or-exited entry in the
+/// runner registry before rendering so the render crate stays pure.
+#[derive(Debug, Clone, Default)]
+pub struct RunnerLive {
+    /// `checkout_key` that started the session (`"main"` or a worktree
+    /// key). The mount + "live" row modifier only appear on this
+    /// checkout's row.
+    pub checkout_key: String,
+    /// `Some(code)` iff the session has exited; `None` while the PTY
+    /// is still running.
+    pub exit_code: Option<i32>,
+}
+
+/// Map of runner-key → session snapshot. Empty is the common case;
+/// populated as sessions start and drop as they are cleared.
+pub type LiveRunners = HashMap<String, RunnerLive>;
 
 fn runner_key_for_member(family: &Family, member: &Member) -> String {
     if member.is_subrepo {
@@ -116,16 +133,51 @@ fn icon_for(slot_key: &str) -> &'static str {
     }
 }
 
-/// Per-checkout Run / Stop / Switch pill. Phase 2 always takes the
-/// "no session" branch → green Start button.
-fn render_runner_button(key: &str, checkout_key: &str, checkout_path: &str) -> String {
+/// Per-checkout Run / Stop / Switch pill. The icon + onclick depend on
+/// whether a live session owns this runner key, and if so which
+/// checkout it is anchored to:
+///
+/// - no session (or session exited)     → green Start
+/// - session on this checkout           → red Stop
+/// - session on a different checkout    → amber Switch (confirm dialog)
+fn render_runner_button(
+    key: &str,
+    checkout_key: &str,
+    checkout_path: &str,
+    live: Option<&RunnerLive>,
+) -> String {
     let js_key = embed_attr(&key);
     let js_checkout = embed_attr(&checkout_key);
     let js_path = embed_attr(&checkout_path);
-    let title = "Start dev runner";
-    let cls = "git-action-runner-run";
-    let icon = Icons::runner_run;
-    let onclick = format!("runnerStart(event,{js_key},{js_checkout},{js_path})");
+    let (title, cls, icon, onclick) = match live {
+        None => (
+            "Start dev runner",
+            "git-action-runner-run",
+            Icons::runner_run,
+            format!("runnerStart(event,{js_key},{js_checkout},{js_path})"),
+        ),
+        Some(RunnerLive { exit_code, .. }) if exit_code.is_some() => (
+            "Start dev runner",
+            "git-action-runner-run",
+            Icons::runner_run,
+            format!("runnerStart(event,{js_key},{js_checkout},{js_path})"),
+        ),
+        Some(RunnerLive {
+            checkout_key: owner,
+            ..
+        }) if owner == checkout_key => (
+            "Stop dev runner",
+            "git-action-runner-stop",
+            Icons::runner_stop,
+            format!("runnerStop(event,{js_key})"),
+        ),
+        Some(_) => (
+            "Switch runner to this checkout",
+            "git-action-runner-switch",
+            Icons::runner_run,
+            format!("runnerSwitch(event,{js_key},{js_checkout},{js_path})"),
+        ),
+    };
     format!(
         "<button class=\"git-action-btn git-action-runner {cls}\" \
          title=\"{t}\" aria-label=\"{t}\" \
@@ -134,11 +186,54 @@ fn render_runner_button(key: &str, checkout_key: &str, checkout_path: &str) -> S
     )
 }
 
-/// Inline runner mount — in Phase 2 we have no live sessions, so this
-/// always returns the empty string (matches Python's `if session is
-/// None: return ""` branch).
-fn render_runner_mount(_key: &str, _checkout_key: &str) -> String {
-    String::new()
+/// Inline runner mount — returns the empty string unless the runner
+/// identified by `key` has a live-or-exited session anchored at
+/// `checkout_key`. Fresh mounts start collapsed; the user reveals the
+/// output by clicking the header. `data-exit-code` is set on exited
+/// sessions so the header styling flips to the muted variant.
+fn render_runner_mount(key: &str, checkout_key: &str, live: Option<&RunnerLive>) -> String {
+    let Some(session) = live else {
+        return String::new();
+    };
+    if session.checkout_key != checkout_key {
+        return String::new();
+    }
+    let exited_attr = match session.exit_code {
+        Some(code) => format!(" data-exit-code=\"{code}\""),
+        None => String::new(),
+    };
+    let label = format!("{key} @ {checkout_key}");
+    format!(
+        "<div class=\"runner-term-mount runner-collapsed\" \
+         data-runner-key=\"{k}\" data-runner-checkout=\"{c}\"{ex}>\
+         <div class=\"runner-term-header\" \
+         title=\"Click to collapse / expand (keeps process running)\" \
+         onclick=\"runnerToggleCollapse(this)\">\
+         <span class=\"runner-term-label\">{label_h}</span>\
+         <span class=\"runner-term-status\" aria-live=\"polite\"></span>\
+         <button class=\"runner-control runner-collapse\" \
+         aria-label=\"Collapse terminal\" tabindex=\"-1\" \
+         onclick=\"event.stopPropagation();runnerToggleCollapse(this)\">\
+         {collapse_icon}</button>\
+         <button class=\"runner-control runner-popout\" \
+         title=\"Pop out\" aria-label=\"Pop out\" \
+         onclick=\"event.stopPropagation();runnerPopout(this)\">\
+         {popout_icon}</button>\
+         <button class=\"runner-control runner-stop-inline\" \
+         title=\"Stop\" aria-label=\"Stop\" \
+         onclick=\"event.stopPropagation();runnerStopInline(this)\">\
+         {stop_icon}</button>\
+         </div>\
+         <div class=\"runner-term-host\"></div>\
+         </div>",
+        k = h(key),
+        c = h(checkout_key),
+        ex = exited_attr,
+        label_h = h(&label),
+        collapse_icon = Icons::runner_collapse,
+        popout_icon = Icons::runner_popout,
+        stop_icon = Icons::runner_stop,
+    )
 }
 
 fn branch_status_cell(info: &Checkout) -> String {
@@ -194,6 +289,7 @@ fn render_branch_row_inner(
     checkout_key: &str,
     is_main: bool,
     node_id: &str,
+    live: &LiveRunners,
 ) -> String {
     // Branch label: subrepo's main row inherits the parent's branch.
     let branch_label = if !info_branch.is_empty() {
@@ -212,12 +308,12 @@ fn render_branch_row_inner(
     // Runner pill — only for configured members that aren't missing.
     let mut runner_pill = String::new();
     let member_key = runner_key_for_member(family, member);
-    let mut is_live = false; // Phase 2: no live sessions.
+    let session = live.get(&member_key);
+    let is_live = session
+        .map(|s| s.exit_code.is_none() && s.checkout_key == checkout_key)
+        .unwrap_or(false);
     if !info_missing && ctx.repo_run_keys.contains(&member_key) {
-        runner_pill = render_runner_button(&member_key, checkout_key, info_path);
-        // Python here re-checks runners_mod.get(); Phase 2 has no
-        // sessions so is_live stays false.
-        let _ = &mut is_live;
+        runner_pill = render_runner_button(&member_key, checkout_key, info_path, session);
     }
     let _ = info_changed;
     let _ = info_changed_files;
@@ -271,6 +367,7 @@ fn render_branch_row_main(
     family: &Family,
     member: &Member,
     node_id: &str,
+    live: &LiveRunners,
 ) -> String {
     let status_html = branch_status_cell_member(member);
     render_branch_row_inner(
@@ -287,6 +384,7 @@ fn render_branch_row_main(
         "main",
         true,
         node_id,
+        live,
     )
 }
 
@@ -296,6 +394,7 @@ fn render_branch_row_worktree(
     member: &Member,
     wt: &Checkout,
     node_id: &str,
+    live: &LiveRunners,
 ) -> String {
     let status_html = branch_status_cell(wt);
     render_branch_row_inner(
@@ -312,12 +411,19 @@ fn render_branch_row_worktree(
         &wt.key,
         false,
         node_id,
+        live,
     )
 }
 
 /// One peer card (parent or promoted subrepo). Port of
 /// `_render_peer_card`.
-fn render_peer_card(ctx: &RenderCtx, family: &Family, member: &Member, member_id: &str) -> String {
+fn render_peer_card(
+    ctx: &RenderCtx,
+    family: &Family,
+    member: &Member,
+    member_id: &str,
+    live: &LiveRunners,
+) -> String {
     let is_subrepo = member.is_subrepo;
     let is_missing = member.missing;
 
@@ -343,9 +449,14 @@ fn render_peer_card(ctx: &RenderCtx, family: &Family, member: &Member, member_id
     } else {
         "<span class=\"peer-tag peer-tag-clean\">clean</span>".to_string()
     };
-    // Phase 2: no live runner sessions, so never append the "live" tag.
-    let live = false;
-    let head_tag = if live {
+    let member_key = runner_key_for_member(family, member);
+    let session = live.get(&member_key);
+    let is_live = !is_missing && session.map(|s| s.exit_code.is_none()).unwrap_or(false);
+    // Emit the mount (exited or running) whenever a session is anchored
+    // here — so the "exited: N" state survives until the user clicks
+    // Stop. Matches Python's `_render_runner_mount` truth table.
+    let has_session_here = !is_missing && session.is_some();
+    let head_tag = if is_live {
         format!("{head_tag}<span class=\"peer-tag peer-tag-live\">live</span>")
     } else {
         head_tag
@@ -362,7 +473,7 @@ fn render_peer_card(ctx: &RenderCtx, family: &Family, member: &Member, member_id
     if dirty_branches > 0 {
         card_cls.push_str(" peer-card-dirty");
     }
-    if live {
+    if is_live {
         card_cls.push_str(" peer-card-live");
     }
     if is_missing {
@@ -392,18 +503,21 @@ fn render_peer_card(ctx: &RenderCtx, family: &Family, member: &Member, member_id
         family,
         member,
         &format!("{member_id}/b:main"),
+        live,
     ));
     for wt in &member.worktrees {
         let wt_id = format!("{member_id}/wt:{}", wt.key);
-        parts.push(render_branch_row_worktree(ctx, family, member, wt, &wt_id));
+        parts.push(render_branch_row_worktree(
+            ctx, family, member, wt, &wt_id, live,
+        ));
     }
     parts.push("</div>".into()); // /peer-rows
 
-    // Inline runner terminal mount — only present when a live session
-    // is running. Phase 2: never.
-    if live {
-        let member_key = runner_key_for_member(family, member);
-        let mount = render_runner_mount(&member_key, "main");
+    // Inline runner terminal mount — rendered on the row that owns the
+    // session (live or exited). Empty string when no session here.
+    if has_session_here {
+        let owner_checkout = session.map(|s| s.checkout_key.as_str()).unwrap_or("main");
+        let mount = render_runner_mount(&member_key, owner_checkout, session);
         if !mount.is_empty() {
             parts.push(format!("<div class=\"peer-term\">{mount}</div>"));
         }
@@ -414,7 +528,7 @@ fn render_peer_card(ctx: &RenderCtx, family: &Family, member: &Member, member_id
         "<span class=\"peer-foot-path\">{p}</span>",
         p = h(foot_path)
     );
-    if live {
+    if is_live {
         foot.push_str(&format!(
             "<button type=\"button\" class=\"peer-jump\" \
              title=\"Jump to live terminal\" aria-label=\"Jump to live terminal\" \
@@ -429,7 +543,12 @@ fn render_peer_card(ctx: &RenderCtx, family: &Family, member: &Member, member_id
 }
 
 /// One family → bucket-grid wrapper. Port of `_render_flat_group`.
-fn render_flat_group(ctx: &RenderCtx, family: &Family, group_id: &str) -> String {
+fn render_flat_group(
+    ctx: &RenderCtx,
+    family: &Family,
+    group_id: &str,
+    live: &LiveRunners,
+) -> String {
     let family_id = format!("{group_id}/{}", family.name);
     let is_compound = family.members.len() > 1;
     let cls = if is_compound {
@@ -450,7 +569,7 @@ fn render_flat_group(ctx: &RenderCtx, family: &Family, group_id: &str) -> String
     }
     for member in &family.members {
         let member_id = format!("{family_id}/m:{}", member.name);
-        parts.push(render_peer_card(ctx, family, member, &member_id));
+        parts.push(render_peer_card(ctx, family, member, &member_id, live));
     }
     parts.push("</div>".into());
     parts.join("\n")
@@ -462,6 +581,7 @@ pub fn render_git_repo_fragment(
     ctx: &RenderCtx,
     groups: &[Group],
     node_id: &str,
+    live: &LiveRunners,
 ) -> Option<String> {
     let rest = node_id.strip_prefix("code/")?;
     let (group_label, family_name) = rest.split_once('/')?;
@@ -475,6 +595,7 @@ pub fn render_git_repo_fragment(
                     ctx,
                     family,
                     &format!("code/{group_label}"),
+                    live,
                 ));
             }
         }
@@ -484,7 +605,7 @@ pub fn render_git_repo_fragment(
 
 /// Render the full Code tab given the list of discovered groups.
 /// Port of `_render_git_repos`.
-pub fn render_git_repos(ctx: &RenderCtx, groups: &[Group]) -> String {
+pub fn render_git_repos(ctx: &RenderCtx, groups: &[Group], live: &LiveRunners) -> String {
     if groups.is_empty() {
         return String::new();
     }
@@ -499,7 +620,7 @@ pub fn render_git_repos(ctx: &RenderCtx, groups: &[Group]) -> String {
             label = h(&group.label),
         ));
         for family in &group.families {
-            parts.push(render_flat_group(ctx, family, &group_id));
+            parts.push(render_flat_group(ctx, family, &group_id, live));
         }
         parts.push("</div></section>".into());
     }

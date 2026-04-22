@@ -151,6 +151,25 @@ pub async fn start_on(state: AppState, port: u16) -> Result<u16> {
     Ok(port)
 }
 
+/// Middleware — log any non-2xx response at warn-level with method +
+/// path + status. Written to stderr so it lands in the Tauri host's
+/// stdout capture and in `condash-serve`'s console. Keeps silent 404s
+/// from hiding unported routes; a future regression shows up as a
+/// one-liner after the first click.
+async fn log_non_2xx(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let response = next.run(req).await;
+    let status = response.status();
+    if status.is_client_error() || status.is_server_error() {
+        eprintln!("[condash] {method} {path} -> {}", status.as_u16());
+    }
+    response
+}
+
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
@@ -178,18 +197,39 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/runner/stop", post(runner_stop_route))
         .route("/ws/runner/{key}", get(runner_ws))
         // Phase 3 slice 3 — file-level mutations.
-        .route("/note", post(post_note))
+        .route("/note", get(get_note).post(post_note))
+        .route("/note-raw", get(get_note_raw))
         .route("/note/rename", post(post_note_rename))
         .route("/note/create", post(post_note_create))
         .route("/note/mkdir", post(post_note_mkdir))
         .route("/note/upload", post(post_note_upload))
         .route("/create-item", post(post_create_item))
+        // `/api/items` is the legacy path the bundled frontend still
+        // calls for the New Item modal. Kept as an alias so the modal
+        // works without a frontend rebuild; semantically identical.
+        .route("/api/items", post(post_create_item))
         // Configuration modal — plain-text YAML editor of
         // <conception>/configuration.yml.
         .route(
             "/configuration",
             get(get_configuration).post(post_configuration),
         )
+        // Legacy config summary — used by the frontend for setup-banner
+        // detection and terminal shortcut loading. Returns a small JSON
+        // dict with `conception_path` + `terminal` fields only.
+        .route("/config", get(get_config_summary))
+        // Open-path surface — these four dispatch the user-visible
+        // "Open with", "Open folder", "Open external", "Open doc"
+        // actions into detached external processes.
+        .route("/open", post(post_open))
+        .route("/open-folder", post(post_open_folder))
+        .route("/open-external", post(post_open_external))
+        .route("/open-doc", post(post_open_doc))
+        // Hard-refresh hook — rebuild RenderCtx from disk + invalidate
+        // cached slices. `refreshAll` in the frontend hits this before
+        // `location.reload()`.
+        .route("/rescan", post(post_rescan))
+        .layer(axum::middleware::from_fn(log_non_2xx))
         .with_state(state)
 }
 
@@ -376,6 +416,48 @@ async fn reorder_all_route(
 // Shape matches `src/condash/routes/notes.py` and
 // `src/condash/routes/items.py`.
 // ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct NotePathQuery {
+    #[serde(default)]
+    path: String,
+}
+
+/// `GET /note?path=…` — rendered HTML for the modal view pane. Dispatches
+/// on `note_kind` and returns preformatted text, `<img>`, a PDF host
+/// placeholder the frontend mounts PDF.js into, or the markdown render.
+async fn get_note(
+    State(state): State<AppState>,
+    Query(q): Query<NotePathQuery>,
+) -> impl IntoResponse {
+    if q.path.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "missing path");
+    }
+    let Some(full) = crate::paths::validate_note_path(&state.ctx.base_dir, &q.path) else {
+        return error(StatusCode::FORBIDDEN, "invalid path");
+    };
+    let html = condash_render::render_note(&q.path, &full, &state.ctx.base_dir);
+    html_response(html)
+}
+
+/// `GET /note-raw?path=…` — JSON `{content, kind, mtime}` for the edit
+/// pane. Binary kinds (pdf/image) return 415 so the frontend silently
+/// leaves the edit modes disabled (it catches the non-ok response).
+async fn get_note_raw(
+    State(state): State<AppState>,
+    Query(q): Query<NotePathQuery>,
+) -> impl IntoResponse {
+    if q.path.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "missing path");
+    }
+    let Some(full) = crate::paths::validate_note_path(&state.ctx.base_dir, &q.path) else {
+        return error_json(StatusCode::FORBIDDEN, "invalid path");
+    };
+    match condash_render::note_raw_payload(&full) {
+        Some(body) => json_response(&body),
+        None => error_json(StatusCode::UNSUPPORTED_MEDIA_TYPE, "not editable"),
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct NoteWritePayload {
@@ -718,13 +800,35 @@ fn error_json(code: StatusCode, msg: &str) -> Response {
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
     let items = state.cache.get_items(&state.ctx);
     let knowledge = state.cache.get_knowledge(&state.ctx);
+    let live_runners = live_runners_snapshot(&state);
     let html = render_page(
         &state.ctx,
         &items,
         knowledge.as_ref().as_ref(),
         &state.version,
+        &live_runners,
     );
     html_response(html)
+}
+
+/// Build the renderer's `LiveRunners` map from the current runner
+/// registry. One entry per session (live or exited); the renderer
+/// decides whether to paint the mount as running or "exited: N".
+fn live_runners_snapshot(state: &AppState) -> condash_render::git_render::LiveRunners {
+    state
+        .runner_registry
+        .snapshot()
+        .into_iter()
+        .map(|session| {
+            (
+                session.key.clone(),
+                condash_render::git_render::RunnerLive {
+                    checkout_key: session.checkout_key.clone(),
+                    exit_code: session.exit_code_now(),
+                },
+            )
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -769,7 +873,8 @@ async fn fragment(
             return error(StatusCode::NOT_FOUND, "use global reload");
         }
         let groups = collect_git_repos(&state.ctx);
-        if let Some(html) = render_git_repo_fragment(&state.ctx, &groups, &id) {
+        let live_runners = live_runners_snapshot(&state);
+        if let Some(html) = render_git_repo_fragment(&state.ctx, &groups, &id, &live_runners) {
             return html_response(html);
         }
         return error(StatusCode::NOT_FOUND, "repo not found");
@@ -1496,12 +1601,196 @@ async fn post_configuration(State(state): State<AppState>, body: String) -> Resp
         return error(StatusCode::BAD_REQUEST, &format!("{e}"));
     }
     match crate::config::write_configuration(&state.ctx.base_dir, &body) {
-        Ok(_path) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            "saved. Close and reopen condash for changes to take effect.\n",
-        )
-            .into_response(),
+        Ok(_path) => {
+            // Invalidate caches so the next `/` hit re-walks the tree.
+            // The RenderCtx itself still only rebuilds on restart or
+            // /rescan — the modal's success message tells the user as
+            // much.
+            state.cache.invalidate_items();
+            state.cache.invalidate_knowledge();
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                "saved. Close and reopen condash for changes to take effect.\n",
+            )
+                .into_response()
+        }
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e}")),
     }
+}
+
+// ---------------------------------------------------------------------
+// Legacy `/config` summary endpoint — kept for the bundled frontend's
+// setup-banner detection and terminal-shortcut loader. Returns only the
+// fields those two callers actually use. For full-config editing the
+// frontend uses `/configuration`.
+// ---------------------------------------------------------------------
+
+async fn get_config_summary(State(state): State<AppState>) -> Response {
+    let conception_path = state.ctx.base_dir.to_string_lossy().into_owned();
+    let term = &state.ctx.terminal;
+    let body = serde_json::json!({
+        "conception_path": conception_path,
+        "terminal": {
+            "shell": term.shell.clone().unwrap_or_default(),
+            "shortcut": term.shortcut.clone().unwrap_or_default(),
+            "screenshot_dir": term.screenshot_dir.clone().unwrap_or_default(),
+            "screenshot_paste_shortcut": term.screenshot_paste_shortcut.clone().unwrap_or_default(),
+            "launcher_command": term.launcher_command.clone().unwrap_or_default(),
+            "move_tab_left_shortcut": term.move_tab_left_shortcut.clone().unwrap_or_default(),
+            "move_tab_right_shortcut": term.move_tab_right_shortcut.clone().unwrap_or_default(),
+        }
+    });
+    json_response(&body)
+}
+
+// ---------------------------------------------------------------------
+// External-opener routes — `POST /open`, `/open-folder`, `/open-external`,
+// `/open-doc`. Each one validates the incoming path (URL for
+// /open-external) and dispatches to the openers module, which spawns a
+// detached `sh -c "<template with {path} filled in>"` and walks the
+// configured fallback chain. Returns 200 on first success, 502 when the
+// entire chain falls through, 400/403 on validation failures.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct OpenPayload {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    tool: String,
+}
+
+async fn post_open(State(state): State<AppState>, Json(p): Json<OpenPayload>) -> impl IntoResponse {
+    if p.path.trim().is_empty() || p.tool.trim().is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "path and tool required");
+    }
+    let Some(validated) = validate_open_path(&state.ctx, &p.path) else {
+        return error_json(StatusCode::FORBIDDEN, "path out of sandbox");
+    };
+    let Some(slot) = state.ctx.open_with.get(&p.tool) else {
+        return error_json(StatusCode::NOT_FOUND, &format!("unknown tool: {}", p.tool));
+    };
+    if slot.commands.is_empty() {
+        return error_json(
+            StatusCode::FAILED_DEPENDENCY,
+            &format!("no commands configured for {}", p.tool),
+        );
+    }
+    let value = validated.to_string_lossy().into_owned();
+    match crate::openers::try_chain(&slot.commands, "path", &value) {
+        Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
+        None => error_json(StatusCode::BAD_GATEWAY, "all commands failed"),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PathOnlyPayload {
+    #[serde(default)]
+    path: String,
+}
+
+async fn post_open_folder(
+    State(state): State<AppState>,
+    Json(p): Json<PathOnlyPayload>,
+) -> impl IntoResponse {
+    if p.path.trim().is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "path required");
+    }
+    let Some(validated) = validate_open_path(&state.ctx, &p.path) else {
+        return error_json(StatusCode::FORBIDDEN, "path out of sandbox");
+    };
+    let value = validated.to_string_lossy().into_owned();
+    match crate::openers::try_chain_static(crate::openers::FOLDER_FALLBACKS, "path", &value) {
+        Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
+        None => error_json(StatusCode::BAD_GATEWAY, "no folder opener succeeded"),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalPayload {
+    #[serde(default)]
+    url: String,
+}
+
+async fn post_open_external(Json(p): Json<ExternalPayload>) -> impl IntoResponse {
+    let url = p.url.trim();
+    if url.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "url required");
+    }
+    // Only hand verified URL schemes to `xdg-open` — never bare paths
+    // or `javascript:` / `data:` tricks the webview might let through.
+    let allowed = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("mailto:")
+        || url.starts_with("file://");
+    if !allowed {
+        return error_json(StatusCode::BAD_REQUEST, "unsupported url scheme");
+    }
+    match crate::openers::try_chain_static(crate::openers::URL_FALLBACKS, "url", url) {
+        Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
+        None => error_json(StatusCode::BAD_GATEWAY, "no url opener succeeded"),
+    }
+}
+
+async fn post_open_doc(
+    State(state): State<AppState>,
+    Json(p): Json<PathOnlyPayload>,
+) -> impl IntoResponse {
+    if p.path.trim().is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "path required");
+    }
+    // /open-doc may land on an absolute path (from a note link) or a
+    // conception-tree-relative path (from a card button). Try to
+    // resolve it either way inside the sandbox. The note-link path is
+    // already sandbox-safe (the note path itself was validated to open
+    // the modal), so we first try the raw value and fall back to
+    // base_dir-rooted resolution.
+    let full = match validate_open_path(&state.ctx, &p.path) {
+        Some(v) => v,
+        None => {
+            let rel = state.ctx.base_dir.join(&p.path);
+            match std::fs::canonicalize(&rel).ok().and_then(|c| {
+                let base = std::fs::canonicalize(&state.ctx.base_dir).ok()?;
+                if c.starts_with(&base) {
+                    Some(c)
+                } else {
+                    None
+                }
+            }) {
+                Some(v) => v,
+                None => return error_json(StatusCode::FORBIDDEN, "path out of sandbox"),
+            }
+        }
+    };
+    let value = full.to_string_lossy().into_owned();
+    // Prefer the user's configured pdf_viewer chain; fall back to the
+    // xdg-open / gio open chain.
+    let chain: Vec<String> = if state.ctx.pdf_viewer.is_empty() {
+        crate::openers::DOC_FALLBACKS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        state.ctx.pdf_viewer.clone()
+    };
+    match crate::openers::try_chain(&chain, "path", &value) {
+        Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
+        None => error_json(StatusCode::BAD_GATEWAY, "no doc opener succeeded"),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Hard-refresh — invalidate cached slices. The RenderCtx itself still
+// rebuilds only when the user actively edits configuration.yml through
+// the modal; this endpoint exists so the top-bar refresh button forces
+// a fresh filesystem walk through the WorkspaceCache on the next
+// request, picking up out-of-band edits (git pull, external renames,
+// direct YAML hand-edits after close+reopen).
+// ---------------------------------------------------------------------
+
+async fn post_rescan(State(state): State<AppState>) -> impl IntoResponse {
+    state.cache.invalidate_items();
+    state.cache.invalidate_knowledge();
+    json_response(&serde_json::json!({"ok": true}))
 }

@@ -158,7 +158,13 @@ fn build_ctx_from_py(ctx_json: &Value, base: &Path) -> RenderCtx {
                         .and_then(|l| l.as_str())
                         .unwrap_or(k.as_str())
                         .to_string();
-                    (k.clone(), OpenWithSlot { label })
+                    (
+                        k.clone(),
+                        OpenWithSlot {
+                            label,
+                            commands: Vec::new(),
+                        },
+                    )
                 })
                 .collect()
         })
@@ -199,13 +205,18 @@ fn render_rust(
     }
 
     let git_groups = collect_git_repos(ctx);
-    let git_html = render_git_repos(ctx, &git_groups);
+    // The diff harness only compares rendered HTML shapes; runners are a
+    // per-process-state concern the harness doesn't model. Pass an
+    // empty live map so both builds render the "no session" branch.
+    let live_runners: condash_render::git_render::LiveRunners = Default::default();
+    let git_html = render_git_repos(ctx, &git_groups, &live_runners);
     let mut git_fragments: HashMap<String, String> = HashMap::new();
     for group in &git_groups {
         let group_id = format!("code/{}", group.label);
         for family in &group.families {
             let node_id = format!("{group_id}/{}", family.name);
-            if let Some(html) = render_git_repo_fragment(ctx, &git_groups, &node_id) {
+            if let Some(html) = render_git_repo_fragment(ctx, &git_groups, &node_id, &live_runners)
+            {
                 git_fragments.insert(node_id, html);
             }
         }

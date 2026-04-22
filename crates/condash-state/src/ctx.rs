@@ -28,12 +28,14 @@ pub struct RepoEntry {
 }
 
 /// One "Open with …" slot config entry. Mirrors Python's
-/// `OpenWithSlot` — only the user-visible `label` is needed for
-/// rendering; the `commands` list is used by the mutations / openers
-/// layer (Phase 3+) and lives elsewhere.
+/// `OpenWithSlot`: the user-visible `label` drives rendering, and the
+/// `commands` fallback chain is tried in order by the openers layer.
+/// Each command is a shell template with `{path}` substitution — the
+/// first that exits 0 wins.
 #[derive(Debug, Clone, Default)]
 pub struct OpenWithSlot {
     pub label: String,
+    pub commands: Vec<String>,
 }
 
 /// Embedded-terminal preferences. Carries the Python

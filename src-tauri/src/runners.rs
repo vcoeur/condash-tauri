@@ -89,6 +89,20 @@ impl RunnerRegistry {
             .collect()
     }
 
+    /// Snapshot of every registry entry — the caller iterates to build
+    /// whatever aggregate it needs (e.g. the renderer's `LiveRunners`
+    /// map) without holding the mutex across the build. Both live and
+    /// exited sessions are returned; filter on `exit_code_now()` if
+    /// you only want the running ones.
+    pub fn snapshot(&self) -> Vec<Arc<RunnerSession>> {
+        self.inner
+            .lock()
+            .expect("runners mutex")
+            .values()
+            .cloned()
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.inner.lock().expect("runners mutex").len()
     }

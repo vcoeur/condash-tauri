@@ -3044,7 +3044,13 @@ function refreshAll() {
     _pendingReloadInPlace = false;
     _lastFingerprint = null;
     _lastGitFingerprint = null;
-    location.reload();
+    // Force-invalidate the server-side items/knowledge caches before
+    // reloading so the next GET / re-walks the tree from disk. Best
+    // effort: reload unconditionally even if the POST errors, since
+    // `location.reload()` is also the user-requested action.
+    fetch('/rescan', {method: 'POST'})
+        .catch(function() {})
+        .finally(function() { location.reload(); });
 }
 
 /* --- Local subtree reload ---
@@ -4985,8 +4991,12 @@ Object.assign(window, {
     openConfigModal, openNewItemModal, openAboutModal,
     closeConfigModal, closeNewItemModal, closeAboutModal, closeNotePreview,
     toggleTheme, toggleTerminal, termNewTab, termNewLauncherTab,
+    termDragStart, termSplitStart,
     switchTab, switchSubtab, switchConfigTab, refreshAll, setNoteMode,
-    noteSearchStep, noteSearchClose, saveEdit, noteNavBack,
+    noteSearchStep, noteSearchClose, noteSearchRun, saveEdit, noteNavBack,
+    openPath,
+    filterHistory, filterKnowledge,
+    saveConfig, submitNewItem, _setDirty,
     jumpToProject, _openHistoryHit,
     _noteReconcileDismiss, _noteReconcileReload,
 });

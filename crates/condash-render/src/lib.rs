@@ -16,7 +16,10 @@
 
 pub mod git_render;
 pub mod icons;
+pub mod note_render;
 pub mod templating;
+
+pub use note_render::{raw_payload as note_raw_payload, render_note};
 
 use condash_parser::{knowledge_title_and_desc, Item, KnowledgeCard, KnowledgeNode};
 use condash_state::{collect_git_repos, RenderCtx};
@@ -203,6 +206,7 @@ pub fn render_page(
     items: &[Item],
     knowledge: Option<&KnowledgeNode>,
     version: &str,
+    live_runners: &git_render::LiveRunners,
 ) -> String {
     // Sort: by (pri_order, slug[:10]), then within each priority reverse
     // by slug[:10]. Matches Python's two-pass sort exactly.
@@ -267,7 +271,7 @@ pub fn render_page(
     }
 
     let git_groups = collect_git_repos(ctx);
-    let git_html = git_render::render_git_repos(ctx, &git_groups);
+    let git_html = git_render::render_git_repos(ctx, &git_groups, live_runners);
     let count_repos: usize = git_groups.iter().map(|g| g.families.len()).sum();
 
     let knowledge_html = render_knowledge(knowledge);
@@ -401,7 +405,8 @@ mod tests {
             template: "<html>{{CARDS}} | count={{COUNT_PROJECTS}} | v={{VERSION}}</html>".into(),
             ..Default::default()
         };
-        let out = render_page(&ctx, &[], None, "0.99.0");
+        let live: git_render::LiveRunners = Default::default();
+        let out = render_page(&ctx, &[], None, "0.99.0", &live);
         assert!(out.contains("count=0"));
         assert!(out.contains("v=0.99.0"));
     }

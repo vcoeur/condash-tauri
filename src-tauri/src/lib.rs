@@ -15,6 +15,7 @@ use tauri::Manager;
 pub mod assets;
 pub mod config;
 pub mod events;
+pub mod openers;
 pub mod paths;
 pub mod pty;
 pub mod runners;
