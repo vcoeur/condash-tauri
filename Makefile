@@ -25,6 +25,12 @@ ESBUILD_VERSION               := 0.24.0
 # dashboard.html so the note preview modal can render mermaid code
 # blocks offline.
 MERMAID_VERSION               := 11.14.0
+
+# Vendored xterm.js pins — bumped by `make update-xterm`. The xterm@5 line
+# is the last under the unscoped name (v6+ moved to @xterm/xterm); we
+# stay on 5.x until we have a reason to cross that break.
+XTERM_VERSION                 := 5.3.0
+XTERM_FIT_VERSION             := 0.8.0
 # NOTE: state/view versions must match what @codemirror/lint and
 # @codemirror/search (transitive deps of basicSetup) require at top
 # level — otherwise npm nests a second copy and the bundle loads two
@@ -173,4 +179,21 @@ update-mermaid: ## Re-vendor Mermaid at $(MERMAID_VERSION) into frontend/vendor/
 	echo "Vendored Mermaid $(MERMAID_VERSION):"; \
 	du -sh "$$DEST"
 
-.PHONY: help setup run serve build check test format frontend update-pdfjs update-codemirror update-mermaid
+update-xterm: ## Re-vendor xterm.js at $(XTERM_VERSION) + xterm-addon-fit at $(XTERM_FIT_VERSION) into frontend/vendor/xterm/
+	@set -e; \
+	DEST=frontend/vendor/xterm; \
+	rm -rf "$$DEST"; \
+	mkdir -p "$$DEST/lib" "$$DEST/css"; \
+	echo "Downloading xterm $(XTERM_VERSION) + xterm-addon-fit $(XTERM_FIT_VERSION)"; \
+	curl -sSL -o "$$DEST/lib/xterm.min.js" \
+	    "https://cdn.jsdelivr.net/npm/xterm@$(XTERM_VERSION)/lib/xterm.js"; \
+	curl -sSL -o "$$DEST/lib/xterm-addon-fit.min.js" \
+	    "https://cdn.jsdelivr.net/npm/xterm-addon-fit@$(XTERM_FIT_VERSION)/lib/xterm-addon-fit.js"; \
+	curl -sSL -o "$$DEST/css/xterm.min.css" \
+	    "https://cdn.jsdelivr.net/npm/xterm@$(XTERM_VERSION)/css/xterm.min.css"; \
+	curl -sSL -o "$$DEST/LICENSE" \
+	    "https://cdn.jsdelivr.net/npm/xterm@$(XTERM_VERSION)/LICENSE"; \
+	echo "Vendored xterm $(XTERM_VERSION) + addon-fit $(XTERM_FIT_VERSION):"; \
+	du -sh "$$DEST"
+
+.PHONY: help setup run serve build check test format frontend update-pdfjs update-codemirror update-mermaid update-xterm
