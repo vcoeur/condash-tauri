@@ -28,7 +28,34 @@ permissions:
   contents: write
 
 jobs:
+  # Build the frontend bundle once on Linux and hand it to each per-OS
+  # bundle job as an artifact. `frontend/dist/` is gitignored — the
+  # bundle must exist on disk when tauri-action runs `cargo tauri build`
+  # because tauri.conf.json sets `frontendDist: "../frontend"`.
+  frontend:
+    name: frontend-bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend bundle
+        run: make frontend
+
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 1
+
   build:
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +72,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download frontend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
 
       - name: Install Linux Tauri deps
         if: matrix.os == 'ubuntu-latest'

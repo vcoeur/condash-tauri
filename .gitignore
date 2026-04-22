@@ -5,6 +5,11 @@ node_modules/
 .npm-cache/
 npm-debug.log*
 
+# Frontend build output — rebuilt in CI by the `frontend` job in
+# .github/workflows/release.yml and passed to the per-OS bundle jobs as
+# an artifact. Run `make frontend` locally before `cargo tauri build`.
+frontend/dist/
+
 # MkDocs build output (built in CI, deployed via GitHub Actions)
 site/
 
