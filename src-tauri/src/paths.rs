@@ -1,49 +1,166 @@
-//! Path validation for user-supplied item paths. Mirrors the subset of
-//! `src/condash/paths.py` that the write-side step routes need —
-//! `_safe_resolve` + `_validate_path`. Same rules:
+//! Path validation for user-supplied paths. Mirrors the subset of
+//! `src/condash/paths.py` that the write-side routes need — the
+//! `_safe_resolve` helper plus the regex-gated validators
+//! (`_validate_path`, `validate_note_path`, …) and small helpers the
+//! mutation handlers depend on (`_resolve_under_item`,
+//! `_VALID_NOTE_FILENAME_RE`, …).
 //!
-//! 1. Reject empty / NUL / `..` outright.
-//! 2. Gate with a regex that requires the standard
-//!    `projects/YYYY-MM/YYYY-MM-DD-slug/README.md` shape.
+//! Every validator follows the same shape Python does:
+//!
+//! 1. Reject empty / NUL / literal `..` outright.
+//! 2. Gate with one or more regexes.
 //! 3. Resolve under `base_dir`, refuse anything whose canonical path
-//!    escapes `base_dir`.
-//!
-//! The step mutations target READMEs that must already exist — so we
-//! also require the target to resolve to an on-disk file.
+//!    escapes it.
+//! 4. Optionally require the resolved entry be a file on disk.
 
 use std::path::{Path, PathBuf};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-/// `projects/YYYY-MM/YYYY-MM-DD-<slug>/README.md`. Same regex as
-/// `_VALID_PATH_RE` in `paths.py`.
+/// Common item-path prefix — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`.
+const VALID_ITEM_PREFIX: &str = r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/";
+
+/// `projects/YYYY-MM/YYYY-MM-DD-<slug>/README.md` — `_VALID_PATH_RE`.
 static VALID_README_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/README\.md$")
-        .expect("VALID_README_RE compiles")
+    Regex::new(&format!("{VALID_ITEM_PREFIX}README\\.md$")).expect("VALID_README_RE compiles")
 });
 
-/// Validate `rel_path` under `base_dir`, returning the resolved absolute
-/// path if it passes every check. Returns `None` otherwise. Mirrors
-/// `paths._validate_path(ctx, rel_path)` — the README must resolve to an
-/// existing *file* under `base_dir`.
-pub fn validate_readme_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
+/// `<item>/<anything>.md` — `_VALID_NOTE_RE` in `paths.py`.
+static VALID_NOTE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(r"{VALID_ITEM_PREFIX}[\w./-]+\.md$")).expect("VALID_NOTE_RE compiles")
+});
+
+/// `knowledge/<file>.md` — `_VALID_KNOWLEDGE_NOTE_RE`. Matches `knowledge/`
+/// at any depth.
+static VALID_KNOWLEDGE_NOTE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^knowledge/(?:[\w.-]+/)*[\w.-]+\.md$").expect("VALID_KNOWLEDGE_NOTE_RE compiles")
+});
+
+/// Any file at any depth inside an item directory — `_VALID_ITEM_FILE_RE`.
+static VALID_ITEM_FILE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(r"{VALID_ITEM_PREFIX}[\w./-]+$")).expect("VALID_ITEM_FILE_RE compiles")
+});
+
+/// Restricted to files directly under `<item>/notes/` — used by rename
+/// (only notes are user-renamable). `_VALID_ITEM_NOTES_FILE_RE`.
+static VALID_ITEM_NOTES_FILE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(r"{VALID_ITEM_PREFIX}notes/[\w./-]+$"))
+        .expect("VALID_ITEM_NOTES_FILE_RE compiles")
+});
+
+/// `<name>.<ext>` — `_VALID_NOTE_FILENAME_RE`. Used to validate the target
+/// of create_note / rename_note.
+pub static VALID_NOTE_FILENAME_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[\w.-]+\.[A-Za-z0-9]+$").expect("VALID_NOTE_FILENAME_RE compiles"));
+
+/// Simple bare-filename regex allowed for rename new-stem. Matches what
+/// `mutations.py` inlines as `re.match(r"^[\w.-]+$", new_stem)`.
+pub static VALID_NEW_STEM_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[\w.-]+$").expect("VALID_NEW_STEM_RE compiles"));
+
+/// Subdirectory path (possibly nested) — `_VALID_SUBDIR_RE`. Used by
+/// `resolve_under_item` to reject anything that doesn't look like a
+/// sequence of `[\w.-]+` segments.
+pub static VALID_SUBDIR_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[\w.-]+(/[\w.-]+)*$").expect("VALID_SUBDIR_RE compiles"));
+
+/// Upload filename regex — `_VALID_UPLOAD_FILENAME_RE`. More permissive
+/// than the note regex to accept typical Camera/PDF exports (spaces,
+/// parentheses).
+pub static VALID_UPLOAD_FILENAME_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^[\w. \-()]+\.[A-Za-z0-9]+$").expect("VALID_UPLOAD_FILENAME_RE compiles")
+});
+
+/// Low-level: resolve `rel_path` under `base_dir`, rejecting anything
+/// outside. `require_file=true` additionally checks that the resolved
+/// entry exists as a regular file; `require_file=false` only requires
+/// the path to resolve (which on Unix implies existence, since we go
+/// through `canonicalize`).
+pub fn safe_resolve(
+    base: &Path,
+    rel_path: &str,
+    regexes: &[&Regex],
+    require_file: bool,
+) -> Option<PathBuf> {
     if rel_path.is_empty() || rel_path.contains('\0') || rel_path.contains("..") {
         return None;
     }
-    if !VALID_README_RE.is_match(rel_path) {
+    if !regexes.is_empty() && !regexes.iter().any(|r| r.is_match(rel_path)) {
         return None;
     }
-    let candidate = base_dir.join(rel_path);
+    let candidate = base.join(rel_path);
     let canonical = std::fs::canonicalize(&candidate).ok()?;
-    let base_canonical = std::fs::canonicalize(base_dir).ok()?;
+    let base_canonical = std::fs::canonicalize(base).ok()?;
     if !canonical.starts_with(&base_canonical) {
         return None;
     }
-    if !canonical.is_file() {
+    if require_file && !canonical.is_file() {
         return None;
     }
     Some(canonical)
+}
+
+/// Validate a README path (`projects/YYYY-MM/<slug>/README.md`). The
+/// README must resolve to an existing file under `base_dir`. Mirrors
+/// `paths._validate_path` (plus the step-mutation handlers' implicit
+/// require_file=true, since they immediately read the file).
+pub fn validate_readme_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
+    safe_resolve(base_dir, rel_path, &[&VALID_README_RE], true)
+}
+
+/// Validate a note-like path — item-tree file, `<item>/notes/*.md`, or
+/// `knowledge/**/*.md`. Mirrors `paths.validate_note_path`. The target
+/// must resolve to an existing file.
+pub fn validate_note_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
+    safe_resolve(
+        base_dir,
+        rel_path,
+        &[
+            &VALID_NOTE_RE,
+            &VALID_KNOWLEDGE_NOTE_RE,
+            &VALID_ITEM_FILE_RE,
+        ],
+        true,
+    )
+}
+
+/// `true` iff `rel_path` looks like `<item>/notes/<filename>`. Used by
+/// `rename_note` to refuse renaming anything that isn't a user note
+/// (item READMEs, loose files alongside the README, …).
+pub fn is_item_notes_file(rel_path: &str) -> bool {
+    VALID_ITEM_NOTES_FILE_RE.is_match(rel_path)
+}
+
+/// Resolve `subdir` (relative to `item_dir`) and verify the result stays
+/// inside the item directory. Empty `subdir` resolves to `item_dir`
+/// itself. Returns `None` on traversal / regex failure. Mirrors
+/// `mutations._resolve_under_item`.
+pub fn resolve_under_item(item_dir: &Path, subdir: &str) -> Option<PathBuf> {
+    let trimmed = subdir.trim().trim_matches('/');
+    if trimmed.is_empty() {
+        return Some(item_dir.to_path_buf());
+    }
+    if trimmed.split('/').any(|seg| seg == "..") {
+        return None;
+    }
+    if !VALID_SUBDIR_RE.is_match(trimmed) {
+        return None;
+    }
+    let target = item_dir.join(trimmed);
+    // Python uses `.resolve().relative_to(item_dir.resolve())`. We match
+    // that via `canonicalize` when the target exists, and a literal
+    // prefix check when it does not (the target may legitimately not
+    // exist yet in the create_note / mkdir flows — the regex + `..`
+    // reject above is enough to keep us safely inside).
+    if let Ok(canonical_target) = std::fs::canonicalize(&target) {
+        let canonical_base = std::fs::canonicalize(item_dir).ok()?;
+        if !canonical_target.starts_with(&canonical_base) {
+            return None;
+        }
+        return Some(canonical_target);
+    }
+    Some(target)
 }
 
 #[cfg(test)]
@@ -56,26 +173,28 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let base = dir.path().to_path_buf();
         let item = base.join("projects/2026-04/2026-04-22-demo");
-        fs::create_dir_all(&item).unwrap();
-        let readme = item.join("README.md");
-        fs::write(&readme, "# demo\n").unwrap();
+        fs::create_dir_all(item.join("notes")).unwrap();
+        fs::write(item.join("README.md"), "# demo\n").unwrap();
+        fs::write(item.join("notes/first.md"), "hello\n").unwrap();
+        fs::create_dir_all(base.join("knowledge/topics")).unwrap();
+        fs::write(base.join("knowledge/conventions.md"), "c\n").unwrap();
+        fs::write(base.join("knowledge/topics/dev.md"), "d\n").unwrap();
         (dir, base)
     }
 
     #[test]
     fn accepts_well_formed_readme() {
         let (_tmp, base) = seeded_tree();
-        let full = validate_readme_path(&base, "projects/2026-04/2026-04-22-demo/README.md");
-        assert!(full.is_some());
+        assert!(
+            validate_readme_path(&base, "projects/2026-04/2026-04-22-demo/README.md").is_some()
+        );
     }
 
     #[test]
     fn rejects_traversal() {
         let (_tmp, base) = seeded_tree();
-        assert!(
-            validate_readme_path(&base, "projects/../etc/passwd").is_none(),
-            "must reject .."
-        );
+        assert!(validate_readme_path(&base, "projects/../etc/passwd").is_none());
+        assert!(validate_note_path(&base, "projects/../../etc/passwd").is_none());
     }
 
     #[test]
@@ -89,8 +208,9 @@ mod tests {
     #[test]
     fn rejects_missing_file() {
         let (_tmp, base) = seeded_tree();
-        let missing = "projects/2026-04/2026-04-22-ghost/README.md";
-        assert!(validate_readme_path(&base, missing).is_none());
+        assert!(
+            validate_readme_path(&base, "projects/2026-04/2026-04-22-ghost/README.md").is_none()
+        );
     }
 
     #[test]
@@ -98,5 +218,80 @@ mod tests {
         let (_tmp, base) = seeded_tree();
         assert!(validate_readme_path(&base, "").is_none());
         assert!(validate_readme_path(&base, "a\0b").is_none());
+    }
+
+    #[test]
+    fn accepts_note_under_item_notes_dir() {
+        let (_tmp, base) = seeded_tree();
+        assert!(
+            validate_note_path(&base, "projects/2026-04/2026-04-22-demo/notes/first.md").is_some()
+        );
+    }
+
+    #[test]
+    fn accepts_knowledge_note() {
+        let (_tmp, base) = seeded_tree();
+        assert!(validate_note_path(&base, "knowledge/conventions.md").is_some());
+        assert!(validate_note_path(&base, "knowledge/topics/dev.md").is_some());
+    }
+
+    #[test]
+    fn is_item_notes_file_gates_rename_source() {
+        assert!(is_item_notes_file(
+            "projects/2026-04/2026-04-22-demo/notes/first.md"
+        ));
+        assert!(!is_item_notes_file(
+            "projects/2026-04/2026-04-22-demo/README.md"
+        ));
+        assert!(!is_item_notes_file(
+            "projects/2026-04/2026-04-22-demo/loose.md"
+        ));
+    }
+
+    #[test]
+    fn resolve_under_item_empty_is_item_dir() {
+        let (_tmp, base) = seeded_tree();
+        let item = base.join("projects/2026-04/2026-04-22-demo");
+        assert_eq!(resolve_under_item(&item, ""), Some(item.clone()));
+        assert_eq!(resolve_under_item(&item, "   "), Some(item.clone()));
+        assert_eq!(resolve_under_item(&item, "/"), Some(item.clone()));
+    }
+
+    #[test]
+    fn resolve_under_item_nested() {
+        let (_tmp, base) = seeded_tree();
+        let item = base.join("projects/2026-04/2026-04-22-demo");
+        let got = resolve_under_item(&item, "notes").expect("notes exists");
+        assert!(got.ends_with("projects/2026-04/2026-04-22-demo/notes"));
+    }
+
+    #[test]
+    fn resolve_under_item_rejects_traversal() {
+        let (_tmp, base) = seeded_tree();
+        let item = base.join("projects/2026-04/2026-04-22-demo");
+        assert!(resolve_under_item(&item, "..").is_none());
+        assert!(resolve_under_item(&item, "notes/..").is_none());
+        assert!(resolve_under_item(&item, "../../etc").is_none());
+    }
+
+    #[test]
+    fn resolve_under_item_allows_nonexistent_nested() {
+        let (_tmp, base) = seeded_tree();
+        let item = base.join("projects/2026-04/2026-04-22-demo");
+        // The target doesn't exist yet — create_notes_subdir uses this
+        // code path. Should still resolve, since the regex + ".." reject
+        // keep us safe.
+        let got = resolve_under_item(&item, "freshly/nested").expect("ok");
+        assert!(got.ends_with("projects/2026-04/2026-04-22-demo/freshly/nested"));
+    }
+
+    #[test]
+    fn valid_new_stem_accepts_reasonable_names() {
+        for good in ["report", "report.draft", "report-2", "under_score"] {
+            assert!(VALID_NEW_STEM_RE.is_match(good), "want match: {good}");
+        }
+        for bad in ["", "has space", "a/b", "../x"] {
+            assert!(!VALID_NEW_STEM_RE.is_match(bad), "want reject: {bad}");
+        }
     }
 }
