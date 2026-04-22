@@ -1,26 +1,3 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg
-*.egg-info/
-.eggs/
-*.so
-
-# Distribution / packaging
-build/
-dist/
-wheels/
-.wheels/
-# …but the vendored PDF.js has a build/ subdir that is real source, not a
-# dist artefact — re-include it explicitly.
-!frontend/vendor/pdfjs/build/
-!frontend/vendor/pdfjs/build/**
-# …and the frontend build output ships with the wheel (esbuild bundles,
-# rebuilt by `make frontend`), same re-include pattern.
-!frontend/dist/
-!frontend/dist/**
-
 # Node — frontend build toolchain. esbuild is invoked via `npx --yes` by
 # `make frontend` so `node_modules/` is never required, but a developer who
 # runs `npm install` locally (for IDE completions) produces one.
@@ -28,25 +5,12 @@ node_modules/
 .npm-cache/
 npm-debug.log*
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# uv
-.uv/
-
 # MkDocs build output (built in CI, deployed via GitHub Actions)
 site/
 
-# Testing / tooling caches
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-
-# Test config
+# Local-only environment file — per-developer overrides read by the dev
+# scripts. The repo's shipped values are safe defaults; the local copy is
+# where credentials or machine-specific paths go.
 .env
 
 # Editors / OS
