@@ -1,8 +1,6 @@
-PYTHONPATH := $(shell pwd)
-
 # Vendored Mozilla PDF.js version — bumped by `make update-pdfjs`. The
-# live assets live under frontend/vendor/pdfjs/ (see app.py's
-# /vendor/pdfjs route and dashboard.html's PDF.js ES module block).
+# live assets live under frontend/vendor/pdfjs/ and are embedded into
+# the Tauri binary via rust-embed (see src-tauri/src/assets.rs).
 PDFJS_VERSION := 5.6.205
 
 # Vendored CodeMirror 6 pins — bumped by `make update-codemirror`. The
@@ -23,9 +21,9 @@ ESBUILD_VERSION               := 0.24.0
 
 # Vendored Mermaid version — bumped by `make update-mermaid`. The live
 # bundle is the upstream-published UMD file at
-# frontend/vendor/mermaid/mermaid.min.js, served by app.py's
-# /vendor/mermaid route and loaded unconditionally by dashboard.html
-# so the note preview modal can render mermaid code blocks offline.
+# frontend/vendor/mermaid/mermaid.min.js, loaded unconditionally by
+# dashboard.html so the note preview modal can render mermaid code
+# blocks offline.
 MERMAID_VERSION               := 11.14.0
 # NOTE: state/view versions must match what @codemirror/lint and
 # @codemirror/search (transitive deps of basicSetup) require at top
@@ -33,34 +31,15 @@ MERMAID_VERSION               := 11.14.0
 # @codemirror/state modules, which breaks CM's instanceof extension
 # checks with "Unrecognized extension value in extension set".
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "%-16s %s\n", $$1, $$2}'
-
-install: ## Install dependencies into a uv-managed venv
-	uv sync
-
-dev-install: ## Install dev dependencies too
-	uv sync --all-extras
-
-run: ## Run the condash CLI (pass args after --, e.g. make run -- init)
-	uv run condash
-
-# Rust + Tauri port (Phase 0). The rustup-managed toolchain at
-# ~/.rustup/toolchains/*/bin is picked up explicitly because the user
-# does not have ~/.cargo/bin on PATH. Once cargo-tauri is installed it
-# lives under that same toolchain's bin dir, so the same prefix works.
+# The rustup-managed toolchain at ~/.rustup/toolchains/*/bin is picked
+# up explicitly because the user does not have ~/.cargo/bin on PATH.
+# Once cargo-tauri is installed it lives under that same toolchain's
+# bin dir, so the same prefix works.
 RUSTUP_BIN := $(HOME)/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin
 CARGO      := $(RUSTUP_BIN)/cargo
 
-run-tauri: ## Phase 0 exit gate — open the Tauri window against dashboard.html with stub (404) API
-	cd src-tauri && PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) tauri dev
-
-run-rust: ## Phase 2 slice 5 — run the Rust HTTP server headless (no GUI deps needed)
-	PATH="$(RUSTUP_BIN):$$PATH" CONDASH_CONCEPTION_PATH=$(CONCEPTION) \
-	    $(CARGO) run -q --bin condash-serve
-
-build-tauri: ## Bundle Tauri release artefacts (requires Linux system deps)
-	cd src-tauri && PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) tauri build
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "%-20s %s\n", $$1, $$2}'
 
 install-tauri-cli: ## One-shot: install cargo-tauri CLI into the rustup toolchain
 	# Prepend RUSTUP_BIN to PATH so cargo finds the rustup-managed rustc
@@ -68,88 +47,26 @@ install-tauri-cli: ## One-shot: install cargo-tauri CLI into the rustup toolchai
 	# for tauri-cli.
 	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) install tauri-cli --version '^2'
 
-test-rust: ## Run cargo tests across the workspace (condash-parser, src-tauri, …)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) test --workspace
+run-tauri: ## Open the Tauri window against dashboard.html
+	cd src-tauri && PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) tauri dev
 
-check-rust: ## cargo check across the workspace (fast, no codegen)
+run-serve: ## Run the Rust HTTP server headless (no GUI deps needed). Override CONCEPTION= to point elsewhere.
+	PATH="$(RUSTUP_BIN):$$PATH" CONDASH_CONCEPTION_PATH=$(CONCEPTION) \
+	    $(CARGO) run -q --bin condash-serve
+
+build-tauri: ## Bundle Tauri release artefacts (requires Linux system deps)
+	cd src-tauri && PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) tauri build
+
+check: ## cargo check across the workspace (fast, no codegen)
 	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) check --workspace
 
-fmt-rust: ## cargo fmt across the workspace
+test: ## Run cargo tests across the workspace
+	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) test --workspace
+
+format: ## cargo fmt across the workspace
 	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) fmt --all
 
-# Phase 1 exit gate. Override CONCEPTION= to diff against a different tree.
 CONCEPTION ?= $(HOME)/src/vcoeur/conception
-
-diff-parser: diff-parser-per-readme diff-parser-collect diff-parser-fingerprints ## Run every parser-diff mode against the conception corpus
-
-diff-parser-per-readme: ## Diff per-README parse output Rust-vs-Python (Phase 1 exit gate)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-parser --bin parser-diff -- \
-	    --conception $(CONCEPTION) \
-	    --condash-src $(CURDIR)/src \
-	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
-	    --python python3 \
-	    --mode per-readme
-
-diff-parser-collect: ## Diff collect_items + collect_knowledge Rust-vs-Python (Phase 2 slice 1 exit gate)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-parser --bin parser-diff -- \
-	    --conception $(CONCEPTION) \
-	    --condash-src $(CURDIR)/src \
-	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
-	    --python python3 \
-	    --mode collect
-
-diff-parser-fingerprints: ## Diff /check-updates fingerprints Rust-vs-Python (Phase 2 slice 2 exit gate)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-parser --bin parser-diff -- \
-	    --conception $(CONCEPTION) \
-	    --condash-src $(CURDIR)/src \
-	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
-	    --python python3 \
-	    --mode fingerprints
-
-diff-render: ## Diff rendered card + knowledge fragments Rust-vs-Python (Phase 2 slice 3 exit gate)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-render --bin render-diff -- \
-	    --conception $(CONCEPTION) \
-	    --condash-src $(CURDIR)/src \
-	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
-	    --python python3
-
-diff-state: ## Diff git_scan + search outputs Rust-vs-Python (Phase 2 slice 4 exit gate)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-state --bin state-diff -- \
-	    --conception $(CONCEPTION) \
-	    --condash-src $(CURDIR)/src \
-	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
-	    --python python3
-
-diff-mutations: ## Diff step-level mutations Rust-vs-Python (Phase 3 slice 1 exit gate)
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-mutations --bin mutation-diff -- \
-	    --conception $(CONCEPTION) \
-	    --condash-src $(CURDIR)/src \
-	    --driver $(CURDIR)/crates/condash-mutations/tools/py_driver.py \
-	    --python python3
-
-test: ## Run the fast in-process pytest suite (skips tests/e2e/)
-	uv run pytest; RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi
-
-test-e2e: ## Run the Playwright browser smoke tests (uses system Chrome)
-	uv run --extra e2e pytest tests/e2e -v; RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi
-
-test-e2e-rust: ## Phase 2 exit gate — Playwright smoke against the Rust build
-	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) build -q --bin condash-serve
-	uv run --extra e2e pytest tests/e2e/test_dashboard_smoke_rust.py -v; \
-	    RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi
-
-test-all: test test-e2e ## Run both suites
-
-coverage: ## Run pytest with line-coverage report
-	uv run pytest --cov=condash --cov-report=term-missing --cov-report=html
-
-lint: ## Ruff lint + format check
-	uv run ruff check .
-	uv run ruff format --check .
-
-format: ## Ruff auto-fix + format
-	uv run ruff check --fix .
-	uv run ruff format .
 
 update-pdfjs: ## Re-vendor Mozilla PDF.js at $(PDFJS_VERSION) into frontend/vendor/pdfjs/
 	@set -e; \
@@ -256,4 +173,4 @@ update-mermaid: ## Re-vendor Mermaid at $(MERMAID_VERSION) into frontend/vendor/
 	echo "Vendored Mermaid $(MERMAID_VERSION):"; \
 	du -sh "$$DEST"
 
-.PHONY: help install dev-install run test test-e2e test-e2e-rust test-all coverage lint format frontend update-pdfjs update-codemirror update-mermaid
+.PHONY: help install-tauri-cli run-tauri run-serve build-tauri check test format frontend update-pdfjs update-codemirror update-mermaid
