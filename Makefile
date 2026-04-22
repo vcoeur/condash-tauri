@@ -1,13 +1,13 @@
 PYTHONPATH := $(shell pwd)
 
 # Vendored Mozilla PDF.js version — bumped by `make update-pdfjs`. The
-# live assets live under src/condash/assets/vendor/pdfjs/ (see app.py's
+# live assets live under frontend/vendor/pdfjs/ (see app.py's
 # /vendor/pdfjs route and dashboard.html's PDF.js ES module block).
 PDFJS_VERSION := 5.6.205
 
 # Vendored CodeMirror 6 pins — bumped by `make update-codemirror`. The
 # live bundle is a single minified IIFE at
-# src/condash/assets/vendor/codemirror/codemirror.min.js, built from
+# frontend/vendor/codemirror/codemirror.min.js, built from
 # tools/codemirror-entry.js via esbuild. CM6 is deeply modular ESM;
 # we ship one file so dashboard.html needs only one <script> tag and
 # condash stays offline-first.
@@ -23,7 +23,7 @@ ESBUILD_VERSION               := 0.24.0
 
 # Vendored Mermaid version — bumped by `make update-mermaid`. The live
 # bundle is the upstream-published UMD file at
-# src/condash/assets/vendor/mermaid/mermaid.min.js, served by app.py's
+# frontend/vendor/mermaid/mermaid.min.js, served by app.py's
 # /vendor/mermaid route and loaded unconditionally by dashboard.html
 # so the note preview modal can render mermaid code blocks offline.
 MERMAID_VERSION               := 11.14.0
@@ -151,11 +151,11 @@ format: ## Ruff auto-fix + format
 	uv run ruff check --fix .
 	uv run ruff format .
 
-update-pdfjs: ## Re-vendor Mozilla PDF.js at $(PDFJS_VERSION) into src/condash/assets/vendor/pdfjs/
+update-pdfjs: ## Re-vendor Mozilla PDF.js at $(PDFJS_VERSION) into frontend/vendor/pdfjs/
 	@set -e; \
 	URL="https://github.com/mozilla/pdf.js/releases/download/v$(PDFJS_VERSION)/pdfjs-$(PDFJS_VERSION)-legacy-dist.zip"; \
 	WORK=$$(mktemp -d); \
-	DEST=src/condash/assets/vendor/pdfjs; \
+	DEST=frontend/vendor/pdfjs; \
 	echo "Downloading $$URL"; \
 	curl -sSL -o "$$WORK/pdfjs.zip" "$$URL"; \
 	unzip -q "$$WORK/pdfjs.zip" -d "$$WORK/extracted"; \
@@ -178,10 +178,10 @@ update-pdfjs: ## Re-vendor Mozilla PDF.js at $(PDFJS_VERSION) into src/condash/a
 	echo "Vendored PDF.js $(PDFJS_VERSION) (minified):"; \
 	du -sh "$$DEST"
 
-update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/codemirror/
+update-codemirror: ## Re-vendor CodeMirror 6 into frontend/vendor/codemirror/
 	@set -e; \
 	WORK=$$(mktemp -d); \
-	DEST=src/condash/assets/vendor/codemirror; \
+	DEST=frontend/vendor/codemirror; \
 	ENTRY=$$(pwd)/tools/codemirror-entry.js; \
 	echo "Building CodeMirror bundle in $$WORK"; \
 	python3 -c "import json; open('$$WORK/package.json','w').write(json.dumps({\
@@ -220,11 +220,11 @@ update-codemirror: ## Re-vendor CodeMirror 6 into src/condash/assets/vendor/code
 	echo "Vendored CodeMirror 6:"; \
 	du -sh "$$DEST"
 
-frontend: ## Bundle the dashboard source (src/condash/assets/src/) into dist/bundle.{js,css}
+frontend: ## Bundle the dashboard source (frontend/src/) into dist/bundle.{js,css}
 	@set -e; \
-	SRC_JS=src/condash/assets/src/js/entry.js; \
-	SRC_CSS=src/condash/assets/src/css/main.css; \
-	DEST=src/condash/assets/dist; \
+	SRC_JS=frontend/src/js/entry.js; \
+	SRC_CSS=frontend/src/css/main.css; \
+	DEST=frontend/dist; \
 	mkdir -p "$$DEST"; \
 	echo "Bundling $$SRC_JS → $$DEST/bundle.js (esbuild $(ESBUILD_VERSION))"; \
 	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
@@ -239,10 +239,10 @@ frontend: ## Bundle the dashboard source (src/condash/assets/src/) into dist/bun
 	echo "Frontend bundle:"; \
 	du -sh "$$DEST"
 
-update-mermaid: ## Re-vendor Mermaid at $(MERMAID_VERSION) into src/condash/assets/vendor/mermaid/
+update-mermaid: ## Re-vendor Mermaid at $(MERMAID_VERSION) into frontend/vendor/mermaid/
 	@set -e; \
 	URL="https://cdn.jsdelivr.net/npm/mermaid@$(MERMAID_VERSION)/dist/mermaid.min.js"; \
-	DEST=src/condash/assets/vendor/mermaid; \
+	DEST=frontend/vendor/mermaid; \
 	rm -rf "$$DEST"; \
 	mkdir -p "$$DEST"; \
 	echo "Downloading $$URL"; \

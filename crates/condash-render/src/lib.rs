@@ -2,7 +2,7 @@
 //!
 //! Rust port of `src/condash/render.py`. Pairs with `condash-parser`
 //! (item + knowledge data types) and `condash-state` (`RenderCtx`,
-//! cache). The Jinja2 templates under `src/condash/templates/` are
+//! cache). The Jinja2 templates under `crates/condash-render/templates/` are
 //! embedded verbatim via `include_str!` in [`templating`] and driven
 //! through `minijinja` — no runtime filesystem dependency, no template
 //! deviation from the Python build.

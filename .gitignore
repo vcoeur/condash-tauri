@@ -14,12 +14,12 @@ wheels/
 .wheels/
 # …but the vendored PDF.js has a build/ subdir that is real source, not a
 # dist artefact — re-include it explicitly.
-!src/condash/assets/vendor/pdfjs/build/
-!src/condash/assets/vendor/pdfjs/build/**
+!frontend/vendor/pdfjs/build/
+!frontend/vendor/pdfjs/build/**
 # …and the frontend build output ships with the wheel (esbuild bundles,
 # rebuilt by `make frontend`), same re-include pattern.
-!src/condash/assets/dist/
-!src/condash/assets/dist/**
+!frontend/dist/
+!frontend/dist/**
 
 # Node — frontend build toolchain. esbuild is invoked via `npx --yes` by
 # `make frontend` so `node_modules/` is never required, but a developer who

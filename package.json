@@ -1,11 +1,11 @@
 {
   "name": "condash-frontend",
   "private": true,
-  "description": "Frontend build for condash's dashboard.html shell. Bundles src/condash/assets/src/{js,css}/ into src/condash/assets/dist/bundle.{js,css}. Build runs via `make frontend`, which invokes esbuild through `npx --yes` (no node_modules/ required). This package.json exists to pin the esbuild version for IDEs, Dependabot, and developers who prefer a local install.",
+  "description": "Frontend build for condash's dashboard.html shell. Bundles frontend/src/{js,css}/ into frontend/dist/bundle.{js,css}. Build runs via `make frontend`, which invokes esbuild through `npx --yes` (no node_modules/ required). This package.json exists to pin the esbuild version for IDEs, Dependabot, and developers who prefer a local install.",
   "devDependencies": {
     "esbuild": "0.24.0"
   },
   "scripts": {
-    "build": "esbuild src/condash/assets/src/js/entry.js --bundle --format=iife --global-name=Condash --target=es2019 --outfile=src/condash/assets/dist/bundle.js && esbuild src/condash/assets/src/css/main.css --bundle --outfile=src/condash/assets/dist/bundle.css"
+    "build": "esbuild frontend/src/js/entry.js --bundle --format=iife --global-name=Condash --target=es2019 --outfile=frontend/dist/bundle.js && esbuild frontend/src/css/main.css --bundle --outfile=frontend/dist/bundle.css"
   }
 }
