@@ -5091,7 +5091,7 @@ Object.assign(window, {
     runnerStopInline, gitToggleOpenPopover, gitClosePopovers,
     updateProgress, _syncModeControls,
     openNotePreview, addStep, removeStep, cycle, pickPriority,
-    createNoteFor, createNotesSubdir, openFolder,
+    createNoteFor, createNotesSubdir, openFolder, openPath,
     openConfigModal, openNewItemModal, openAboutModal,
     closeConfigModal, closeNewItemModal, closeAboutModal, closeNotePreview,
     toggleTheme, toggleTerminal, termNewTab, termNewLauncherTab,

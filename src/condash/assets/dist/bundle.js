@@ -345,6 +345,36 @@ var Condash = (() => {
       }
     });
   })();
+  async function openPath(ev, path, tool) {
+    ev.stopPropagation();
+    var btn = ev.currentTarget;
+    var originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    function restore() {
+      btn.innerHTML = originalHtml;
+      btn.classList.remove("is-ok", "is-err");
+      btn.disabled = false;
+    }
+    function flash(cls, label, ms) {
+      btn.classList.add(cls);
+      btn.textContent = label;
+      setTimeout(restore, ms);
+    }
+    try {
+      var res = await fetch("/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, tool })
+      });
+      if (!res.ok) {
+        flash("is-err", "err", 1200);
+        return;
+      }
+      flash("is-ok", "ok", 800);
+    } catch (e) {
+      flash("is-err", "err", 1200);
+    }
+  }
   function openInTerminal(ev, path) {
     if (ev) {
       ev.stopPropagation();
@@ -4113,6 +4143,7 @@ var Condash = (() => {
     createNoteFor,
     createNotesSubdir,
     openFolder,
+    openPath,
     openConfigModal,
     openNewItemModal,
     openAboutModal,
