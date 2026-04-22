@@ -14,6 +14,7 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 serde_json = "1"
+tempfile = "3"
 
 # The diff harness needs JSON at runtime too; it's fine to carry serde_json
 # in the default feature set since this crate is only consumed locally.

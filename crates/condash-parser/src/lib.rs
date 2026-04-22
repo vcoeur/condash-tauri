@@ -1,19 +1,36 @@
 //! Rust port of condash's markdown parser (`src/condash/parser.py`).
 //!
-//! Phase 1 scope: the pure string-level primitives. The filesystem-walking
-//! entry points (collect_items, collect_knowledge, _list_item_tree) and
-//! the top-level `parse_readme` wrapper that reads a file off disk land in
-//! later phases alongside the route port, so this crate stays pure and
-//! easy to unit-test against the Python output.
+//! Layered by side-effect:
+//!   - Pure string-level primitives: `regexes`, `sections`, `deliverables`,
+//!     `readme` (`parse_readme_content`), `note_kind`.
+//!   - Filesystem-walking: `tree` (`list_item_tree`), `knowledge`
+//!     (`collect_knowledge` + tree walker), `collect` (`parse_readme` +
+//!     `collect_items`).
+//!
+//! Fingerprint helpers (`_compute_fingerprint`, `compute_*_node_fingerprints`)
+//! land alongside the `/check-updates` route port, not here — they depend
+//! on matching Python's `repr()` output for cross-build stability, which
+//! is easier to settle once the cache + route layer is in place.
 
+pub mod collect;
 pub mod deliverables;
+pub mod knowledge;
+pub mod note_kind;
 pub mod readme;
 pub mod regexes;
 pub mod sections;
+pub mod tree;
 
+pub use collect::{collect_items, parse_readme, Item};
 pub use deliverables::{parse_deliverables, Deliverable};
+pub use knowledge::{
+    collect_knowledge, collect_tree, find_card, find_node, knowledge_title_and_desc, KnowledgeCard,
+    KnowledgeNode,
+};
+pub use note_kind::note_kind;
 pub use readme::{parse_readme_content, ItemReadme};
 pub use sections::{parse_sections, CheckboxStatus, Section, SectionItem};
+pub use tree::{flatten_tree_paths, list_item_tree, FileEntry, GroupEntry, ItemTree};
 
 /// Ordered priority / status enum. The order of variants mirrors Python's
 /// `PRIORITIES` tuple — call sites that sort by `as usize` get the same

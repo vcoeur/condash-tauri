@@ -76,12 +76,23 @@ fmt-rust: ## cargo fmt across the workspace
 # Phase 1 exit gate. Override CONCEPTION= to diff against a different tree.
 CONCEPTION ?= $(HOME)/src/vcoeur/conception
 
-diff-parser: ## Phase 1 exit gate — diff Rust condash-parser output against Python's on the conception corpus
+diff-parser: diff-parser-per-readme diff-parser-collect ## Run both parser-diff modes against the conception corpus
+
+diff-parser-per-readme: ## Diff per-README parse output Rust-vs-Python (Phase 1 exit gate)
 	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-parser --bin parser-diff -- \
 	    --conception $(CONCEPTION) \
 	    --condash-src $(CURDIR)/src \
 	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
-	    --python python3
+	    --python python3 \
+	    --mode per-readme
+
+diff-parser-collect: ## Diff collect_items + collect_knowledge Rust-vs-Python (Phase 2 slice 1 exit gate)
+	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-parser --bin parser-diff -- \
+	    --conception $(CONCEPTION) \
+	    --condash-src $(CURDIR)/src \
+	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
+	    --python python3 \
+	    --mode collect
 
 test: ## Run the fast in-process pytest suite (skips tests/e2e/)
 	uv run pytest; RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi

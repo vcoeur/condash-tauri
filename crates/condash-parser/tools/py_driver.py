@@ -1,22 +1,18 @@
-"""Python driver for the Phase 1 parser diff harness.
+"""Python driver for the parser diff harness.
 
-Invoked by `parser-diff` (the Rust bin in the same crate). For each
-README path given on stdin (one per line, or `--` terminator), parses
-the README via `condash.parser.parse_readme` and emits the resulting
-dict as JSON on stdout — one JSON object per line, keyed `{path, data}`.
+Invoked by ``parser-diff`` (the Rust bin in the same crate) in two modes:
 
-The `files` field is dropped before serialisation: the Rust port does
-not currently build the files-tree (that's a Phase 2 filesystem concern),
-so diffing that field would be noise.
+1. **per-README mode** (default): read README paths from stdin one per
+   line, call :func:`condash.parser.parse_readme` for each, emit
+   ``{path, data}`` JSON lines on stdout.
 
-Usage:
-    python3 py_driver.py --condash-src <path> --base-dir <path>
+2. **collect mode** (``--mode=collect``): ignore stdin, call
+   :func:`condash.parser.collect_items` and :func:`collect_knowledge`
+   once, emit a single JSON document on stdout — keyed ``{items,
+   knowledge}``.
 
-Paths are read one per line from stdin until EOF. Each path must be an
-absolute path to a README.md under `--base-dir`.
-
-Stdout is newline-delimited JSON so the Rust consumer can stream-parse.
-Stderr carries warnings and summary lines.
+Stdout is newline-delimited JSON for per-README mode so the Rust
+consumer can stream-parse. Stderr carries warnings and summary lines.
 """
 
 from __future__ import annotations
@@ -27,26 +23,22 @@ import sys
 from pathlib import Path
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--condash-src", required=True, help="path to condash's src/ directory")
-    ap.add_argument("--base-dir", required=True, help="conception base_dir for RenderCtx")
-    args = ap.parse_args()
-
-    sys.path.insert(0, args.condash_src)
-
-    # Imports deferred until after sys.path is set so we pick up the
-    # condash package under `--condash-src`.
+def _build_ctx(condash_src: str, base_dir: Path):
+    """Import condash from ``condash_src`` and return a minimal RenderCtx."""
+    sys.path.insert(0, condash_src)
     from condash.context import RenderCtx  # noqa: E402
-    from condash.parser import parse_readme  # noqa: E402
 
-    base_dir = Path(args.base_dir).resolve()
-    ctx = RenderCtx(
+    return RenderCtx(
         base_dir=base_dir,
         workspace=None,
         worktrees=None,
         repo_structure=[],
     )
+
+
+def _run_per_readme(condash_src: str, base_dir: Path) -> int:
+    ctx = _build_ctx(condash_src, base_dir)
+    from condash.parser import parse_readme  # noqa: E402
 
     count = 0
     for raw in sys.stdin:
@@ -59,8 +51,6 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 — driver surface only
             print(f"driver: error parsing {path}: {exc}", file=sys.stderr)
             result = None
-        if result is not None:
-            result.pop("files", None)
         rel = str(path.relative_to(base_dir))
         sys.stdout.write(json.dumps({"path": rel, "data": result}, ensure_ascii=False))
         sys.stdout.write("\n")
@@ -69,6 +59,41 @@ def main() -> int:
 
     print(f"driver: parsed {count} READMEs", file=sys.stderr)
     return 0
+
+
+def _run_collect(condash_src: str, base_dir: Path) -> int:
+    ctx = _build_ctx(condash_src, base_dir)
+    from condash.parser import collect_items, collect_knowledge  # noqa: E402
+
+    items = collect_items(ctx)
+    knowledge = collect_knowledge(ctx)
+    out = {"items": items, "knowledge": knowledge}
+    json.dump(out, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    print(
+        f"driver: collect items={len(items)} knowledge={'present' if knowledge else 'absent'}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--condash-src", required=True, help="path to condash's src/ directory")
+    ap.add_argument("--base-dir", required=True, help="conception base_dir for RenderCtx")
+    ap.add_argument(
+        "--mode",
+        choices=("per-readme", "collect"),
+        default="per-readme",
+        help="per-readme = stream one {path,data} per line; collect = emit a single {items,knowledge} doc",
+    )
+    args = ap.parse_args()
+
+    base_dir = Path(args.base_dir).resolve()
+    if args.mode == "collect":
+        return _run_collect(args.condash_src, base_dir)
+    return _run_per_readme(args.condash_src, base_dir)
 
 
 if __name__ == "__main__":
