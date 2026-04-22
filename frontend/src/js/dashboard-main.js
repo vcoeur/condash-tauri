@@ -4801,6 +4801,35 @@ async function _runnerStopFetch(key) {
     } catch (e) {}
 }
 
+/* Repo-level force-stop — posts to /api/runner/force-stop which runs
+   the user-configured `force_stop` shell command. Unlike runnerStop this
+   is NOT scoped to a specific checkout; it's one per repo. Used to
+   recover when the port is held by a process condash didn't start
+   (stale server from another terminal, previous run killed uncleanly). */
+async function runnerForceStop(ev, key) {
+    if (ev) ev.stopPropagation();
+    var btn = ev && ev.currentTarget;
+    if (btn && btn.disabled) return;
+    if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
+    try {
+        var res = await fetch('/api/runner/force-stop', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: key}),
+        });
+        if (!res.ok) {
+            var txt = '';
+            try { txt = (await res.json()).error || ''; } catch (e) {}
+            console.warn('force-stop failed:', res.status, txt);
+        }
+    } catch (e) {
+        console.warn('force-stop request errored:', e);
+    } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
+        await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+    }
+}
+
 /* ─── Code tab · open-with popover ─────────── */
 
 function gitToggleOpenPopover(ev, btn) {
@@ -4983,6 +5012,7 @@ Object.assign(window, {
     toggleCard, togglePriMenu, uploadToNotes, workOn, toggleSection,
     openInTerminal, startEditText, stepPointerDown, openDeliverable,
     startRenameNote, runnerStart, runnerStop, runnerSwitch,
+    runnerForceStop,
     runnerToggleCollapse, runnerJump, runnerPopout,
     runnerStopInline, gitToggleOpenPopover, gitClosePopovers,
     updateProgress, _syncModeControls,

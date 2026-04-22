@@ -84,6 +84,11 @@ def_icons! {
         "aria-hidden=\"true\">",
         "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1\"/></svg>",
     );
+    runner_force_stop = concat!(
+        "<svg viewBox=\"0 0 24 24\" width=\"15\" height=\"15\" fill=\"currentColor\" ",
+        "aria-hidden=\"true\">",
+        "<polygon points=\"13 2 4 14 11 14 10 22 20 9 13 9\"/></svg>",
+    );
     runner_jump = concat!(
         "<svg viewBox=\"0 0 24 24\" width=\"13\" height=\"13\" fill=\"none\" ",
         "stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" ",

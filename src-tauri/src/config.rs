@@ -103,6 +103,12 @@ enum RepoEntryYaml {
         /// by the runners module (Phase 4).
         #[serde(default)]
         run: Option<String>,
+        /// Optional "nuclear" stop command. Invoked by the force-stop
+        /// button when a port is held by a process condash didn't start
+        /// (stale gunicorn, another terminal). The tri-state Start/Stop
+        /// button only knows about condash-managed sessions.
+        #[serde(default, alias = "force-stop")]
+        force_stop: Option<String>,
     },
 }
 
@@ -114,6 +120,8 @@ enum SubmoduleYaml {
         name: String,
         #[serde(default)]
         run: Option<String>,
+        #[serde(default, alias = "force-stop")]
+        force_stop: Option<String>,
     },
 }
 
@@ -190,6 +198,7 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
     let mut repo_structure = Vec::new();
     let mut repo_run_keys = std::collections::HashSet::new();
     let mut repo_run_templates: HashMap<String, String> = HashMap::new();
+    let mut repo_force_stop_templates: HashMap<String, String> = HashMap::new();
     if let Some(buckets) = &parsed.repositories {
         if !buckets.primary.is_empty() {
             repo_structure.push(RepoSection {
@@ -198,6 +207,7 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
                     &buckets.primary,
                     &mut repo_run_keys,
                     &mut repo_run_templates,
+                    &mut repo_force_stop_templates,
                 ),
             });
         }
@@ -208,6 +218,7 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
                     &buckets.secondary,
                     &mut repo_run_keys,
                     &mut repo_run_templates,
+                    &mut repo_force_stop_templates,
                 ),
             });
         }
@@ -215,6 +226,7 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
     ctx.repo_structure = repo_structure;
     ctx.repo_run_keys = repo_run_keys;
     ctx.repo_run_templates = repo_run_templates;
+    ctx.repo_force_stop_templates = repo_force_stop_templates;
 
     if let Some(open_with) = parsed.open_with {
         ctx.open_with = open_with
@@ -244,6 +256,7 @@ fn entries_from(
     yaml: &[RepoEntryYaml],
     repo_run_keys: &mut std::collections::HashSet<String>,
     repo_run_templates: &mut HashMap<String, String>,
+    repo_force_stop_templates: &mut HashMap<String, String>,
 ) -> Vec<RepoEntry> {
     let mut out = Vec::with_capacity(yaml.len());
     for entry in yaml {
@@ -256,6 +269,7 @@ fn entries_from(
                 name,
                 submodules,
                 run,
+                force_stop,
             } => {
                 if let Some(tpl) = run.as_deref() {
                     let trimmed = tpl.trim();
@@ -264,17 +278,34 @@ fn entries_from(
                         repo_run_templates.insert(name.clone(), trimmed.into());
                     }
                 }
+                if let Some(tpl) = force_stop.as_deref() {
+                    let trimmed = tpl.trim();
+                    if !trimmed.is_empty() {
+                        repo_force_stop_templates.insert(name.clone(), trimmed.into());
+                    }
+                }
                 let mut sub_names = Vec::with_capacity(submodules.len());
                 for s in submodules {
                     match s {
                         SubmoduleYaml::Bare(n) => sub_names.push(n.clone()),
-                        SubmoduleYaml::Full { name: sub, run } => {
+                        SubmoduleYaml::Full {
+                            name: sub,
+                            run,
+                            force_stop,
+                        } => {
                             if let Some(tpl) = run.as_deref() {
                                 let trimmed = tpl.trim();
                                 if !trimmed.is_empty() {
                                     let key = format!("{name}--{sub}");
                                     repo_run_keys.insert(key.clone());
                                     repo_run_templates.insert(key, trimmed.into());
+                                }
+                            }
+                            if let Some(tpl) = force_stop.as_deref() {
+                                let trimmed = tpl.trim();
+                                if !trimmed.is_empty() {
+                                    let key = format!("{name}--{sub}");
+                                    repo_force_stop_templates.insert(key, trimmed.into());
                                 }
                             }
                             sub_names.push(sub.clone());

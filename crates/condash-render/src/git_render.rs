@@ -495,6 +495,22 @@ fn render_peer_card(
         "<span class=\"peer-kind\">{kind}</span>",
         kind = h(kind_label)
     ));
+    // Repo-level "nuclear" stop. One per repo (not per branch) because
+    // the underlying command kills whatever is holding the port — no
+    // notion of which checkout is active. Rendered only when the user
+    // configured `force_stop:` in configuration.yml and the repo is on
+    // disk (otherwise the peer card itself is tagged missing and the
+    // button would be meaningless).
+    if !is_missing && ctx.repo_force_stop_templates.contains_key(&member_key) {
+        let js_key = embed_attr(&member_key);
+        parts.push(format!(
+            "<button type=\"button\" class=\"peer-force-stop\" \
+             title=\"Force stop (run configured force_stop command)\" \
+             aria-label=\"Force stop\" \
+             onclick=\"runnerForceStop(event,{js_key})\">{icon}</button>",
+            icon = Icons::runner_force_stop,
+        ));
+    }
     parts.push("</div>".into());
     parts.push("<div class=\"peer-rows\">".into());
 

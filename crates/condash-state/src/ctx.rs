@@ -92,6 +92,13 @@ pub struct RenderCtx {
     /// `/api/runner/start` handler treats that as "no command
     /// configured" and 404s, matching Python.
     pub repo_run_templates: HashMap<String, String>,
+    /// Optional per-repo "nuclear" stop command. Same keyspace as
+    /// [`Self::repo_run_templates`] (parent: `name`, subrepo:
+    /// `<parent>--<sub>`). Populated from the `force_stop:` YAML field.
+    /// Runs even when `runner_registry` has no live session, so the user
+    /// can free a port held by a process condash didn't start. Missing
+    /// key = no force-stop button rendered for that repo.
+    pub repo_force_stop_templates: HashMap<String, String>,
     /// PDF-viewer command fallback chain (e.g. `["evince {path}",
     /// "okular {path}"]`). Empty = use the built-in chain. Consumed by
     /// the openers layer (Phase 3+).

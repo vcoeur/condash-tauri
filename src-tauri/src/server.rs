@@ -195,6 +195,7 @@ pub fn build_router(state: AppState) -> Router {
         // Phase 4 slice 2 — inline dev-server runners.
         .route("/api/runner/start", post(runner_start_route))
         .route("/api/runner/stop", post(runner_stop_route))
+        .route("/api/runner/force-stop", post(runner_force_stop_route))
         .route("/ws/runner/{key}", get(runner_ws))
         // Phase 3 slice 3 — file-level mutations.
         .route("/note", get(get_note).post(post_note))
@@ -1197,6 +1198,120 @@ async fn runner_stop_route(
     {
         Ok(_) => json_response(&serde_json::json!({"ok": true, "cleared": true})),
         Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("stop: {e}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RunnerForceStopPayload {
+    #[serde(default)]
+    key: String,
+}
+
+/// `POST /api/runner/force-stop` — run the configured `force_stop`
+/// command for `key`. Unlike `/api/runner/stop`, which only touches
+/// sessions condash launched, this invokes a user-supplied shell
+/// fragment meant to kill whatever is currently holding the port
+/// (a stale gunicorn, a server started from another terminal).
+///
+/// The command runs detached via `sh -c`; we wait up to 5s for it to
+/// exit so the frontend can report success/failure, but any child
+/// processes the command starts are not tracked. Also clears any
+/// condash-managed session for `key` so the tri-state button resets
+/// to Start without a further refresh.
+async fn runner_force_stop_route(
+    State(state): State<AppState>,
+    Json(p): Json<RunnerForceStopPayload>,
+) -> impl IntoResponse {
+    let key = p.key.trim();
+    if key.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "key required");
+    }
+    let Some(command) = state.ctx.repo_force_stop_templates.get(key).cloned() else {
+        return error_json(
+            StatusCode::NOT_FOUND,
+            &format!("no force_stop command configured for {key}"),
+        );
+    };
+
+    // Best-effort: stop any condash-managed session for the same key
+    // first so the registry reflects reality once the external
+    // process is gone. Ignore failures — the user's force_stop is
+    // what the request is really about.
+    if let Some(session) = state.runner_registry.get(key) {
+        if session.exit_code_now().is_some() {
+            crate::runners::clear_exited(&state.runner_registry, key);
+        } else {
+            let _ = crate::runners::stop(
+                &state.runner_registry,
+                key,
+                std::time::Duration::from_secs(2),
+            )
+            .await;
+        }
+    }
+
+    let cmd = command.clone();
+    let spawn = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+    })
+    .await;
+    let child = match spawn {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
+            return error_json(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("spawn force_stop: {e}"),
+            );
+        }
+        Err(e) => {
+            return error_json(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("spawn force_stop task: {e}"),
+            );
+        }
+    };
+
+    // Wait up to 5s so the UI can flag scripts that hang. After that
+    // we leave the process running and return ok — the script is
+    // user-supplied, so a long-running "kill -9 && sleep 10" is a
+    // legitimate shape we don't want to block the request on.
+    let wait = tokio::task::spawn_blocking(move || child.wait_with_output());
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), wait).await;
+    match outcome {
+        Ok(Ok(Ok(output))) => {
+            let body = serde_json::json!({
+                "ok": output.status.success(),
+                "exit_code": output.status.code(),
+                "stdout": String::from_utf8_lossy(&output.stdout),
+                "stderr": String::from_utf8_lossy(&output.stderr),
+                "command": command,
+            });
+            json_response(&body)
+        }
+        Ok(Ok(Err(e))) => error_json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("force_stop wait: {e}"),
+        ),
+        Ok(Err(e)) => error_json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("force_stop join: {e}"),
+        ),
+        Err(_) => {
+            // Timed out waiting for exit. The process is still alive and
+            // detached — report ok so the UI shows success; the next
+            // /check-updates cycle will pick up whatever state it ends in.
+            json_response(&serde_json::json!({
+                "ok": true,
+                "detached": true,
+                "command": command,
+            }))
+        }
     }
 }
 
