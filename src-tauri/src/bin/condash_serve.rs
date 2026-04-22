@@ -9,22 +9,17 @@
 //! `CONDASH_PORT` to pin the listen port — handy for Playwright
 //! fixtures that want a stable URL.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use condash_lib::{assets, build_ctx_for_bin, load_template_for_bin};
+use condash_lib::{assets, build_ctx_for_bin, load_template_for_bin, resolve_conception_path};
 use condash_state::WorkspaceCache;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let conception_path = match std::env::var_os("CONDASH_CONCEPTION_PATH") {
-        Some(v) => PathBuf::from(v),
-        None => {
-            let home = std::env::var_os("HOME").context("HOME unset")?;
-            PathBuf::from(home).join("src/vcoeur/conception")
-        }
-    };
+    // Headless binary: env var → ~/.config/condash/settings.yaml →
+    // hard error. No folder picker, no hard-coded default.
+    let conception_path = resolve_conception_path().map_err(|e| anyhow::anyhow!("{e}"))?;
     let asset_source = assets::pick_from_env();
     let template = load_template_for_bin(&asset_source)?;
 
