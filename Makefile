@@ -55,6 +55,10 @@ CARGO      := $(RUSTUP_BIN)/cargo
 run-tauri: ## Phase 0 exit gate — open the Tauri window against dashboard.html with stub (404) API
 	cd src-tauri && PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) tauri dev
 
+run-rust: ## Phase 2 slice 5 — run the Rust HTTP server headless (no GUI deps needed)
+	PATH="$(RUSTUP_BIN):$$PATH" CONDASH_CONCEPTION_PATH=$(CONCEPTION) \
+	    $(CARGO) run -q --bin condash-serve
+
 build-tauri: ## Bundle Tauri release artefacts (requires Linux system deps)
 	cd src-tauri && PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) tauri build
 
