@@ -1,0 +1,122 @@
+:root, [data-theme="light"] {
+    --bg: #f4f4f5;
+    --bg-card: #fff;
+    --bg-card-hover: #fafafa;
+    --text: #18181b;
+    --text-secondary: #52525b;
+    --text-muted: #a1a1aa;
+    --border: #e4e4e7;
+    --border-light: #f4f4f5;
+
+    --accent: #2563eb;
+    --accent-bg: #eff6ff;
+
+    --card-incident: #fdf4ff;
+    --card-incident-border: #d946ef;
+    --card-project: #eff6ff;
+    --card-project-border: #3b82f6;
+    --card-document: #ecfdf5;
+    --card-document-border: #10b981;
+
+    --kind-incident: #a21caf;
+    --kind-project: #1d4ed8;
+    --kind-document: #047857;
+
+    --pri-now-bg: #fee2e2; --pri-now: #991b1b;
+    --pri-soon-bg: #ffedd5; --pri-soon: #9a3412;
+    --pri-later-bg: #fef9c3; --pri-later: #854d0e;
+    --pri-backlog-bg: #f4f4f5; --pri-backlog: #71717a;
+    --pri-review-bg: #dbeafe; --pri-review: #1e40af;
+    --pri-done-bg: #f4f4f5; --pri-done: #a1a1aa;
+
+    --status-done-border: #22c55e; --status-done: #15803d; --status-done-bg: #dcfce7;
+    --status-progress-border: #f97316; --status-progress: #ea580c; --status-progress-bg: #fff7ed;
+    --status-abandoned-border: #a1a1aa; --status-abandoned: #71717a; --status-abandoned-bg: #f4f4f5;
+    --status-open-border: #d4d4d8;
+
+    --pill-bg: #f4f4f5; --pill-text: #3f3f46;
+
+    --input-bg: #fff; --input-border: #d4d4d8;
+    --input-focus: #3b82f6;
+    --btn-bg: #eff6ff; --btn-text: #1d4ed8; --btn-border: #bfdbfe;
+
+    --progress-track: #e4e4e7; --progress-fill: #22c55e; --progress-done: #16a34a;
+
+    --dlv-icon-bg: #dbeafe; --dlv-icon-text: #1d4ed8;
+
+    --git-dirty-bg: #fffbeb;
+    --git-branch: #4f46e5;
+    --git-changes-bg: #fef3c7; --git-changes: #b45309;
+    --git-clean: #16a34a;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+    --tab-border: #e4e4e7;
+
+    --toggle-bg: #e4e4e7; --toggle-knob: #fff; --toggle-icon: #71717a;
+
+    --scrollbar-thumb: rgba(24, 20, 24, 0.14);
+    --scrollbar-thumb-hover: rgba(24, 20, 24, 0.26);
+}
+
+[data-theme="dark"] {
+    --bg: #111113;
+    --bg-card: #1c1c1f;
+    --bg-card-hover: #232326;
+    --text: #ececef;
+    --text-secondary: #b0b0b8;
+    --text-muted: #6e6e76;
+    --border: #2c2c30;
+    --border-light: #232326;
+
+    --accent: #7cacf8;
+    --accent-bg: #1c2536;
+
+    --card-incident: #1e1c20;
+    --card-incident-border: #9f7aea;
+    --card-project: #1c1d22;
+    --card-project-border: #7cacf8;
+    --card-document: #1c1f1e;
+    --card-document-border: #6ec9a8;
+
+    --kind-incident: #c4a5e0;
+    --kind-project: #93b8f0;
+    --kind-document: #7ec8a8;
+
+    --pri-now-bg: #2c2020; --pri-now: #e8a0a0;
+    --pri-soon-bg: #2c2418; --pri-soon: #d8b080;
+    --pri-later-bg: #2a2818; --pri-later: #d0c878;
+    --pri-backlog-bg: #232326; --pri-backlog: #8e8e96;
+    --pri-review-bg: #1e2a3c; --pri-review: #93b5e8;
+    --pri-done-bg: #232326; --pri-done: #6e6e76;
+
+    --status-done-border: #5aad70; --status-done: #80cc90; --status-done-bg: #1a2820;
+    --status-progress-border: #c89050; --status-progress: #d8b080; --status-progress-bg: #28201a;
+    --status-abandoned-border: #505058; --status-abandoned: #8e8e96; --status-abandoned-bg: #232326;
+    --status-open-border: #3a3a40;
+
+    --pill-bg: #28282c; --pill-text: #c0c0c8;
+
+    --input-bg: #141416; --input-border: #3a3a40;
+    --input-focus: #7cacf8;
+    --btn-bg: #1c2536; --btn-text: #93b8f0; --btn-border: #3060a0;
+
+    --progress-track: #28282c; --progress-fill: #5aad70; --progress-done: #4a9a60;
+
+    --dlv-icon-bg: #1c2536; --dlv-icon-text: #93b8f0;
+
+    --git-dirty-bg: #28221a;
+    --git-branch: #a0a8d0;
+    --git-changes-bg: #28221a; --git-changes: #d8b080;
+    --git-clean: #80cc90;
+
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 14px rgba(0,0,0,0.4);
+    --tab-border: #2c2c30;
+
+    --toggle-bg: #28282c; --toggle-knob: #ececef; --toggle-icon: #b0b0b8;
+
+    --scrollbar-thumb: rgba(236, 236, 239, 0.14);
+    --scrollbar-thumb-hover: rgba(236, 236, 239, 0.28);
+}
+

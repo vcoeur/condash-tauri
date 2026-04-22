@@ -1,6 +1,5 @@
-/* condash dashboard — bundled stylesheet entry point.
- *
- * Empty in F1 so the build pipeline and static-serving route are exercised
- * end-to-end before any inline CSS moves. F2 will replace the contents of
- * this file with @import lines pointing at themes.css, cards.css,
- * modals.css, terminal.css, notes.css as each section is extracted. */
+@import "./themes.css";
+@import "./cards.css";
+@import "./modals.css";
+@import "./terminal.css";
+@import "./notes.css";

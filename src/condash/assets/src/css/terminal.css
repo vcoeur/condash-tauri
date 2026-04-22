@@ -1,0 +1,477 @@
+/* --- Deliverables --- */
+.deliverables { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px dashed var(--border); }
+.dlv-heading {
+    font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem;
+}
+.dlv-item { padding: 2px 0; }
+.dlv-link {
+    font-size: 0.8rem; color: var(--accent); text-decoration: none;
+    font-weight: 500;
+}
+.dlv-link:hover { text-decoration: underline; }
+.dlv-desc { font-size: 0.75rem; color: var(--text-muted); }
+.dlv-icon {
+    font-size: 0.6rem; font-weight: 700;
+    color: var(--dlv-icon-text); background: var(--dlv-icon-bg);
+    padding: 1px 5px; border-radius: 4px; margin-left: 0.4rem;
+    letter-spacing: 0.03em; vertical-align: middle;
+}
+
+/* --- Git panel (always visible, stacked under the cards list) --- */
+.git-panel { display: block; margin-top: 2rem; }
+.git-section-heading {
+    font-size: 0.75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    padding: 0.5rem 0 0.6rem;
+    border-bottom: 2px solid var(--tab-border);
+    margin-bottom: 1rem;
+}
+
+/* --- In-tab priority group heading ("Now" / "Review" inside Current, etc.) --- */
+.group-heading {
+    font-size: 0.72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    padding: 0.25rem 0 0.35rem;
+    margin: 0.75rem 0 0.5rem;
+    border-bottom: 1px dashed var(--border);
+}
+.group-heading:first-child { margin-top: 0; }
+.group-heading.hidden { display: none; }
+
+/* ─────────────────────────────────────────────────────────────────
+   Code tab — flat view.
+
+   Structure:
+     .flat-bucket            Primary / Secondary / Others heading + groups
+     .flat-group             One collapsible project group (a family)
+       .flat-group-head      Chevron + project name + rollup tags
+       .flat-collapsed-strip Summary strip shown only when .collapsed
+       .flat-group-body      Grid of peer-cards
+         .peer-card          One repo or promoted sub-repo
+           .peer-head        Name + kind + overall status tag
+           .peer-rows        One branch row per checkout + worktree
+             .peer-row       dot · name · status · run · open-with
+           .peer-term        Inline runner terminal mount (when live)
+           .peer-foot        Path + optional jump-arrow
+   ───────────────────────────────────────────────────────────────── */
+
+.flat-bucket { margin-bottom: 1.75rem; }
+.flat-bucket:last-child { margin-bottom: 0; }
+.flat-bucket-heading {
+    font-size: 0.72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    padding: 0.5rem 0 0.4rem;
+    margin: 0 0 0.75rem;
+    border-bottom: 1px dashed var(--border);
+}
+
+/* Bucket body — a two-column grid every peer-card flows into. Both
+   solo families and compound families use `display: contents` on the
+   wrapper so their cards become direct grid items of the bucket.
+   Compound families prepend a full-row ornament that labels the group
+   without shifting the cards or breaking column alignment. */
+.flat-bucket-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+    gap: 0.7rem;
+    align-items: start;
+}
+
+.flat-group-solo,
+.flat-group-compound { display: contents; }
+
+/* The family ornament — a small-caps muted label that claims a full
+   bucket row, sitting directly above the compound family's peer-cards.
+   No background frame, no left accent: the cards below stay aligned
+   with solo-family cards in neighbouring rows. */
+.flat-group-ornament {
+    grid-column: 1 / -1;
+    padding: 0.25rem 0.2rem 0.05rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    /* A subtle underline seats the label visually against the group
+       below without drawing a full framing rule. */
+    border-bottom: 1px dashed var(--border-light);
+    margin-bottom: -0.2rem;
+}
+
+/* One peer-card — a repo or a promoted sub-repo. */
+.peer-card {
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex; flex-direction: column;
+    overflow: visible;     /* open-with popover escapes downward */
+    position: relative;
+}
+.peer-card.peer-card-dirty { border-color: color-mix(in srgb, var(--git-changes) 40%, var(--border)); }
+.peer-card.peer-card-live  { border-color: color-mix(in srgb, var(--git-clean) 40%, var(--border)); }
+.peer-card.peer-card-live.peer-card-dirty {
+    border-color: color-mix(in srgb, var(--git-clean) 30%, var(--git-changes) 30%);
+}
+.peer-card.peer-card-missing { opacity: 0.55; }
+.peer-card.peer-card-parent { border-left: 2px solid var(--accent); }
+
+.peer-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.75rem 0.4rem;
+}
+.peer-name {
+    font-size: 0.95rem; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+.peer-kind {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.6rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text-muted);
+    margin-left: auto; white-space: nowrap;
+}
+.peer-tag {
+    font-size: 0.6rem; letter-spacing: 0.06em;
+    text-transform: uppercase; font-weight: 600;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-card);
+    white-space: nowrap;
+}
+.peer-tag-clean { color: var(--git-clean); border-color: color-mix(in srgb, var(--git-clean) 30%, transparent); }
+.peer-tag-dirty { color: var(--git-changes); border-color: color-mix(in srgb, var(--git-changes) 40%, transparent); }
+.peer-tag-live  {
+    color: var(--git-clean);
+    border-color: color-mix(in srgb, var(--git-clean) 40%, transparent);
+    background: color-mix(in srgb, var(--git-clean) 10%, transparent);
+}
+.peer-tag-missing { color: var(--text-muted); font-style: italic; }
+
+/* Branch row — dot · name(+kind) · status · run · open-with. */
+.peer-rows {
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: visible;
+}
+.peer-row {
+    display: grid;
+    grid-template-columns: 12px 1fr auto auto auto;
+    column-gap: 0.55rem;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.82rem;
+    border-top: 1px solid var(--border-light);
+    position: relative;
+}
+.peer-row:first-child { border-top: none; }
+.peer-row:hover { background: var(--bg-card); }
+.peer-row-dirty { background: color-mix(in srgb, var(--git-dirty-bg) 70%, transparent); }
+.peer-row-live  { background: color-mix(in srgb, var(--git-clean) 6%, transparent); }
+.peer-row-live.peer-row-dirty { background: color-mix(in srgb, var(--git-clean) 6%, var(--git-dirty-bg) 50%); }
+.peer-row-missing { opacity: 0.55; }
+
+.b-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-muted);
+    justify-self: center;
+}
+.b-dot-clean   { background: var(--git-clean); }
+.b-dot-dirty   { background: var(--git-changes); }
+.b-dot-missing { background: var(--text-muted); }
+.b-dot-live    {
+    background: var(--git-clean);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--git-clean) 30%, transparent);
+    animation: peerLivePulse 1.4s ease-in-out infinite;
+}
+@keyframes peerLivePulse { 0%,100%{opacity:0.55}50%{opacity:1} }
+
+.b-name {
+    display: inline-flex; align-items: baseline; gap: 0.5rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.8rem; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0;
+}
+.peer-row-main .b-name {
+    color: var(--git-branch);
+    font-weight: 600;
+}
+.b-kind {
+    font-size: 0.6rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-muted);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+.b-status { justify-self: end; min-width: 32px; text-align: right; }
+.branch-clean   { color: var(--git-clean); font-size: 0.85rem; }
+.branch-dirty {
+    font-size: 0.68rem; font-weight: 600;
+    color: var(--git-changes); background: var(--git-changes-bg);
+    padding: 1px 7px; border-radius: 999px;
+}
+.branch-missing {
+    font-size: 0.6rem; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text-muted);
+    padding: 1px 7px; border-radius: 999px;
+    border: 1px dashed var(--border);
+}
+.b-run {
+    justify-self: center;
+    display: inline-flex; align-items: center; min-width: 28px;
+}
+.b-run:empty { min-width: 0; }
+
+/* Inline terminal mount placed between rows and foot. */
+.peer-term { padding: 0.4rem 0.75rem 0; }
+.peer-term .runner-term-mount { margin: 0; }
+
+/* Peer-card foot — absolute repo path + optional jump-arrow. */
+.peer-foot {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0.75rem 0.5rem;
+    border-top: 1px solid var(--border-light);
+}
+.peer-foot-path {
+    flex: 1;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.68rem; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    direction: rtl;   /* ellipsis on the left so the tail stays visible */
+    text-align: left;
+}
+.peer-jump {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0;
+    background: color-mix(in srgb, var(--git-clean) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--git-clean) 35%, transparent);
+    border-radius: 50%;
+    color: var(--git-clean);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.peer-jump:hover { background: color-mix(in srgb, var(--git-clean) 26%, transparent); }
+
+/* Split open-with button: primary + caret + popover. */
+.open-grp {
+    display: inline-flex; align-items: stretch;
+    height: 22px;
+    border: 1px solid var(--btn-border);
+    border-radius: 6px;
+    background: var(--btn-bg);
+    position: relative;
+    flex-shrink: 0;
+}
+.open-grp:hover { border-color: var(--accent); }
+.open-grp-empty { visibility: hidden; width: 60px; }
+.open-primary, .open-caret {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    color: var(--btn-text);
+    padding: 0;
+}
+.open-primary {
+    width: 28px;
+    border-right: 1px solid var(--btn-border);
+    border-radius: 6px 0 0 6px;
+}
+.open-primary:hover { background: var(--accent-bg); color: var(--accent); }
+.open-primary svg { width: 13px; height: 13px; display: block; }
+.open-caret {
+    width: 16px;
+    color: var(--text-muted);
+    border-radius: 0 6px 6px 0;
+}
+.open-caret:hover { background: var(--accent-bg); color: var(--accent); }
+
+/* Popover menu — anchored below the caret, right-aligned. */
+.open-popover {
+    position: absolute;
+    top: calc(100% + 4px); right: 0;
+    min-width: 190px;
+    z-index: 30;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+    box-shadow: var(--shadow-md);
+    display: flex; flex-direction: column;
+}
+.open-popover[hidden] { display: none; }
+.open-popover-item {
+    display: inline-flex; align-items: center; gap: 0.55rem;
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    font: inherit;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    text-align: left;
+    cursor: pointer;
+}
+.open-popover-item:hover { background: var(--bg-card-hover); color: var(--text); }
+.open-popover-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; color: var(--text-muted);
+}
+.open-popover-item:hover .open-popover-icon { color: var(--accent); }
+
+/* Runner button, inside a peer-row — override the fixed icon-button
+   base so it reads as a compact pill sitting next to the status cell. */
+.peer-row .b-run .git-action-btn {
+    width: 22px; height: 22px;
+    padding: 0;
+    border-radius: 50%;
+}
+.peer-row .b-run .git-action-btn svg { width: 11px; height: 11px; }
+.git-action-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 26px; padding: 0; border-radius: 6px;
+    background: var(--btn-bg); color: var(--btn-text);
+    border: 1px solid var(--btn-border); cursor: pointer;
+    transition: filter 0.1s, background 0.1s;
+    flex-shrink: 0;
+}
+.git-action-btn svg { display: block; }
+.git-action-btn:hover { filter: brightness(0.92); }
+.git-action-btn:active { filter: brightness(0.85); }
+/* Transient ok / err text feedback replaces the SVG briefly. */
+.git-action-btn.is-ok,
+.git-action-btn.is-err {
+    font-size: 0.65rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+}
+.git-action-btn.is-err { color: var(--git-changes); }
+
+/* --- Inline dev-server runner ---
+   One Run/Stop button per checkout row. Button colour carries the
+   signal: green to start, red to stop, amber to switch (another
+   checkout is already live). Inline terminal mounts as a sibling
+   immediately below the checkout row. */
+.git-action-btn.git-action-runner-run { color: #41a83a; }
+.git-action-btn.git-action-runner-stop { color: #d64545; }
+.git-action-btn.git-action-runner-switch { color: #c68b1f; }
+.git-action-btn.git-action-runner:hover { background: var(--accent-bg); }
+
+.runner-term-mount {
+    --runner-term-rows: 18;
+    margin: 0.25rem 0 0.5rem;
+    border: 1px solid var(--border);
+    border-left: 2px solid #41a83a;
+    border-radius: 6px;
+    background: #0b0b0e;
+    color: #e6e6e6;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    transition: box-shadow 0.8s;
+}
+.runner-term-mount.runner-term-highlight {
+    box-shadow: 0 0 0 2px color-mix(in srgb, #41a83a 50%, transparent);
+}
+.runner-term-mount.runner-exited {
+    border-left-color: var(--text-muted);
+    opacity: 0.85;
+}
+/* Collapsed inline runner: hide the output, keep the header (so the
+   label, status and controls stay reachable) and flip the chevron. The
+   server-side session keeps running — this is a view-only toggle. */
+.runner-term-mount.runner-collapsed .runner-term-host { display: none; }
+.runner-term-mount.runner-collapsed .runner-collapse svg { transform: rotate(180deg); }
+.runner-term-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.2rem 0.5rem;
+    background: color-mix(in srgb, var(--bg-card) 85%, black 15%);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.72rem;
+    cursor: pointer;
+    user-select: none;
+}
+.runner-term-header:hover {
+    background: color-mix(in srgb, var(--bg-card) 70%, black 30%);
+}
+.runner-term-mount.runner-collapsed .runner-term-header {
+    border-bottom-color: transparent;
+}
+.runner-term-label {
+    font-weight: 600; color: var(--text-secondary);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.runner-term-status {
+    flex: 1; color: var(--text-muted); font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+}
+.runner-term-mount.runner-exited .runner-term-status {
+    color: var(--git-changes);
+}
+.runner-control {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 20px; padding: 0;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 4px;
+    cursor: pointer;
+}
+.runner-control:hover { background: var(--accent-bg); color: var(--accent); }
+.runner-term-host {
+    position: relative; height: calc(var(--runner-term-rows) * 1.2em);
+    min-height: 180px;
+    padding: 2px 4px;
+    overflow: hidden;
+}
+.runner-term-host .xterm { height: 100%; width: 100%; }
+.runner-term-host .xterm-viewport { overflow-y: auto; }
+
+/* Pop-out modal — full-size terminal; close returns to inline. */
+.runner-modal {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: center; justify-content: center;
+}
+.runner-modal-dialog {
+    width: 92vw; height: 86vh; max-width: 1400px;
+    background: #0b0b0e; color: #e6e6e6;
+    border-radius: 10px; overflow: hidden;
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border);
+    box-shadow: 0 16px 60px rgba(0, 0, 0, 0.5);
+}
+.runner-modal-header {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.45rem 0.8rem;
+    background: color-mix(in srgb, var(--bg-card) 85%, black 15%);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+.runner-modal-close {
+    font-size: 1.1rem; line-height: 1;
+    width: 28px; height: 24px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+}
+/* Inside the popout modal the mount and its host both stretch to fill the
+   dialog. Without this, .runner-term-mount keeps its default margin +
+   row-based height and leaves a large empty band below the terminal. */
+.runner-modal-dialog .runner-modal-viewer {
+    flex: 1 1 auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    min-height: 0;
+}
+.runner-modal-dialog .runner-term-host {
+    flex: 1 1 auto; height: auto; min-height: 0;
+}
+
+/* Per-card quick actions (work-on + open folder) — sit to the right of
+   the date in the card header, use the same icon-button styling as the
+   git-row slots so the visual language stays consistent. */
+.card-actions {
+    display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle;
+}
+

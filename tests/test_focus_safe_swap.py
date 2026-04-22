@@ -126,8 +126,12 @@ def test_phase7_note_reconcile_wired():
     assert "function _noteSilentReload(" in body
     assert "function _noteReconcileDismiss(" in body
     assert "function _noteReconcileReload(" in body
-    # Banner element + its CSS exist.
+    # Banner element lives in the HTML shell; its CSS moved to the
+    # bundled modals.css in F2 of condash-frontend-split.
     assert 'id="note-modal-external-banner"' in body
-    assert ".note-modal-external-banner" in body
+    modals_css = (
+        DASHBOARD.parent / "src" / "css" / "modals.css"
+    ).read_text(encoding="utf-8")
+    assert ".note-modal-external-banner" in modals_css
     # SSE messages trigger the reconcile.
     assert "_reconcileNoteModal();" in body

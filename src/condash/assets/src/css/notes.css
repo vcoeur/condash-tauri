@@ -1,0 +1,127 @@
+/* --- PDF.js custom viewer ---
+   Mount point is emitted by render.py for .pdf files. We use pdfjs-dist
+   as a library (see the ES module at the bottom) rather than Chromium's
+   built-in PDF handling — QtWebEngine ships with PdfViewerEnabled=false
+   and pywebview doesn't flip it, so the native-window modal would
+   otherwise show Chromium's "Open externally" card instead of the PDF. */
+.note-pdf-host {
+    display: flex; flex-direction: column;
+    width: 100%; min-height: 70vh; height: 100%;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    overflow: hidden; position: relative;
+}
+.pdf-toolbar {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem; flex: 0 0 auto;
+    color: var(--text-secondary);
+}
+.pdf-toolbar button, .pdf-toolbar a.pdf-dl {
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.2rem 0.55rem; cursor: pointer;
+    font: inherit; line-height: 1.2; text-decoration: none;
+}
+.pdf-toolbar button:hover:not(:disabled),
+.pdf-toolbar a.pdf-dl:hover {
+    background: var(--accent-bg); color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.pdf-toolbar button:disabled { opacity: 0.4; cursor: default; }
+.pdf-toolbar button.is-active {
+    background: var(--accent-bg); color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+.pdf-toolbar-spacer { flex: 1; }
+.pdf-pageinfo { display: inline-flex; align-items: center; gap: 0.3rem; }
+.pdf-page-label { color: var(--text-muted); }
+.pdf-page-input {
+    width: 3rem; text-align: right;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 0.15rem 0.3rem; font: inherit;
+    -moz-appearance: textfield;
+}
+.pdf-page-input::-webkit-outer-spin-button,
+.pdf-page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pdf-page-input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+.pdf-total { color: var(--text-muted); }
+.pdf-zoom-label { min-width: 3rem; text-align: center; color: var(--text-muted); }
+.pdf-goto-hint {
+    min-width: 4rem; font-variant-numeric: tabular-nums;
+    color: var(--accent); font-weight: 600;
+}
+.pdf-goto-hint:empty { display: none; }
+
+/* Body = optional thumbnail sidebar + main pages area. */
+.pdf-body {
+    display: flex; flex: 1 1 auto; min-height: 0;
+}
+.pdf-sidebar {
+    flex: 0 0 150px; overflow: auto;
+    padding: 0.6rem 0.5rem;
+    background: color-mix(in srgb, var(--bg-card) 85%, black 15%);
+    border-right: 1px solid var(--border);
+    text-align: center;
+}
+.pdf-sidebar[hidden] { display: none; }
+.pdf-thumb {
+    display: block; margin: 0 auto 0.5rem; position: relative;
+    border: 1px solid var(--border); border-radius: 3px;
+    cursor: pointer; background: white; overflow: hidden;
+    line-height: 0;
+}
+.pdf-thumb:hover { border-color: var(--accent); }
+.pdf-thumb.is-active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.pdf-thumb canvas { display: block; }
+.pdf-thumb-label {
+    position: absolute; bottom: 2px; right: 4px;
+    font-size: 0.65rem; color: white;
+    background: rgba(0,0,0,0.55); padding: 0 4px; border-radius: 2px;
+    line-height: 1.2;
+}
+
+.pdf-pages {
+    flex: 1 1 auto; overflow: auto;
+    padding: 1rem 0; text-align: center;
+    background: color-mix(in srgb, var(--bg) 70%, black 30%);
+    outline: none;
+}
+.pdf-page {
+    display: block; margin: 0 auto 0.75rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+    background: white; position: relative;
+}
+.pdf-page canvas { display: block; }
+.pdf-page .textLayer {
+    position: absolute; inset: 0;
+    overflow: hidden; line-height: 1;
+}
+.pdf-page .textLayer > span {
+    color: transparent; position: absolute;
+    white-space: pre; cursor: text;
+    transform-origin: 0 0;
+}
+.pdf-page .textLayer ::selection {
+    background: rgba(0, 120, 255, 0.3);
+}
+.pdf-page .textLayer mark.note-match {
+    background: rgba(255, 230, 0, 0.55);
+    color: transparent; padding: 0; border-radius: 2px;
+}
+.pdf-page .textLayer mark.note-match.active {
+    background: rgba(255, 140, 0, 0.8);
+    outline: 2px solid rgba(255, 140, 0, 0.9);
+}
+.pdf-loading, .pdf-error {
+    padding: 2rem; text-align: center;
+    color: var(--text-muted);
+}
+.pdf-error { color: #f87171; }
+
