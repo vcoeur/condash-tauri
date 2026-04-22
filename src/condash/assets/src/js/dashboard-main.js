@@ -5086,7 +5086,8 @@ window.addEventListener('resize', function() {
 Object.assign(window, {
     toggleCard, togglePriMenu, uploadToNotes, workOn, toggleSection,
     openInTerminal, startEditText, stepPointerDown, openDeliverable,
-    startRenameNote, runnerToggleCollapse, runnerJump, runnerPopout,
+    startRenameNote, runnerStart, runnerStop, runnerSwitch,
+    runnerToggleCollapse, runnerJump, runnerPopout,
     runnerStopInline, gitToggleOpenPopover, gitClosePopovers,
     updateProgress, _syncModeControls,
     openNotePreview, addStep, removeStep, cycle, pickPriority,

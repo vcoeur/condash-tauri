@@ -3852,6 +3852,41 @@ var Condash = (() => {
       _runnerRefreshRepoNode(repoId);
     }, 120);
   }
+  async function runnerStart(ev, key, checkout, path) {
+    if (ev) ev.stopPropagation();
+    var res;
+    try {
+      res = await fetch("/api/runner/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, checkout_key: checkout, path })
+      });
+    } catch (e) {
+      return;
+    }
+    if (res.status === 409) {
+      var data = {};
+      try {
+        data = await res.json();
+      } catch (e) {
+      }
+      var other = data.checkout_key || "?";
+      if (!confirm("Stop runner on " + other + " and start on " + checkout + "?")) return;
+      await _runnerStopFetch(key);
+      try {
+        await fetch("/api/runner/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, checkout_key: checkout, path })
+        });
+      } catch (e) {
+      }
+    }
+    await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+  }
+  async function runnerSwitch(ev, key, checkout, path) {
+    return runnerStart(ev, key, checkout, path);
+  }
   async function runnerStop(ev, key) {
     if (ev) ev.stopPropagation();
     await _runnerStopFetch(key);
@@ -4059,6 +4094,9 @@ var Condash = (() => {
     stepPointerDown,
     openDeliverable,
     startRenameNote,
+    runnerStart,
+    runnerStop,
+    runnerSwitch,
     runnerToggleCollapse,
     runnerJump,
     runnerPopout,
