@@ -6,7 +6,7 @@
 //! they all speak plain HTTP fetches, so pointing the webview at our
 //! axum server is the only integration delta.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use condash_state::WorkspaceCache;
@@ -52,7 +52,12 @@ pub fn load_template_for_bin(source: &assets::AssetSource) -> anyhow::Result<Str
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let conception_path = resolve_conception_path().map_err(|e| e.to_string())?;
+            let conception_path = match resolve_conception_path() {
+                Ok(p) => p,
+                Err(unset) => prompt_for_conception_path(unset).ok_or_else(|| {
+                    "condash cancelled at the conception folder picker".to_string()
+                })?,
+            };
             let asset_source = assets::pick_from_env();
             let template =
                 load_template_for_bin(&asset_source).map_err(|e| format!("load template: {e}"))?;
@@ -181,6 +186,108 @@ pub fn resolve_from(
         }
     }
     Err(ConceptionPathUnset { settings_path })
+}
+
+/// Native folder picker shown at first run when no env var and no
+/// user config supply a conception path. Loops until the user picks a
+/// directory that looks like a conception tree or cancels.
+///
+/// On success, persists the choice to the on-disk settings file so the
+/// next launch skips the picker. Returns `None` when the user cancels
+/// (the caller should exit cleanly).
+fn prompt_for_conception_path(initial: ConceptionPathUnset) -> Option<PathBuf> {
+    // Title picks a friendlier form than the raw error.
+    let title = "Select your conception tree";
+    let message = format!(
+        "{}\n\nPick the root of your conception tree (the directory that \
+         contains configuration.yml and/or projects/).",
+        initial,
+    );
+    eprintln!("condash: {message}");
+
+    loop {
+        let Some(picked) = rfd::FileDialog::new().set_title(title).pick_folder() else {
+            // User hit Cancel — bail to the caller.
+            return None;
+        };
+
+        match validate_conception_candidate(&picked) {
+            Ok(()) => {
+                let cfg = user_config::UserConfig {
+                    conception_path: Some(picked.clone()),
+                };
+                if let Err(e) = user_config::save(&cfg) {
+                    // Don't fail the launch on a save failure — the
+                    // user still gets a working session with this path,
+                    // and they'll see the same picker on the next run.
+                    eprintln!("condash: warning — could not persist settings.yaml: {e}");
+                } else if let Some(path) = user_config::settings_file_path() {
+                    eprintln!("condash: saved conception path to {}", path.display());
+                }
+                return Some(picked);
+            }
+            Err(reason) => {
+                // Show a non-blocking error and loop back to the picker.
+                rfd::MessageDialog::new()
+                    .set_title("Not a conception tree")
+                    .set_description(&format!("{}\n\n{}", picked.display(), reason))
+                    .set_level(rfd::MessageLevel::Warning)
+                    .show();
+            }
+        }
+    }
+}
+
+/// Loose validation: the candidate must be a directory and contain
+/// either `configuration.yml` (a migrated tree) or `projects/` (a
+/// pre-migration or freshly-scaffolded tree). Stricter checks are
+/// deliberately avoided — we re-prompt rather than punish plausible
+/// picks.
+pub fn validate_conception_candidate(path: &Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err(format!("{} is not a directory.", path.display()));
+    }
+    let has_config = path.join("configuration.yml").is_file();
+    let has_projects = path.join("projects").is_dir();
+    if has_config || has_projects {
+        return Ok(());
+    }
+    Err(
+        "This directory does not look like a conception tree — expected configuration.yml \
+         or projects/ inside it."
+            .into(),
+    )
+}
+
+#[cfg(test)]
+mod validate_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn rejects_missing_directory() {
+        assert!(validate_conception_candidate(Path::new("/does/not/exist")).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_directory() {
+        let tmp = tempdir().unwrap();
+        assert!(validate_conception_candidate(tmp.path()).is_err());
+    }
+
+    #[test]
+    fn accepts_directory_with_configuration_yml() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(tmp.path().join("configuration.yml"), "").unwrap();
+        assert!(validate_conception_candidate(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn accepts_directory_with_projects_subdir() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("projects")).unwrap();
+        assert!(validate_conception_candidate(tmp.path()).is_ok());
+    }
 }
 
 #[cfg(test)]
