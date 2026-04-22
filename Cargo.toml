@@ -5,6 +5,7 @@ members = [
     "crates/condash-parser",
     "crates/condash-state",
     "crates/condash-render",
+    "crates/condash-mutations",
 ]
 
 # Lints live at the workspace level so every member crate inherits them

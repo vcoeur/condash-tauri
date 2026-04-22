@@ -120,6 +120,13 @@ diff-state: ## Diff git_scan + search outputs Rust-vs-Python (Phase 2 slice 4 ex
 	    --driver $(CURDIR)/crates/condash-parser/tools/py_driver.py \
 	    --python python3
 
+diff-mutations: ## Diff step-level mutations Rust-vs-Python (Phase 3 slice 1 exit gate)
+	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) run -q -p condash-mutations --bin mutation-diff -- \
+	    --conception $(CONCEPTION) \
+	    --condash-src $(CURDIR)/src \
+	    --driver $(CURDIR)/crates/condash-mutations/tools/py_driver.py \
+	    --python python3
+
 test: ## Run the fast in-process pytest suite (skips tests/e2e/)
 	uv run pytest; RET=$$?; if [ $$RET -eq 5 ]; then exit 0; else exit $$RET; fi
 

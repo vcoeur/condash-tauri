@@ -393,6 +393,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "condash-mutations"
+version = "0.1.0"
+dependencies = [
+ "condash-parser",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "condash-parser"
 version = "0.1.0"
 dependencies = [
