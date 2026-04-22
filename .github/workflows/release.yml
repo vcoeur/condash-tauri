@@ -115,6 +115,7 @@ jobs:
             src-tauri
 
       - name: Build + bundle (tauri-action)
+        id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -141,3 +142,99 @@ jobs:
             - Linux: `chmod +x` the AppImage, run.
           releaseDraft: true
           prerelease: false
+
+      # linuxdeploy wraps the stock AppImageKit `AppRun.wrapped` binary,
+      # which unconditionally exports PYTHONHOME/PYTHONPATH/PERLLIB/…
+      # pointing into $APPDIR — regardless of whether the bundle carries
+      # any interpreter. That leak poisons every child process condash
+      # spawns (PTY sessions, runners, launchers): Python binaries hit
+      # "No module named 'encodings'", Perl scripts miss their libs, etc.
+      # See projects/2026-04/2026-04-22-condash-appimage-env-leak/ for
+      # the full analysis.
+      #
+      # condash also scrubs these at its own startup (env_hygiene.rs) as
+      # defense in depth, but replacing AppRun at the packaging layer
+      # removes the leak for any external script the AppImage is used to
+      # launch too, and for the sliver of time before main() runs.
+      - name: Sanitize AppImage AppRun (strip AppImageKit env leak)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          # Pinned appimagetool release — moving off `continuous` so a
+          # silent upstream change doesn't break release day.
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+        run: |
+          set -euo pipefail
+
+          APPIMAGE=$(ls src-tauri/target/release/bundle/appimage/condash_*_amd64.AppImage | head -n1)
+          if [[ -z "$APPIMAGE" || ! -f "$APPIMAGE" ]]; then
+              echo "No AppImage found to sanitize" >&2
+              exit 1
+          fi
+          echo "Sanitizing $APPIMAGE"
+
+          WORK=$(mktemp -d)
+          cp "$APPIMAGE" "$WORK/original.AppImage"
+          chmod +x "$WORK/original.AppImage"
+          ( cd "$WORK" && ./original.AppImage --appimage-extract >/dev/null )
+
+          # Drop the leaky AppImageKit C binary and replace the bash
+          # AppRun with a minimal shell launcher that only sets APPDIR
+          # and LD_LIBRARY_PATH, then sources the GTK hook the original
+          # bundle already ships. No Python/Perl/Qt exports.
+          rm -f "$WORK/squashfs-root/AppRun.wrapped"
+          cat > "$WORK/squashfs-root/AppRun" <<'SH'
+          #!/bin/sh
+          # Custom AppRun for condash (pure Rust, no embedded interpreters).
+          # Replaces AppImageKit's stock AppRun.wrapped which exports
+          # PYTHONHOME/PYTHONPATH/PERLLIB/QT_PLUGIN_PATH/GSETTINGS_SCHEMA_DIR
+          # unconditionally — poisoning any child process the user spawns
+          # from a condash terminal. See env_hygiene.rs and incident
+          # 2026-04-22-condash-appimage-env-leak for the why.
+          set -e
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export APPDIR="${HERE}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib/x86_64-linux-gnu:${HERE}/usr/lib:${LD_LIBRARY_PATH:-}"
+          if [ -f "${HERE}/apprun-hooks/linuxdeploy-plugin-gtk.sh" ]; then
+              . "${HERE}/apprun-hooks/linuxdeploy-plugin-gtk.sh"
+          fi
+          exec "${HERE}/usr/bin/condash" "$@"
+          SH
+          chmod +x "$WORK/squashfs-root/AppRun"
+
+          # Repack with a pinned appimagetool release. Run it via
+          # --appimage-extract-and-run so the outer Actions runner
+          # doesn't need fuse/libfuse2.
+          curl -sSL -o "$WORK/appimagetool" "$APPIMAGETOOL_URL"
+          chmod +x "$WORK/appimagetool"
+          "$WORK/appimagetool" --appimage-extract-and-run \
+              "$WORK/squashfs-root" "$APPIMAGE"
+          chmod +x "$APPIMAGE"
+
+          # Sanity check: extract the repacked AppImage and confirm the
+          # new AppRun no longer contains the leaky env-var strings.
+          # We check the file rather than exec'ing the AppImage (which
+          # would need a display + tauri-action's Linux deps at runtime).
+          VERIFY=$(mktemp -d)
+          cp "$APPIMAGE" "$VERIFY/out.AppImage"
+          chmod +x "$VERIFY/out.AppImage"
+          ( cd "$VERIFY" && ./out.AppImage --appimage-extract >/dev/null )
+          for leaky in PYTHONHOME PYTHONPATH PERLLIB QT_PLUGIN_PATH GSETTINGS_SCHEMA_DIR; do
+              if grep -q "export ${leaky}=" "$VERIFY/squashfs-root/AppRun" 2>/dev/null; then
+                  echo "Sanitization failed — AppRun still exports ${leaky}" >&2
+                  exit 1
+              fi
+          done
+          if [[ -f "$VERIFY/squashfs-root/AppRun.wrapped" ]]; then
+              echo "Sanitization failed — AppRun.wrapped still present" >&2
+              exit 1
+          fi
+          echo "AppRun sanitization verified."
+
+          # Re-attach to the draft release, clobbering the leaky copy
+          # tauri-action just uploaded.
+          gh release upload "$RELEASE_TAG" "$APPIMAGE" --clobber
+          echo "Replaced $APPIMAGE on release $RELEASE_TAG"
