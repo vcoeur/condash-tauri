@@ -11,20 +11,25 @@ By the end, you'll have condash installed, running against the bundled `concepti
 
 ## 1. Install condash
 
+The fastest path is a prebuilt installer from the [GitHub Releases page](https://github.com/vcoeur/condash/releases). Each release ships a per-OS bundle:
+
+| Platform | Artifact |
+|---|---|
+| Linux | `condash_<version>_amd64.AppImage` or `condash_<version>_amd64.deb` |
+| macOS | `condash_<version>_<arch>.dmg` |
+| Windows | `condash_<version>_x64_en-US.msi` |
+
+The builds are unsigned — your OS will ask you to confirm once on first launch. See [Install the desktop app](../guides/install-desktop.md) for the per-platform bypass.
+
+If you'd rather build from source, clone the repo and run:
+
 ```bash
-pipx install condash
-# or: uv tool install condash
+make install-tauri-cli     # one-off, installs cargo-tauri
+make frontend              # bundle the dashboard JS/CSS
+make build-tauri           # produce the platform installer under src-tauri/target/release/bundle/
 ```
 
-Both install `condash` into its own isolated venv and put it on your `$PATH`. The install is self-contained on Linux, macOS, and Windows — the native-window backend (`pywebview[qt]` → `PyQt6` + `PyQt6-WebEngine`) is a normal Python dependency, so there's no system-level Qt or GTK step. Install size is about 100 MB.
-
-Verify:
-
-```bash
-condash --version
-```
-
-If you see `command not found`, run `pipx ensurepath` and reopen the shell.
+That's the same pipeline CI uses. You'll need a Rust toolchain and, on Linux, the usual WebKitGTK + libappindicator system packages.
 
 ## 2. Fetch the demo tree
 
@@ -60,17 +65,15 @@ Everything is plain Markdown. Open `projects/2026-04/2026-04-02-fuzzy-search-v2/
 
 ## 3. Point condash at the tree
 
+condash reads the conception tree location from the `CONDASH_CONCEPTION_PATH` environment variable. Default is `$HOME/src/vcoeur/conception`.
+
+The quickest way to try the demo tree for a single run is:
+
 ```bash
-condash init
+CONDASH_CONCEPTION_PATH=~/conception-demo condash
 ```
 
-This writes a commented template to `~/.config/condash/config.toml`. Edit it and set a single line:
-
-```toml
-conception_path = "/home/you/conception-demo"
-```
-
-Everything else in the template can stay commented out — we'll fill those in later.
+To make it persistent, export the variable from your shell's rc file (`~/.bashrc`, `~/.zshrc`, or the equivalent). Or, once the window is open, click the gear icon in the dashboard header and set the path in the **General** tab — that writes it to `~/conception-demo/config/preferences.yml` for next time.
 
 ## 4. Launch
 
@@ -78,7 +81,7 @@ Everything else in the template can stay commented out — we'll fill those in l
 condash
 ```
 
-A desktop window opens. You should see this:
+Tauri opens a native desktop window on your OS's webview and points it at the local dashboard. You should see this:
 
 ![Dashboard rendering the demo tree — Current tab selected](../assets/screenshots/dashboard-overview-light.png#only-light)
 ![Dashboard rendering the demo tree — Current tab selected](../assets/screenshots/dashboard-overview-dark.png#only-dark)
@@ -97,7 +100,7 @@ Take two minutes to click through:
 - **Knowledge** — the `knowledge/` tree rendered as an explorer: `conventions.md` at the root, `Internal` and `Topics` folders with index files.
 - **History** — full-text search across every item + note. Type `fuzzy` to see ranked matches.
 
-Click the gear icon in the top right to see the **Configuration** modal with three tabs — General / Repositories / Preferences. Everything there maps to keys in either `~/.config/condash/config.toml` (machine-local) or `conception-demo/config/*.yml` (tree-versioned). You'll use this modal in the next tutorial.
+Click the gear icon in the top right to see the **Configuration** modal with three tabs — General / Repositories / Preferences. The General tab holds the conception path and a few per-machine defaults; the other two map directly to `conception-demo/config/repositories.yml` and `conception-demo/config/preferences.yml` (tree-versioned). You'll use this modal in the next tutorial.
 
 ## 6. Close the window
 
@@ -105,10 +108,10 @@ Closing the native window exits condash. Relaunch with `condash` whenever you wa
 
 ## What you just learned
 
-- Installing condash is a single `pipx`/`uv` command; no system prerequisites.
-- `condash init` + `condash config edit` is the setup flow; the only mandatory field is `conception_path`.
+- Installing condash is either a one-click installer from GitHub Releases or three `make` targets from source.
+- `CONDASH_CONCEPTION_PATH` plus the gear modal is the whole setup flow. The path is the only thing you must set.
 - The dashboard renders the files as-is on every page load. There's no database, no watcher, no cache.
-- The tree has two config files — one per-machine (TOML), one versioned with the tree (YAML). We'll dig into that split in [Configure the conception path](../guides/configure-conception-path.md).
+- The tree carries two YAML config files in `config/` — one team-shared (`repositories.yml`), one per-machine (`preferences.yml`). We'll dig into that split in [Configure the conception path](../guides/configure-conception-path.md).
 
 ## Next
 

@@ -1,7 +1,7 @@
 //! `minijinja` environment + custom filters — Rust port of
 //! `condash/templating.py`.
 //!
-//! The Jinja2 templates from `src/condash/templates/` are embedded via
+//! The Jinja2 templates from `crates/condash-render/templates/` are embedded via
 //! `include_str!` so they ship inside the binary. Two custom filters
 //! match the Python env:
 //!
@@ -15,15 +15,12 @@ use std::sync::OnceLock;
 use minijinja::value::Value;
 use minijinja::{AutoEscape, Environment, Error, ErrorKind, Output, State};
 
-pub const CARD_TEMPLATE: &str = include_str!("../../../src/condash/templates/card.html.j2");
-pub const HISTORY_TEMPLATE: &str = include_str!("../../../src/condash/templates/history.html.j2");
-pub const KNOWLEDGE_CARD_TEMPLATE: &str =
-    include_str!("../../../src/condash/templates/knowledge_card.html.j2");
-pub const KNOWLEDGE_GROUP_TEMPLATE: &str =
-    include_str!("../../../src/condash/templates/knowledge_group.html.j2");
-pub const KNOWLEDGE_TREE_TEMPLATE: &str =
-    include_str!("../../../src/condash/templates/knowledge_tree.html.j2");
-pub const MACROS_TEMPLATE: &str = include_str!("../../../src/condash/templates/_macros.html.j2");
+pub const CARD_TEMPLATE: &str = include_str!("../templates/card.html.j2");
+pub const HISTORY_TEMPLATE: &str = include_str!("../templates/history.html.j2");
+pub const KNOWLEDGE_CARD_TEMPLATE: &str = include_str!("../templates/knowledge_card.html.j2");
+pub const KNOWLEDGE_GROUP_TEMPLATE: &str = include_str!("../templates/knowledge_group.html.j2");
+pub const KNOWLEDGE_TREE_TEMPLATE: &str = include_str!("../templates/knowledge_tree.html.j2");
+pub const MACROS_TEMPLATE: &str = include_str!("../templates/_macros.html.j2");
 
 fn embed_filter(value: Value) -> Result<Value, Error> {
     let json = serde_json::to_string(&value).map_err(|e| {

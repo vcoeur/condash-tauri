@@ -73,7 +73,7 @@ Concretely:
 - No cache. Edit a README in your editor, refresh the window, see the change.
 - No sync server. condash binds to `127.0.0.1`. If you want multi-machine, you `git pull`.
 - No auth. Single-user, localhost-only.
-- No signup. `pipx install condash && condash init && condash`.
+- No signup. Download a release, launch `condash`.
 
 What you gain from the view layer is what a view layer is for: visual grouping, quick edits, cross-linking, and the class of features that aren't worth writing by hand (a kanban drag-drop, a history search with snippets, an embedded PDF viewer).
 

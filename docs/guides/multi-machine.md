@@ -7,19 +7,28 @@ description: Sync a conception tree between machines via git. What goes in versi
 
 **When to read this.** You work across two (or more) machines — a desktop and a laptop, your work box and a personal box — and you want the same tree on each, with per-machine tweaks that don't fight each other.
 
-condash was designed for this split from day one. The two-file config layout (per-tree YAML, per-machine TOML) is the whole answer.
+condash was designed for this split from day one. The tree-versioned YAML layout, plus a single per-machine environment variable, is the whole answer.
 
-## The three config files
+## The two config files
 
 | File | Lives in | Committed? | Per-machine or per-tree? |
 |---|---|---|---|
-| `config.toml` | `~/.config/condash/` | No (outside the tree) | Per-machine |
 | `repositories.yml` | `<conception_path>/config/` | **Yes** | Per-tree (shared) |
 | `preferences.yml` | `<conception_path>/config/` | **No** | Per-tree, per-machine |
 
-- **`config.toml`** — lives outside the conception tree, one per user per machine. Never in version control. Holds `conception_path`, `port`, `native`, and fallback terminal/PDF settings.
 - **`repositories.yml`** — lives inside the tree. **Commit this.** It's the team-shared config: workspace layout, repo grouping, open-with command chains. When a teammate pulls, their repo strip matches yours.
-- **`preferences.yml`** — lives inside the tree. **Don't commit it.** Per-machine overrides scoped to this tree. Useful when machine A has Ghostty and machine B has gnome-terminal, or when you want a different terminal shortcut on each host.
+- **`preferences.yml`** — lives inside the tree, beside `repositories.yml`. **Don't commit it.** Per-machine overrides scoped to this tree. Useful when machine A has Ghostty and machine B has gnome-terminal, or when you want a different terminal shortcut on each host.
+
+The one thing that isn't a file is the conception path itself — that's `CONDASH_CONCEPTION_PATH`, set per-machine in your shell's rc file (or left unset to fall through to the `$HOME/src/vcoeur/conception` default).
+
+## Installing condash on each machine
+
+Each machine needs its own condash build. Two options:
+
+- **Download from GitHub Releases.** Each release ships a per-OS installer: `.AppImage` / `.deb` on Linux, `.dmg` on macOS, `.msi` on Windows. See [Install the desktop app](install-desktop.md) for the first-launch bypass each OS asks for.
+- **Build from source.** Clone the repo, then `make install-tauri-cli && make frontend && make build-tauri`. Handy when you want to match a specific commit across machines.
+
+The two machines don't need to run the same condash version — the HTTP API, README format, and config files are stable across minor versions.
 
 ## Syncing via git
 
@@ -40,7 +49,12 @@ On the other machine:
 git clone git@github.com:you/conception.git ~/conception
 ```
 
-Edit `~/.config/condash/config.toml` on each machine to point `conception_path` at the local clone. Paths typically differ (different usernames, different home directories), which is exactly why this lives in per-machine TOML.
+Then set `CONDASH_CONCEPTION_PATH` on each machine to point at the local clone. Paths typically differ (different usernames, different home directories), which is exactly why this lives in a per-machine env var rather than the tree.
+
+```bash
+# ~/.bashrc or ~/.zshrc on each machine
+export CONDASH_CONCEPTION_PATH="$HOME/conception"
+```
 
 ## `.gitignore` for the tree
 
@@ -86,38 +100,21 @@ terminal:
   shortcut: Ctrl+T
 ```
 
-Leave `preferences.yml` absent on the desktop and condash falls back to `config.toml` or its defaults.
+Leave `preferences.yml` absent on the desktop and condash falls back to its defaults.
 
 The same pattern works for `screenshot_dir` (different directories per OS), `launcher_command` (different Claude Code install paths), and the `pdf_viewer` chain.
 
-## Merge order (recap)
+## Merge order
 
 When condash boots, the effective config is the result of layering in this order, top to bottom wins:
 
 1. Built-in defaults.
-2. `~/.config/condash/config.toml`.
-3. `<conception_path>/config/repositories.yml`.
-4. `<conception_path>/config/preferences.yml`.
+2. `<conception_path>/config/repositories.yml`.
+3. `<conception_path>/config/preferences.yml`.
 
-A key set in `preferences.yml` overrides everything else. A key set only in `config.toml` survives because nothing above overrode it.
+A key set in `preferences.yml` overrides everything else. A key set only in `repositories.yml` survives because nothing below overrode it. `CONDASH_CONCEPTION_PATH` is orthogonal — it only decides which tree those two files belong to.
 
 Full details in the [config reference](../reference/config.md).
-
-## Debugging "why is condash picking X?"
-
-Two commands tell you everything:
-
-```bash
-condash config path
-```
-
-Prints the location of the TOML file. If this isn't what you expected, check `$XDG_CONFIG_HOME` and any `--config` flag you may have passed.
-
-```bash
-condash config show --json
-```
-
-Prints the fully-merged configuration as JSON, after all four layers have been applied. Diff this between machines when something renders differently on each — the diff is usually obvious.
 
 ## Handling conflicts in the shared `repositories.yml`
 
@@ -129,5 +126,5 @@ The cleaner approach: leave those two keys out of `repositories.yml` and put the
 
 ## Next
 
-- [Configure the conception path](configure-conception-path.md) — the basic `conception_path` setup, per-machine.
+- [Configure the conception path](configure-conception-path.md) — the basic `CONDASH_CONCEPTION_PATH` setup, per-machine.
 - [Repositories and open-with buttons](repositories-and-open-with.md) — the full `repositories.yml` schema.

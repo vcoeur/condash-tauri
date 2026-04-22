@@ -1,13 +1,13 @@
 ---
 title: HTTP + WebSocket API · condash reference
-description: Every route the embedded FastAPI server exposes — useful when scripting condash, debugging, or wiring a second tool on top of the same data.
+description: Every route the embedded axum server exposes — useful when scripting condash, debugging, or wiring a second tool on top of the same data.
 ---
 
 # HTTP + WebSocket API
 
 ## At a glance
 
-condash runs a local FastAPI server bound to `127.0.0.1:<port>`. The native window loads it via `pywebview`; in `--no-native` mode, you point a browser at the same URL. All routes are local-only — there is no auth layer, and condash never binds to a non-loopback address.
+condash runs a local axum server bound to `127.0.0.1:<port>`. The main `condash` binary wraps it in a Tauri window; `condash-serve` runs the same server headless for browsers and automation. All routes are local-only — there is no auth layer, and condash never binds to a non-loopback address.
 
 Groups:
 
@@ -67,7 +67,7 @@ For mutation semantics (what each route writes), see [Mutation model](mutations.
 
 `fingerprint` is the 16-hex MD5 of the whole-tree repr; a change at any level flips it. `nodes` is a flat map that lets the client decide **which** subtree changed and re-fetch just that — preventing full-page flicker on a single step toggle. See [internals](../explanation/internals.md#parser-and-fingerprints) for how the hashes are computed.
 
-`/search-history` returns a list of per-item hits ranked by [`search.py::search_items`](https://github.com/vcoeur/condash/blob/main/src/condash/search.py). Empty `q` returns `[]`.
+`/search-history` returns a list of per-item hits ranked by [`condash-state::search::search_items`](https://github.com/vcoeur/condash/blob/main/crates/condash-state/src/search.rs). Empty `q` returns `[]`.
 
 ## Notes
 
@@ -190,4 +190,4 @@ The PTY survives the WebSocket: a page refresh detaches cleanly and the buffer (
 - No CORS headers — the dashboard lives on the same origin.
 - No multi-user mode; condash is single-user by design.
 
-If you want to drive condash from a second tool, run both on the same host and talk to the loopback port. The port is printed by `condash config show` (when set) or picked at launch from `11111–12111` when `port = 0`.
+If you want to drive condash from a second tool, run `condash-serve` with a pinned `CONDASH_PORT` — it prints the bound URL on startup. Without `CONDASH_PORT` set, the port is picked from `11111–12111` at launch.

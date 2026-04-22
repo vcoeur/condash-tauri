@@ -113,7 +113,7 @@ If the resulting path collides with an existing item, the skill appends `-2`, `-
 | Run `condash`-level CLI commands | The two tools are orthogonal; the skill has no dependency on condash being installed. |
 | Move or archive items | Items live at `projects/YYYY-MM/YYYY-MM-DD-slug/` for life. Status flips, directories don't. |
 | Create a git branch | Branch isolation is the user's call. Add that as an extension — see [guides/skill-extensions](../guides/skill-extensions.md). |
-| Edit the config | Use the dashboard's gear modal, `condash config edit`, or your editor. |
+| Edit the config | Use the dashboard's gear modal, or edit `<conception_path>/config/*.yml` with your editor. |
 
 ## Extending the shipped skill
 

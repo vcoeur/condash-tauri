@@ -48,7 +48,7 @@ Slug the filename to match the item: `<item-slug>.pdf` for the primary deliverab
 - Clicking a label opens the file in an embedded PDF viewer modal.
 - A **Download** icon next to the label saves the PDF to your OS.
 
-The embedded viewer uses pdf.js, vendored under `src/condash/assets/vendor/pdfjs/`. No external dependency; the viewer works offline.
+The embedded viewer uses pdf.js, vendored under `frontend/vendor/pdfjs/`. No external dependency; the viewer works offline.
 
 ## Generating the PDF
 
@@ -68,13 +68,7 @@ Refresh the dashboard; the PDF badge lights up and the viewer picks up the file.
 
 ## Overriding the viewer
 
-If you'd rather open PDFs in your OS-native viewer (Evince, Okular, Preview, Sumatra, …), configure the `pdf_viewer` fallback chain in `config.toml`:
-
-```toml
-pdf_viewer = ["evince {path}", "okular {path}"]
-```
-
-Or per-tree in `preferences.yml`:
+If you'd rather open PDFs in your OS-native viewer (Evince, Okular, Preview, Sumatra, …), configure the `pdf_viewer` fallback chain in `preferences.yml`:
 
 ```yaml
 pdf_viewer:

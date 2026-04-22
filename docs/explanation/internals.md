@@ -7,14 +7,16 @@ description: How the parser, fingerprints, config split, native-window embedding
 
 This page is for readers who want to understand the moving parts — because they're contributing, integrating with condash, debugging, or just curious. It assumes familiarity with the [CLI](../reference/cli.md), [config files](../reference/config.md), and [HTTP API](../reference/http-api.md).
 
+The stack: **axum** serves HTTP; **Tauri** wraps it in a native window; **rust-embed** carries the dashboard assets at compile time; **minijinja** renders the HTML fragments. The Rust workspace is split into four library crates (`condash-parser`, `condash-state`, `condash-render`, `condash-mutations`) plus the `src-tauri` binary crate that wires them together.
+
 ## Parser and fingerprints
 
 ### Discovery
 
-`collect_items()` in [`parser.py`](https://github.com/vcoeur/condash/blob/main/src/condash/parser.py) performs a single glob:
+`collect_items` in [`crates/condash-parser/src/collect.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/collect.rs) performs a single glob:
 
-```python
-ctx.base_dir / "projects" glob "*/*/README.md"
+```
+<base_dir>/projects/*/*/README.md
 ```
 
 Every match is a candidate item. The parser does **not** recurse deeper, does **not** walk `notes/` subdirectories, does **not** follow symlinks, and does **not** read any file other than the item's own `README.md`.
@@ -23,15 +25,15 @@ This is intentional. The conception tree might hold thousands of notes, but it w
 
 ### Metadata extraction
 
-For each matched `README.md`, `parse_readme()`:
+For each matched `README.md`, `parse_readme`:
 
-1. Reads the file into memory (`read_text(encoding="utf-8")`).
+1. Reads the file into memory as UTF-8.
 2. Takes the first line as `title` (stripping any leading `#`).
 3. Walks subsequent lines until the first `##` heading, extracting `**Key**: value` pairs as metadata.
 4. Captures the first paragraph after the first `##` as the card summary (≤ 300 chars).
-5. Calls `_parse_sections()` which collects every `- [<marker>] <text>` line grouped under its nearest `##` heading.
-6. Calls `_parse_deliverables()` which scans the `## Deliverables` section for `- [label](path.pdf) — desc` lines.
-7. Calls `_list_item_tree()` which walks the item directory up to three levels deep, capturing files and subdirectories for the card's "Files" pane.
+5. Parses every `- [<marker>] <text>` line grouped under its nearest `##` heading.
+6. Scans the `## Deliverables` section for `- [label](path.pdf) — desc` lines.
+7. Walks the item directory up to three levels deep, capturing files and subdirectories for the card's "Files" pane.
 
 Every step is a single pass over the file's line list. For a ~100-line README, the whole parse costs a few hundred microseconds. Even with hundreds of items, rendering the dashboard is dominated by the HTTP round-trip, not the parsing.
 
@@ -43,7 +45,7 @@ The tree is re-parsed **on every page load and every poll**. It would be easy to
 - **Inotify / FSEvents.** Flaky across Linux desktops, platform-specific, and doesn't cover "I pulled a branch".
 - **Manual invalidation.** The dashboard would have to know about every possible external writer — editor, shell, AI agent, git.
 
-A few hundred READMEs parsed on every request takes less than 50 ms on a laptop. That budget bought us zero cache code, zero invalidation bugs, and "edit in your editor, refresh, see the change" with no moving parts.
+A few hundred READMEs parsed on every request takes single-digit milliseconds on a laptop. That budget bought us zero cache code, zero invalidation bugs, and "edit in your editor, refresh, see the change" with no moving parts.
 
 ### Fingerprints — why the UI doesn't flicker
 
@@ -68,65 +70,22 @@ The key design choice is what each hash **doesn't** include:
 - `projects/<priority>/<slug>` deliberately excludes the priority. Dragging a card across columns re-keys the id (new path), not re-hashes the card content — so the DOM can detach-and-reinsert, but the card's innerHTML survives.
 - The whole-tab hash covers the `(priority, slug)` set so that card adds / removes / moves do bubble up. A card content edit doesn't — only its card hash changes, only its `/fragment` is refetched.
 
-See [`compute_project_node_fingerprints`](https://github.com/vcoeur/condash/blob/main/src/condash/parser.py) for the computation and [HTTP API](../reference/http-api.md#change-polling) for the route shape.
+See [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/fingerprint.rs) for the computation and [HTTP API](../reference/http-api.md#change-polling) for the route shape.
 
 Hashes are MD5 truncated to 16 hex chars. MD5 is fine here — this is an equality check, not a security primitive, and the 64-bit output is plenty to avoid collisions on trees of a few thousand items.
 
-## TOML vs YAML config split
+## Config: env var plus tree-level YAML
 
-condash reads **three** config files, owned by two different scopes. See [config files](../reference/config.md) for the full schema; this section is about the *why*.
+condash reads configuration from two places:
 
-### Per-machine vs per-tree
+- **The `CONDASH_CONCEPTION_PATH` environment variable.** Tells condash which tree to render. Defaults to `$HOME/src/vcoeur/conception`. That's the only piece of configuration that has to live outside the tree, because the tree itself doesn't know where it lives on disk.
+- **Two YAML files inside the tree**, under `<conception_path>/config/`:
+  - `repositories.yml` — workspace layout, repo grouping, `open_with` command chains. Team-shared; commit it.
+  - `preferences.yml` — per-machine scoping for this tree (PDF viewer chain, terminal shortcuts). Gitignored.
 
-Some settings belong to the machine:
-
-- Which conception tree this condash points at (`conception_path`).
-- Which port to bind to (`port`).
-- Whether to open a native window (`native`).
-- Which PDF viewer to prefer (`pdf_viewer`).
-- Which shell and keyboard shortcuts to use inside the embedded terminal (`[terminal]`).
-
-These change per host and must not be committed into the conception repo — one developer on Wayland + ghostty wants a different `[terminal]` block than another on X11 + gnome-terminal. That's `~/.config/condash/config.toml`: TOML, per-machine, never committed.
-
-Other settings belong to the tree:
-
-- Where the workspace of repos is (`workspace_path`).
-- Where the worktrees directory is (`worktrees_path`).
-- Which repos are "primary" vs "secondary", and which carry submodules.
-- Which IDE + terminal commands should the "open with" buttons invoke (`open_with`).
-
-These describe the *team's* shape — or the single developer's shape across machines. They should be committed so teammates who pull the tree get the same layout. That's `<conception_path>/config/repositories.yml`: YAML, versioned with the conception repo.
-
-A third file, `<conception_path>/config/preferences.yml`, sits in between: same keys as the TOML (`pdf_viewer`, `[terminal]`) but scoped to the tree rather than the machine. Not committed — it lets a developer use different terminal shortcuts depending on which conception tree they're working in, without polluting the team-shared repo.
-
-### Why three files, not one
-
-It would be simpler to have one file. Two attempts at "one file" failed:
-
-- **One TOML only.** Teammates can't share `workspace_path` / `open_with` — it's per-machine by location. We tried it; every new laptop setup turned into a `workspace_path` copy-paste from chat.
-- **One YAML in the tree.** Can't hold `conception_path` (the tree doesn't know where it lives on disk) and can't hold per-machine terminal shortcuts.
-
-So we split on **what it describes**, not on **how it's edited**. The TOML is machine-local, never shared. `repositories.yml` is tree-shared. `preferences.yml` is tree-local, not shared.
-
-### Merge order
-
-At load time in [`config.py::load`](https://github.com/vcoeur/condash/blob/main/src/condash/config.py):
-
-1. Parse `~/.config/condash/config.toml` → get a `CondashConfig` with all fields.
-2. If `conception_path` resolves and `<conception_path>/config/repositories.yml` exists, overlay its fields (`workspace_path`, `worktrees_path`, `repositories`, `open_with`). This **replaces** whatever was in TOML for those keys.
-3. If `<conception_path>/config/preferences.yml` exists, overlay `pdf_viewer` and `[terminal]`. This too replaces the TOML values.
-
-The `_log_deprecated_toml_keys` helper emits a one-time INFO line when it sees YAML-managed keys still in the TOML — those are migration residue. The next save from the gear modal strips them.
+Splitting between the two YAML files is a *what does this describe* question, not a *how do you edit it* question. `repositories.yml` describes the team's shape — workspace layout, repo structure, "open with IntelliJ" chains — and should be identical for every teammate. `preferences.yml` describes one developer's preferences on one tree on one machine; committing it would force the team onto your terminal shortcut.
 
 ### Example
-
-`~/.config/condash/config.toml` on my laptop:
-
-```toml
-conception_path = "/home/alice/src/vcoeur/conception"
-port = 0
-native = true
-```
 
 `<conception>/config/repositories.yml`, committed:
 
@@ -154,88 +113,98 @@ terminal:
   screenshot_paste_shortcut: "Ctrl+Alt+V"
 ```
 
-The result: teammates who clone the tree get the same `workspace_path` shape and `open_with` chains; my keyboard shortcut override stays local; my conception path stays per-machine.
+The result: teammates who clone the tree get the same `workspace_path` shape and `open_with` chains; my keyboard shortcut override stays local.
+
+### On machine-local configuration
+
+An earlier design had a third file — a per-machine TOML — for settings that don't belong in either YAML (ports, PDF viewer, the native-window toggle). The current build gets by without it: the conception path comes from the environment, everything tree-scoped lives in the two YAMLs, and the few remaining per-machine toggles are either compile-time defaults or reachable via env vars. A future release may bring the TOML back for users who want a persistent machine-local override surface that isn't a shell rc file; for now there is no such file and the loader doesn't look for one.
 
 See [multi-machine setup](../guides/multi-machine.md) for how to structure a two-machine workflow.
 
 ## Native window vs browser mode
 
-### How native mode works
+### Tauri as the window host
 
-By default (`native = true`) condash starts an HTTP server bound to a free local port **and** opens a `pywebview` desktop window pointed at `http://127.0.0.1:<port>`. The window is a real OS-native WebView:
+The main `condash` binary uses Tauri: a thin Rust shell that wraps an axum HTTP server and a native webview pointed at `http://127.0.0.1:<port>`. The webview is **the OS's own**, not a bundled Chromium:
 
-- **Linux** — `pywebview` prefers GTK/WebKit if `python3-gi` is installed system-wide, falling back to Qt (`PyQt6` + `PyQt6-WebEngine`) which is a hard runtime dependency. We force `_ng_app.native.start_args["gui"] = "qt"` in [`app.py::run`](https://github.com/vcoeur/condash/blob/main/src/condash/app.py) so that on systems without GTK bindings we go straight to Qt instead of printing a GTK traceback.
-- **macOS** — Cocoa/WebKit via `pyobjc`.
-- **Windows** — Edge WebView2 via `pywebview[cef]` (or the system WebView2 runtime).
+- **Linux** — WebKitGTK. The `.deb` and `.AppImage` builds depend on `libwebkit2gtk-4.1`.
+- **macOS** — WKWebView, shipped with the OS.
+- **Windows** — Edge WebView2, present on Windows 11 and installable as a runtime on 10.
 
-The trade-off: the Qt wheels are bulky (~80 MB install), but the bundled QtWebEngine means a `pipx install condash` works without any system WebKit + GTK plumbing — a huge win on fresh Linux machines.
+The trade-off: install size stays in the tens of megabytes (no Chromium to carry) and the window starts in a fraction of a second. The cost is that every platform's webview has quirks — PDF rendering and clipboard handling especially — which the dashboard's JavaScript has to work around.
 
-### When to prefer `--no-native`
+### `condash-serve` for headless + automation
 
-Browser mode (`--no-native` / `native = false`) skips `pywebview` entirely. The HTTP server starts and prints the URL; you open it in your normal browser.
+The `condash-serve` binary is the equivalent of the old "no-native" mode: it runs the same axum server on a port and prints the URL, with no webview involvement. Reasons to use it:
 
-Reasons:
+- **No `DISPLAY` / headless host.** No WebKit libs required.
+- **Automation.** Playwright and browser DevTools drive a plain HTTP URL more cleanly than a Tauri-wrapped one.
+- **Frontend iteration.** Pair it with `CONDASH_ASSET_DIR=frontend/` to serve the dashboard bundle straight from disk; rebuild with `make frontend` in another shell and hard-refresh.
 
-- **No DISPLAY / headless host.** Pywebview's Qt backend will try to open a GUI and fail silently, leaving the window absent but the server running. `--no-native` surfaces this: no window, no confusion.
-- **Testing / automation.** Driving the dashboard via Playwright or Chromium DevTools is easier against a plain HTTP URL than a pywebview-wrapped one.
-- **Qt linking problems.** If PyQt6 fails to import for any reason (mismatched system libraries, container constraints), the CLI still works.
+### Why Tauri, not a dedicated Electron bundle
 
-On Linux without `DISPLAY`, the native window fails silently and the HTTP server keeps running — use `--no-native` to avoid the misleading "window didn't open" experience.
-
-### Why pywebview, not a dedicated Electron-style bundle
-
-Electron would triple install size and add an update-manager problem. pywebview uses whatever native webview the OS already ships, so the Python dependency stack stays the binary. Downside: every platform's webview has quirks (see PDF.js below), but they're quirks we can work around in a few hundred lines of Python.
+Electron would roughly triple install size and add an auto-updater of its own. Tauri uses whatever native webview the OS already ships, so the shipped binary is small and the browser update cycle isn't ours to own. Downside: every platform's webview has quirks we work around — but they're quirks we can isolate in the frontend, not in the Rust shell.
 
 ## The dashboard bundle
 
-The dashboard's own JavaScript and CSS used to live as a single ~8 000-line `dashboard.html` with inline `<script>` + `<style>` blocks. v0.20.0 split the two out:
+The dashboard's JavaScript and CSS live under `frontend/src/`:
 
-- **Source** lives under `src/condash/assets/src/{js,css}/` — one CSS module per concern (`themes.css`, `cards.css`, `modals.css`, `terminal.css`, `notes.css`) and, for JavaScript, `dashboard-main.js` (the bulk of the behaviour, still a single module for now — see below), plus `markdown-preview.js` and `cm6-mount.js` for the two surfaces that need the CodeMirror + PDF.js bindings isolated. `entry.js` is the esbuild entrypoint.
-- **Build step** is `make frontend`. It invokes esbuild transiently via `npx --yes esbuild@<pinned>` — **no `node_modules/` is ever created**; the tool runs, writes its output, and exits. Output lands in `src/condash/assets/dist/bundle.{js,css}`.
-- **Committed output.** The built `dist/bundle.{js,css}` files are **committed** to git, so `pip install condash` / `uv sync` work on a machine with no Node toolchain. `make frontend` is only needed when you edit a source file under `assets/src/`.
-- **Serving.** `/assets/dist/{rel_path}` is a path-validated static route in [`routes/static.py`](https://github.com/vcoeur/condash/blob/main/src/condash/routes/static.py), same traversal-hardened pattern as `/vendor/<name>/`.
-- **Shell discipline.** `dashboard.html` is ~440 LOC and structural-only. `tests/test_dashboard_shell_size.py` caps the line count and fails the suite if a new `<script>` or `<style>` block is re-introduced — a guard against drift back to the old monolithic file.
+- `frontend/src/js/` — `dashboard-main.js` carries the bulk of the behaviour (still a single module for now — see below), plus `markdown-preview.js` and `cm6-mount.js` for the two surfaces that need the CodeMirror + PDF.js bindings isolated. `entry.js` is the esbuild entrypoint.
+- `frontend/src/css/` — one CSS module per concern (`themes.css`, `cards.css`, `modals.css`, `terminal.css`, `notes.css`).
 
-Why esbuild and not Vite: no dev server is needed (FastAPI already serves the static bundle), the split didn't buy its cost back in HMR, and the smaller dep surface matters for a tool that's sometimes installed in sandboxed environments.
+**Build step** is `make frontend`. It invokes esbuild transiently via `npx --yes esbuild@<pinned>` — **no `node_modules/` is ever created**; the tool runs, writes its output, and exits. Output lands in `frontend/dist/bundle.{js,css}`.
 
-Why a single `dashboard-main.js` for now: the 247 declarations in the original inline script coexisted as implicit globals (`_persistTabState`, `_rebindDashHandlers`, `_cmViews`, …). Rewriting every cross-call to an explicit import/export was out of scope for the v0.20.0 PR. A full extraction plan — 11 region-modules in dependency order, with the three cross-module cycles to break — exists as a follow-up tracked in the conception project that drove this split.
+**Embedding.** `frontend/dist/` is compiled into the Rust binary via `rust-embed` — see [`src-tauri/src/assets.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/assets.rs). The release binary carries the built bundle with it, so there's no runtime file-system lookup for the dashboard's own assets.
+
+**Committed output.** The built `frontend/dist/bundle.{js,css}` files are **committed** to git, so `cargo build` works on a machine with no Node toolchain. `make frontend` is only needed when you edit a source file under `frontend/src/`.
+
+**Serving.** `/assets/dist/{rel_path}` is a path-validated static route in [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/server.rs). In development, set `CONDASH_ASSET_DIR=frontend/` to serve from disk instead of the embedded copy.
+
+**Shell discipline.** `frontend/dashboard.html` is structural-only. No inline `<script>` or `<style>` blocks — everything goes through the bundle. A size guard in the test suite fails if the file grows past a conservative threshold, catching drift back to the old monolithic layout.
+
+Why esbuild and not Vite: no dev server is needed (axum already serves the static bundle), the split didn't buy its cost back in HMR, and the smaller dep surface matters for a tool that's sometimes installed in sandboxed environments.
+
+Why a single `dashboard-main.js` for now: the 247 declarations in the original inline script coexisted as implicit globals (`_persistTabState`, `_rebindDashHandlers`, `_cmViews`, …). Rewriting every cross-call to an explicit import/export was out of scope for the split. A full extraction plan — 11 region-modules in dependency order, with the three cross-module cycles to break — exists as a follow-up.
 
 ## Vendored third-party assets
 
-External client-side dependencies are **vendored into the package**, not fetched from a CDN. Two of them:
+External client-side dependencies are **vendored into the repo**, not fetched from a CDN. Four of them:
 
 ### PDF.js
 
-In-modal PDF previews use Mozilla's PDF.js. The library lives under `src/condash/assets/vendor/pdfjs/` and is served by the `/vendor/pdfjs/{rel_path:path}` route in [`app.py`](https://github.com/vcoeur/condash/blob/main/src/condash/app.py).
+In-modal PDF previews use Mozilla's PDF.js. The library lives under `frontend/vendor/pdfjs/` and is served by the `/vendor/pdfjs/{rel_path}` route.
 
-Why not the webview's built-in PDF renderer: QtWebEngine ships with `PdfViewerEnabled=false` by default, and even turning it on gives you a fixed viewer UI we can't theme. Chromium / Edge have native PDF viewers but again, no theming hooks.
+Why not the webview's built-in PDF renderer: WebKitGTK and WKWebView don't expose a PDF viewer that the dashboard can theme; Edge WebView2 has one, but with no theming hooks.
 
 The vendored PDF.js lets us:
 
 - Match the dashboard's dark / light theme on the viewer toolbar.
-- Skip the 10 MB of unused viewer assets (locale strings, thumbnail panel, annotation editor).
+- Skip the unused viewer assets (locale strings, thumbnail panel, annotation editor).
 - Wire the viewer's rendering loop to the in-modal `Ctrl+F` search bar eventually.
 
 ### xterm.js
 
 The embedded terminal uses xterm.js plus `xterm-addon-fit`, served from `/vendor/xterm/`. Same rationale but a different failure mode: **an uncached CDN fetch breaks offline installs.**
 
-condash is often run in air-gapped or aggressively-sandboxed environments (corporate laptops with blocked egress, Claude Code sandboxes, development VMs without internet). A runtime CDN fetch turns "start condash" into "start condash and hope for network" — a terrible property for a local-first tool. Vendoring cost us ~400 KB of package size and gave us a terminal that starts in ~50 ms, guaranteed.
+condash is often run in air-gapped or aggressively-sandboxed environments (corporate laptops with blocked egress, Claude Code sandboxes, development VMs without internet). A runtime CDN fetch turns "start condash" into "start condash and hope for network" — a terrible property for a local-first tool. Vendoring cost us a few hundred KB of bundle size and gave us a terminal that starts in ~50 ms, guaranteed.
+
+### CodeMirror 6 and Mermaid
+
+The note editor uses CodeMirror 6, served from `/vendor/codemirror/`. Diagram rendering inside Markdown uses Mermaid, served from `/vendor/mermaid/`. Both are vendored for the same reason as xterm: offline-first matters more than cache freshness.
+
+Re-vendoring is driven by `make update-pdfjs`, `make update-xterm`, `make update-codemirror`, `make update-mermaid` — each pins a version in the Makefile and downloads a clean tarball into `frontend/vendor/<name>/`.
 
 ### Pointer
 
-- `src/condash/assets/vendor/pdfjs/` — Mozilla PDF.js bundle + cmaps, standard fonts, wasm, iccs.
-- `src/condash/assets/vendor/xterm/` — xterm.js + CSS + fit addon.
-
-Both served behind path-validating `/vendor/<name>/{rel_path:path}` routes that reject `..` escapes and null bytes. Standard fare for serving bundled assets out of a Python package.
+All four live under `frontend/vendor/<name>/` and are served behind path-validating `/vendor/<name>/{rel_path}` routes that reject `..` escapes and null bytes. Standard fare for serving bundled assets out of a static-embedded Rust binary.
 
 ## Wrapping up
 
-None of this is novel. The interesting parts are what we **didn't** build: no cache, no watcher, no schema, no lock files, no auth, no sync. The dashboard is a thin FastAPI + NiceGUI layer over a directory of Markdown files, and the design is almost entirely about keeping it that way as features accumulate.
+None of this is novel. The interesting parts are what we **didn't** build: no cache, no watcher, no schema, no lock files, no auth, no sync. The dashboard is a thin axum + Tauri layer over a directory of Markdown files, and the design is almost entirely about keeping it that way as features accumulate.
 
-If you want to contribute or poke deeper, the [source on GitHub](https://github.com/vcoeur/condash) is ~5.9k lines of Python. The modules most worth reading first:
+If you want to contribute or poke deeper, the [source on GitHub](https://github.com/vcoeur/condash) is split across the Rust workspace. Good starting points:
 
-- [`parser.py`](https://github.com/vcoeur/condash/blob/main/src/condash/parser.py) — the tree walker and the fingerprint computation.
-- [`config.py`](https://github.com/vcoeur/condash/blob/main/src/condash/config.py) — the three-file split and its loader / saver pair.
-- [`app.py`](https://github.com/vcoeur/condash/blob/main/src/condash/app.py) — every HTTP route + the PTY session registry.
-- [`mutations.py`](https://github.com/vcoeur/condash/blob/main/src/condash/mutations.py) — the write surface; compare against the [mutation model reference](../reference/mutations.md) for overlap.
+- [`crates/condash-parser/src/collect.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/collect.rs) — the tree walker.
+- [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/fingerprint.rs) — the change-polling hash computation.
+- [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs) — the write surface; compare against the [mutation model reference](../reference/mutations.md) for overlap.
+- [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/server.rs) — every HTTP route, plus the PTY session registry.

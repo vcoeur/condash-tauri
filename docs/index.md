@@ -37,5 +37,5 @@ description: Live desktop dashboard for a Markdown-first project-tracking conven
 ## Links
 
 - [Source on GitHub](https://github.com/vcoeur/condash)
-- [`condash` on PyPI](https://pypi.org/project/condash/)
+- [Releases](https://github.com/vcoeur/condash/releases)
 - [Author](https://vcoeur.com)

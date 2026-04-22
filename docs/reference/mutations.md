@@ -11,11 +11,11 @@ The dashboard's **write surface is small**. It touches three places only:
 
 1. An item's `README.md` (step + status edits).
 2. Files under an item's root, mostly the `notes/` subdirectory (create, rename, upload, overwrite).
-3. The two configuration files — `~/.config/condash/config.toml` and the two YAML files inside the conception tree.
+3. The two tree-level YAML files — `<conception_path>/config/repositories.yml` and `<conception_path>/config/preferences.yml`.
 
 It does **not** touch `.git/`, does not move or rename item directories, does not run shell commands other than the user-configured `open_with.*` / `pdf_viewer` / `terminal.launcher_command` chains.
 
-Every mutation is exposed as a POST route in `app.py`. If a route isn't listed here, condash doesn't write.
+Every mutation is exposed as a POST route defined in [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/server.rs). If a route isn't listed here, condash doesn't write.
 
 ## README edits
 
@@ -55,7 +55,7 @@ Body (`application/json`):
 }
 ```
 
-Server-side rules (re-validated in [`create_item`](https://github.com/vcoeur/condash/blob/main/src/condash/mutations.py) — client input is never trusted):
+Server-side rules (re-validated in [`condash-mutations::create_item`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs) — client input is never trusted):
 
 - `title` required.
 - `kind` ∈ `{project, incident, document}`.
@@ -75,10 +75,10 @@ All paths live under an item's directory (`projects/YYYY-MM/YYYY-MM-DD-slug/...`
 |---|---|---|---|
 | Read a note | `GET /note` | Click a file in the card | Renders Markdown/text/PDF/image — no write |
 | Read raw | `GET /note-raw` | Enter edit mode | Returns plain bytes + mtime — no write |
-| Overwrite a note | `POST /note` | Save in the note editor | Atomic rewrite via a `.tmp` + `replace`. mtime check refuses stale overwrites. |
-| Rename a note | `POST /note/rename` | Edit the filename field | `Path.rename` preserving the extension. Rejects collisions. |
+| Overwrite a note | `POST /note` | Save in the note editor | Atomic rewrite via a `.tmp` + rename. mtime check refuses stale overwrites. |
+| Rename a note | `POST /note/rename` | Edit the filename field | Atomic rename preserving the extension. Rejects collisions. |
 | Create a note | `POST /note/create` | "New note" action | Writes an empty file under `<item>/[subdir]/<filename>` |
-| Create subdir | `POST /note/mkdir` | "New folder" action | `mkdir(parents=True)` under the item root. 409 if the target exists. |
+| Create subdir | `POST /note/mkdir` | "New folder" action | Recursive mkdir under the item root. 409 if the target exists. |
 | Upload files | `POST /note/upload` | Drag-and-drop or picker | Streams each file to disk (50 MB cap per file). Auto-suffixes `(2)`, `(3)`… on name collisions. |
 
 Filename validation regexes are narrow on purpose:
@@ -86,17 +86,17 @@ Filename validation regexes are narrow on purpose:
 - Notes: `[\w.-]+` plus a single extension. No spaces, no parentheses.
 - Uploads: `[\w. \-()]+\.[A-Za-z0-9]+` — permissive enough for camera exports and scanned PDFs.
 
-See [`mutations.py`](https://github.com/vcoeur/condash/blob/main/src/condash/mutations.py) for the exact regexes.
+See [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs) for the exact regexes.
 
 ## Config edits
 
-Two config files can be written from the gear modal. The TOML file is the per-machine store; the two YAML files live inside the conception tree.
+Two YAML files under `<conception_path>/config/` can be written from the gear modal.
 
 | Action | HTTP | Trigger | Effect |
 |---|---|---|---|
-| Save config | `POST /config` | Gear modal "Save" | Writes `config.toml` via `tomlkit` (preserves comments) and the YAMLs via `PyYAML`. All writes are atomic (`.tmp` + `replace`). |
+| Save config | `POST /config` | Gear modal "Save" | Writes `repositories.yml` and / or `preferences.yml`. All writes are atomic (`.tmp` + rename) and preserve comments outside the managed blocks. |
 
-Changes to `port` and `native` require a restart — the response surfaces those as `restart_required: ["port", "native"]` so the dashboard can warn the user. Every other field reloads live by rebuilding `RenderCtx`.
+A handful of fields (listen port, webview-host toggle) require a restart — the response surfaces those in `restart_required` so the dashboard can warn the user. Every other field reloads live by rebuilding `RenderCtx`.
 
 See [Config files](config.md) for the full key schema and which file owns which key.
 
@@ -111,7 +111,7 @@ The `/open*` family launches an external process. These **do not** write to the 
 | Open a folder | `POST /open-folder` | Must match `projects/YYYY-MM/YYYY-MM-DD-slug/` | OS default file manager |
 | Open a URL | `POST /open-external` | `http://` or `https://` only | User's default browser |
 
-Paths outside the configured sandbox are rejected **before the shell sees them**. The regexes live in [`paths.py`](https://github.com/vcoeur/condash/blob/main/src/condash/paths.py); the URL check in [`openers.py::_is_external_url`](https://github.com/vcoeur/condash/blob/main/src/condash/openers.py).
+Paths outside the configured sandbox are rejected **before the shell sees them**. The validation lives in [`src-tauri/src/paths.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/paths.rs); the URL check in [`src-tauri/src/runners.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/runners.rs).
 
 The one exception is the embedded terminal (`WS /ws/term`): its `?cwd=` query parameter goes through the same `_validate_open_path` check, so a forked shell can only start inside `workspace_path` or `worktrees_path`.
 
@@ -120,7 +120,7 @@ The one exception is the embedded terminal (`WS /ws/term`): its `?cwd=` query pa
 | Never | Why |
 |---|---|
 | Anything under `.git/` | Out of scope. Use your editor / CLI. |
-| Anything outside `conception_path` (except the TOML config) | Path validation rejects escapes. |
+| Anything outside `conception_path` | Path validation rejects escapes. |
 | Item directory renames / moves | The flat-month layout means items stay put for life; slug / date changes need `git mv` in the user's shell. |
 | `knowledge/` tree | Read-only from the dashboard. Edit in your editor. |
 | Caches or indices | There are none — the tree is re-parsed on every request. |

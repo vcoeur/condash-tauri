@@ -81,7 +81,7 @@ Markdown checklists inside any `##`-level section. The dashboard's default "add 
 | `[x]` or `[X]` | `done` | yes |
 | `[-]` | `abandoned` | yes |
 
-The dashboard's checkbox-click cycle is `open → done → progress → abandoned → open`, implemented by [`mutations.py::_toggle_checkbox`](https://github.com/vcoeur/condash/blob/main/src/condash/mutations.py).
+The dashboard's checkbox-click cycle is `open → done → progress → abandoned → open`, implemented in [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs).
 
 ### Where to put steps
 
@@ -89,7 +89,7 @@ Keep the top-level `## Steps` list **short** — three to eight high-level miles
 
 ### Why no ordering semantics
 
-The parser preserves source order. Drag-and-drop reorder rewrites the affected step lines in place (see [`mutations.py::_reorder_all`](https://github.com/vcoeur/condash/blob/main/src/condash/mutations.py)) — there is no explicit index, priority, or ID on a step. Two steps with identical text are indistinguishable.
+The parser preserves source order. Drag-and-drop reorder rewrites the affected step lines in place (see [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs)) — there is no explicit index, priority, or ID on a step. Two steps with identical text are indistinguishable.
 
 ## Deliverables
 
@@ -112,7 +112,7 @@ Strict syntax:
 | Separator | optional em-dash (`—`), en-dash (`–`), or hyphen (`-`) |
 | Description | optional free text after the separator |
 
-The parser [`_parse_deliverables`](https://github.com/vcoeur/condash/blob/main/src/condash/parser.py) stops at the next `##` heading. Lines that do not match the pattern are silently skipped — a typo means your PDF disappears from the card, no error.
+The parser ([`crates/condash-parser/src/deliverables.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/deliverables.rs)) stops at the next `##` heading. Lines that do not match the pattern are silently skipped — a typo means your PDF disappears from the card, no error.
 
 See [Deliverables and PDFs](../guides/deliverables.md) for the viewer config, the download route, and how the built-in PDF.js previewer kicks in.
 
@@ -142,4 +142,4 @@ See [mutations](mutations.md) for the create/rename/upload routes, and [Linking 
 - **No IDs.** The directory name is the identity. No UUIDs, no auto-incrementing counters.
 - **No schema version.** The parser is backwards-compatible within a major version; new fields are additive.
 - **No lock files.** Everything the dashboard knows is derived from the tree on every request.
-- **No `tidy` step.** Earlier versions shipped a `condash tidy` that moved `done` items into archive folders. The current flat-month layout makes it unnecessary — items never move.
+- **No archive step.** Items live at `projects/YYYY-MM/YYYY-MM-DD-slug/` for life. Status flips, directories don't — so there's no "archive" or "tidy" workflow to trigger.

@@ -88,7 +88,7 @@ Runner state is folded into the repo-strip fingerprint, so `/check-updates` (the
 ## Lifetime
 
 - A session stays alive for as long as the child process is running, regardless of whether any websocket is attached.
-- On clean shutdown (`condash` terminated via SIGTERM or the pywebview window closed) every registered runner is reaped: `SIGTERM`, brief wait, `SIGKILL` on a process group basis.
+- On clean shutdown (`condash` terminated via SIGTERM or the Tauri window closed) every registered runner is reaped: `SIGTERM`, brief wait, `SIGKILL` on a process group basis.
 - On a dirty crash (OOM, kill -9 on condash itself) the children are orphaned; you'll find them in `ps` under PID 1. This is the same footprint as the embedded terminal — condash does not install a double-fork sentinel.
 
 ## Known limits

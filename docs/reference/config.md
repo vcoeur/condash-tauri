@@ -1,61 +1,22 @@
 ---
 title: Config files · condash reference
-description: The two config files — one per-machine (TOML), one per-tree (YAML) — and every key in each.
+description: The two tree-level YAML config files — one team-shared, one per-machine — and every key in each.
 ---
 
 # Config files
 
 ## At a glance
 
-condash reads **two** config files. Which file owns which key is not cosmetic — it's how per-machine and per-team boundaries are kept separate.
+condash reads **two** config files, both under `<conception_path>/config/`. Which file owns which key is not cosmetic — it's how per-team and per-machine boundaries are kept separate.
 
 | File | Location | Scope | Owns |
 |------|----------|-------|------|
-| `config.toml` | `$XDG_CONFIG_HOME/condash/` (usually `~/.config/condash/`) | Per-machine, not shared | `conception_path`, `port`, `native`, `pdf_viewer`, `terminal` |
 | `repositories.yml` | `<conception_path>/config/repositories.yml` | Per-tree, versioned in git | `workspace_path`, `worktrees_path`, `repositories`, `open_with` |
 | `preferences.yml` | `<conception_path>/config/preferences.yml` | Per-tree but **not** versioned — per-machine preferences for this tree | `pdf_viewer`, `terminal` |
 
-The two YAML files live *inside* the conception tree itself. On any given machine, the three files are merged at load time: YAML values override the TOML defaults, so moving a team-wide setting into `repositories.yml` automatically propagates to every developer who pulls the tree.
+The two YAML files live *inside* the conception tree itself. On any given machine, they're merged at load time: `preferences.yml` overrides `repositories.yml` on overlapping keys. Moving a team-wide setting into `repositories.yml` automatically propagates to every developer who pulls the tree.
 
-## `config.toml` (per-machine)
-
-Default location: `$XDG_CONFIG_HOME/condash/config.toml`, falling back to `~/.config/condash/config.toml`.
-
-```toml
-conception_path = "/path/to/conception"
-port            = 0
-native          = true
-pdf_viewer      = ["evince {path}", "okular {path}"]
-
-[terminal]
-shell                     = "/bin/zsh"
-shortcut                  = "Ctrl+`"
-screenshot_dir            = "/home/you/Pictures/Screenshots"
-screenshot_paste_shortcut = "Ctrl+Shift+V"
-launcher_command          = "claude"
-move_tab_left_shortcut    = "Ctrl+Left"
-move_tab_right_shortcut   = "Ctrl+Right"
-```
-
-| Key | Required | Meaning |
-|-----|----------|---------|
-| `conception_path` | **yes** | Absolute path to the root of the conception tree condash renders. Must contain `projects/` (and may contain `knowledge/` and `config/`). |
-| `port` | no | TCP port for the embedded HTTP server. `0` (default) means "pick a free port in `11111–12111`". Set a fixed value if you want `http://127.0.0.1:<port>` to be stable. |
-| `native` | no | `true` (default) opens a desktop window via `pywebview`. `false` skips pywebview and serves the dashboard in whatever browser points at `http://127.0.0.1:<port>` — useful when the Qt/GTK backend isn't available. |
-| `pdf_viewer` | no | Bare list of shell-style commands, tried in order. `{path}` is replaced with the absolute path of the PDF. Unset or empty → falls back to the OS default. **Note**: it's a top-level list, **not** `pdf_viewer.commands = [...]`. |
-| `[terminal]` | no | Embedded terminal settings — see below. |
-
-### `[terminal]`
-
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `shell` | `$SHELL` → `/bin/bash` | Absolute path to an interactive shell. |
-| `shortcut` | `` Ctrl+` `` | Toggle the terminal pane. Modifiers: `Ctrl`, `Shift`, `Alt`, `Meta`. Key names follow the HTML `KeyboardEvent.key` convention. |
-| `screenshot_dir` | `$XDG_PICTURES_DIR/Screenshots`, else `~/Pictures/Screenshots` on Linux, `~/Desktop` on macOS | Directory scanned for "most recent screenshot" by the paste shortcut. |
-| `screenshot_paste_shortcut` | `Ctrl+Shift+V` | Inserts the absolute path of the newest image in `screenshot_dir` into the active terminal. No `Enter` — user confirms. |
-| `launcher_command` | `claude` | Shell-style command spawned by the secondary `+` button in each terminal side. Empty hides the button. |
-| `move_tab_left_shortcut` | `Ctrl+Left` | Move the active tab to the left pane. |
-| `move_tab_right_shortcut` | `Ctrl+Right` | Move the active tab to the right pane. |
+One thing that isn't a file: the conception path itself. That comes from the `CONDASH_CONCEPTION_PATH` environment variable (defaulting to `$HOME/src/vcoeur/conception`), because the tree doesn't know where it lives on disk. See [Environment variables](env.md).
 
 ## `repositories.yml` (per-tree, versioned)
 
@@ -102,13 +63,13 @@ open_with:
 
 ### `{path}` substitution
 
-Each `commands` entry is a single shell-style string parsed with `shlex`. The literal `{path}` is replaced with the absolute path of the repo / worktree being opened. Commands are tried in order until one starts successfully — if `idea {path}` isn't on `$PATH`, the button falls through to `idea.sh {path}` automatically.
+Each `commands` entry is a single shell-style string. The literal `{path}` is replaced with the absolute path of the repo / worktree being opened. Commands are tried in order until one starts successfully — if `idea {path}` isn't on `$PATH`, the button falls through to `idea.sh {path}` automatically.
 
-Built-in defaults reproduce the previous IntelliJ / VS Code / terminal behaviour, so a `repositories.yml` with no `open_with` section still gives functional buttons. Override only the slots you want to customise.
+Built-in defaults reproduce common IntelliJ / VS Code / terminal behaviour, so a `repositories.yml` with no `open_with` section still gives functional buttons. Override only the slots you want to customise.
 
 ## `preferences.yml` (per-tree, **not** versioned)
 
-Lives at `<conception_path>/config/preferences.yml`. **Do not** commit this file — add it to the tree's `.gitignore`. It holds the same per-machine keys as the TOML file, but scoped to the tree, so different trees on the same machine can use different terminal shortcuts or PDF viewers.
+Lives at `<conception_path>/config/preferences.yml`. **Do not** commit this file — add it to the tree's `.gitignore`. It holds per-machine overrides for this tree, so different trees on the same machine can use different terminal shortcuts or PDF viewers, and different machines sharing the same tree can carry their own preferences.
 
 ```yaml
 pdf_viewer:
@@ -116,23 +77,42 @@ pdf_viewer:
   - evince {path}
 
 terminal:
+  shell: /bin/zsh
   shortcut: Ctrl+T
+  screenshot_dir: /home/you/Pictures/Screenshots
   screenshot_paste_shortcut: Ctrl+Shift+V
   launcher_command: claude
+  move_tab_left_shortcut: Ctrl+Left
+  move_tab_right_shortcut: Ctrl+Right
 ```
 
-Keys match the `config.toml` schema exactly. `preferences.yml` **overrides** `config.toml` when both set the same key for the current tree.
+### Top-level keys
+
+| Key | Meaning |
+|-----|---------|
+| `pdf_viewer` | Bare list of shell-style commands, tried in order. `{path}` is replaced with the absolute path of the PDF. Unset or empty → falls back to the OS default. |
+
+### `terminal`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `shell` | `$SHELL` → `/bin/bash` | Absolute path to an interactive shell. |
+| `shortcut` | `` Ctrl+` `` | Toggle the terminal pane. Modifiers: `Ctrl`, `Shift`, `Alt`, `Meta`. Key names follow the HTML `KeyboardEvent.key` convention. |
+| `screenshot_dir` | `~/Pictures/Screenshots` on Linux, `~/Desktop` on macOS | Directory scanned for "most recent screenshot" by the paste shortcut. |
+| `screenshot_paste_shortcut` | `Ctrl+Shift+V` | Inserts the absolute path of the newest image in `screenshot_dir` into the active terminal. No `Enter` — user confirms. |
+| `launcher_command` | `claude` | Shell-style command spawned by the secondary `+` button in each terminal side. Empty hides the button. |
+| `move_tab_left_shortcut` | `Ctrl+Left` | Move the active tab to the left pane. |
+| `move_tab_right_shortcut` | `Ctrl+Right` | Move the active tab to the right pane. |
 
 ## Merge order
 
 At load time:
 
-1. Start with defaults.
-2. Merge `~/.config/condash/config.toml` on top.
-3. Merge `<conception_path>/config/repositories.yml` on top (adds `workspace_path`, `worktrees_path`, `repositories`, `open_with`; these keys don't appear in the TOML file).
-4. Merge `<conception_path>/config/preferences.yml` on top.
+1. Start with defaults compiled into the binary.
+2. Merge `<conception_path>/config/repositories.yml` on top.
+3. Merge `<conception_path>/config/preferences.yml` on top (overrides `repositories.yml` on overlapping keys — `pdf_viewer`, `terminal`).
 
-Result: you get sensible per-machine defaults from `~/.config/`, team-shared repo/IDE settings from the versioned YAML, and optional per-tree per-machine tweaks from the untracked YAML.
+Result: team-shared repo/IDE settings from the versioned YAML, plus per-tree per-machine tweaks from the untracked YAML.
 
 ## Editing from the dashboard
 
@@ -141,7 +121,7 @@ Click the gear icon in the header. A modal opens with three tabs:
 ![Gear modal General tab](../assets/screenshots/gear-modal-light.png#only-light)
 ![Gear modal General tab](../assets/screenshots/gear-modal-dark.png#only-dark)
 
-- **General** → writes `conception_path`, `port`, `native` to `config.toml`.
+- **General** → the conception path (written to `preferences.yml`) plus a few per-machine defaults.
 - **Repositories** → writes `workspace_path`, `worktrees_path`, `repositories`, `open_with` to `repositories.yml`.
 - **Preferences** → writes `pdf_viewer`, `terminal` to `preferences.yml`.
 
@@ -151,4 +131,8 @@ Click the gear icon in the header. A modal opens with three tabs:
 ![Gear modal Preferences tab](../assets/screenshots/gear-modal-preferences-light.png#only-light)
 ![Gear modal Preferences tab](../assets/screenshots/gear-modal-preferences-dark.png#only-dark)
 
-Saves are atomic (`tomlkit` / PyYAML) and preserve comments you've added outside the header block. Changes to `port` and `native` require a restart; the modal tells you so. Everything else reloads live.
+Saves are atomic and preserve comments you've added outside the managed blocks. Most changes reload live; a port or webview-host change requires a restart and the modal tells you so.
+
+## Machine-local TOML
+
+An earlier build also carried a per-machine TOML file (`~/.config/condash/config.toml`) for settings that didn't fit either YAML. That file is no longer read — the conception path lives in the `CONDASH_CONCEPTION_PATH` environment variable instead, and the remaining per-machine knobs are all in `preferences.yml`. A future release may reintroduce a machine-local override surface; for now there is none.

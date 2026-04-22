@@ -14,7 +14,7 @@ The embedded terminal is a real PTY over a WebSocket. `bash` (or your configured
 Two ways:
 
 - Click the `>_` icon in the dashboard header.
-- Press the configured toggle shortcut. Default is `` Ctrl+` ``; change it under `terminal.shortcut` in `config.toml` or `preferences.yml`.
+- Press the configured toggle shortcut. Default is `` Ctrl+` ``; change it under `terminal.shortcut` in `preferences.yml`.
 
 ![Terminal pane open beneath the dashboard](../assets/screenshots/terminal-light.png#only-light)
 ![Terminal pane open beneath the dashboard](../assets/screenshots/terminal-dark.png#only-dark)
@@ -58,21 +58,21 @@ Press `Ctrl+Shift+V` (configurable as `terminal.screenshot_paste_shortcut`) anyw
 
 Typical use: take a screenshot of a failing test → `Ctrl+Shift+V` → the path appears → prefix with `cat ` or drop into a `gh issue create --body-file ` command.
 
-Clipboard-based paste (`Ctrl+V`) also works for regular text, and uses the OS clipboard via a server-side bridge (Qt) because xterm.js can't read the browser clipboard directly. Both `Ctrl+V` (paste) and `Ctrl+C` (copy) flow through this bridge.
+Clipboard-based paste (`Ctrl+V`) also works for regular text, and uses the OS clipboard via a server-side bridge because xterm.js can't read the browser clipboard directly. Both `Ctrl+V` (paste) and `Ctrl+C` (copy) flow through this bridge.
 
 ## Configuration surface
 
-Everything lives in `[terminal]` in `config.toml` or under `terminal:` in `preferences.yml`. The YAML copy overrides the TOML copy when both are set — so you can keep a machine-wide default in `~/.config/condash/config.toml` and per-tree overrides in the tree's `preferences.yml`.
+Everything lives under `terminal:` in `<conception_path>/config/preferences.yml`:
 
-```toml
-[terminal]
-shell                     = "/bin/zsh"
-shortcut                  = "Ctrl+`"
-screenshot_dir            = "/home/you/Pictures/Screenshots"
-screenshot_paste_shortcut = "Ctrl+Shift+V"
-launcher_command          = "claude"
-move_tab_left_shortcut    = "Ctrl+Left"
-move_tab_right_shortcut   = "Ctrl+Right"
+```yaml
+terminal:
+  shell: /bin/zsh
+  shortcut: "Ctrl+`"
+  screenshot_dir: /home/you/Pictures/Screenshots
+  screenshot_paste_shortcut: Ctrl+Shift+V
+  launcher_command: claude
+  move_tab_left_shortcut: Ctrl+Left
+  move_tab_right_shortcut: Ctrl+Right
 ```
 
 See the [config reference](../reference/config.md) for the full key table with defaults.

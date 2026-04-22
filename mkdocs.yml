@@ -46,8 +46,6 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/vcoeur/condash
-    - icon: fontawesome/brands/python
-      link: https://pypi.org/project/condash/
 
 markdown_extensions:
   - admonition

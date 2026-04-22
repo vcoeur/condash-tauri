@@ -1,102 +1,65 @@
 ---
 title: CLI · condash reference
-description: Every subcommand and flag the condash CLI accepts.
+description: The two condash binaries and how to configure them.
 ---
 
 # CLI
 
+condash ships two binaries. Neither takes subcommands or flags — everything that used to live behind a flag is now either an environment variable or a tab in the in-app gear modal.
+
 ## At a glance
 
-| Command | What it does |
-|---------|-------------|
-| `condash` | Launch the dashboard (default) |
-| `condash init` | Write the template config file |
-| `condash config show` | Print the effective (resolved) config |
-| `condash config path` | Print the config file path |
-| `condash config edit` | Open the config in `$VISUAL` / `$EDITOR` |
-| `condash install-desktop` | Register an XDG launcher entry (Linux) |
-| `condash uninstall-desktop` | Remove the launcher entry |
+| Binary | What it does |
+|---|---|
+| `condash` | Open the Tauri desktop window against the current conception tree |
+| `condash-serve` | Run the HTTP server headless — no webview, no GUI deps |
 
-## `condash` (launch the dashboard)
+## `condash`
+
+The main binary. Packaged into the per-OS installer on the [releases page](https://github.com/vcoeur/condash/releases); also produced by `make build-tauri` from source.
 
 ```bash
-condash [--version]
-        [--conception-path PATH]
-        [--config PATH]
-        [--port PORT]
-        [--native | --no-native]
+condash
 ```
 
-With no subcommand, `condash` launches the native window against the effective config. On Linux without `DISPLAY`, the window fails silently and the HTTP server keeps running — use `--no-native` to avoid the misleading "window didn't open" experience in that case.
+That's it — no arguments. The binary boots an embedded axum HTTP server on a free loopback port, then opens a Tauri window pointing at it. On Linux the window uses WebKitGTK; on macOS, WKWebView; on Windows, WebView2.
 
-| Flag | Meaning |
-|------|---------|
-| `--version` | Print version and exit. |
-| `--conception-path PATH` | One-shot override of `conception_path`. Does not touch the config file. |
-| `--config PATH` | Use a different config file instead of the default `$XDG_CONFIG_HOME/condash/config.toml`. |
-| `--port PORT` | One-shot override of `port`. `0` lets the OS pick a free port. |
-| `--native` | Force the native window on for this launch (overrides `native = false` in config). |
-| `--no-native` | Force browser mode for this launch (overrides `native = true` in config). Useful in headless environments or when the Qt/GTK backend isn't available. |
+Closing the window exits the process. Relaunch whenever you want to come back — state lives in the Markdown files, not in the app.
 
-All `--*` flags are **one-shot** — they take effect for that process and never write to the config file. Useful for testing against a scratch tree or running a second condash instance side by side (pass `--port` and a different `--config`).
+## `condash-serve`
 
-### Exit codes
-
-| Code | Meaning |
-|------|---------|
-| `0`  | Clean shutdown |
-| `1`  | Config error (missing required field, unparseable TOML/YAML, invalid value) |
-| `2`  | `condash init` refused to overwrite an existing config |
-
-## `condash init`
-
-Writes a commented template config to `$XDG_CONFIG_HOME/condash/config.toml` (or `~/.config/condash/config.toml` if `$XDG_CONFIG_HOME` isn't set). Refuses to overwrite an existing file — delete it first, or use `condash config edit` to modify in place.
-
-The template is fully commented; `conception_path` is the only field you must uncomment before the dashboard will start. Every other key has a reasonable default (see [Config files](config.md)).
-
-## `condash config`
-
-Three subcommands that all operate on the resolved config.
+A developer-oriented binary that runs the same HTTP server without opening a window. Produced by `cargo build -p condash --bin condash-serve`, or `make run-serve` when iterating.
 
 ```bash
-condash config show [--json]
-condash config path [--json]
-condash config edit
+condash-serve
 ```
 
-| Subcommand | Output |
-|------------|--------|
-| `show` | Human-readable dump of the effective config (file + defaults merged). Add `--json` for machine-parseable output. |
-| `path` | Absolute path to the config file being used. `--json` wraps it in `{"path": "..."}`. |
-| `edit` | Open the config file in `$VISUAL`, or `$EDITOR`, or `nano` as a fallback. Exits after the editor quits. |
+Prints the bound URL (e.g. `http://127.0.0.1:11111`) and keeps running until you `Ctrl+C`. Open the URL in your normal browser.
 
-Use `show` when you're debugging "why is condash using that path" without hand-parsing the TOML + YAML.
+Reasons to use `condash-serve`:
 
-## `condash install-desktop`
+- **Headless host.** No `DISPLAY`, no webview libs, still want the dashboard.
+- **Automation.** Playwright / Chromium DevTools drive a plain HTTP URL more cleanly than a Tauri-wrapped one.
+- **Frontend iteration.** Combine with `CONDASH_ASSET_DIR=frontend/` to serve the source bundle from disk instead of the embedded copy, then rebuild with `make frontend` in another shell and hard-refresh the browser.
 
-**Linux only.** Registers `condash` with the XDG application launcher so it appears in your OS launcher / menu / Activities view like any other GUI app.
+## Configuration
 
-```bash
-condash install-desktop
-```
+Neither binary reads flags. The two places configuration lives:
 
-Writes two files:
+1. **Environment variables** — three of them, all prefixed `CONDASH_`:
 
-- `~/.local/share/applications/condash.desktop` — launcher entry, pointing at the absolute path of whichever `condash` binary ran the command (survives `pipx` / `venv` isolation).
-- `~/.local/share/icons/hicolor/scalable/apps/condash.svg` — the SVG app icon.
+   | Variable | Meaning |
+   |---|---|
+   | `CONDASH_CONCEPTION_PATH` | Absolute path to the conception tree to render. Defaults to `$HOME/src/vcoeur/conception`. |
+   | `CONDASH_ASSET_DIR` | Override the embedded dashboard bundle with a live directory on disk. Dev-only. |
+   | `CONDASH_PORT` | Pin the listen port of `condash-serve`. Defaults to a free port in `11111–12111`. |
 
-No `sudo`, no system-wide changes. The native window also picks up the same icon at runtime via `pywebview`, so it appears correctly in your taskbar and Alt-Tab switcher.
+   See [Environment variables](env.md) for the full list.
 
-## `condash uninstall-desktop`
-
-```bash
-condash uninstall-desktop
-```
-
-Removes both files that `install-desktop` wrote. Idempotent.
+2. **The gear modal in the dashboard.** Click the gear icon in the top right of the window. Three tabs — **General**, **Repositories**, **Preferences** — cover the tree-level YAML config (`<conception_path>/config/repositories.yml`, `<conception_path>/config/preferences.yml`). Saves are atomic and reload live.
 
 ## What's not in the CLI
 
 - **Creating items** — the dashboard doesn't create items, and neither does the CLI. Use your editor, or the [management skill](skill.md).
 - **Listing or searching items** — use the **History** tab in the dashboard, or `grep` over the tree.
-- **A server mode** — condash is single-user. If you want multi-user, something else is the right tool.
+- **A server mode for multiple users** — condash is single-user. If you want multi-user, something else is the right tool.

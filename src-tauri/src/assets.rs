@@ -11,13 +11,13 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-/// Embedded copy of the Python package's `assets/` tree. The path is
+/// Embedded copy of the repo-root `frontend/` tree. The path is
 /// relative to `src-tauri/Cargo.toml` (rust-embed resolves
 /// `CARGO_MANIFEST_DIR` + `folder`). `include = "*"` keeps every file in
 /// the tree; we need `dashboard.html`, `favicon.{svg,ico}`, `dist/*`,
 /// `vendor/<lib>/*`, and occasionally `src/*` for debug previews.
 #[derive(rust_embed::Embed)]
-#[folder = "../src/condash/assets/"]
+#[folder = "../frontend/"]
 pub struct EmbeddedAssets;
 
 /// Source of asset bytes. Handler code doesn't care which variant it
