@@ -1,25 +1,99 @@
 name: release
 
+# Builds the Tauri desktop app for Linux / macOS / Windows on tag push
+# and attaches unsigned bundles (MSI / DMG / AppImage / .deb) to a
+# draft GitHub Release. Per notes/packaging.md the project ships
+# unsigned — no code-signing certs, no Apple notarization, no Tauri
+# updater.
+#
+# Trigger: push a tag matching `v*` (e.g. `v1.0.0`). The `tauri-v*`
+# prefix-workaround was retired on 2026-04-22 when the repo swap made
+# this the sole release pipeline in the Rust `condash` repo (see
+# conception/projects/2026-04/2026-04-22-condash-repo-swap).
+#
+# Build handoff: `tauri-apps/tauri-action` per OS:
+#   * runs `cargo tauri build`,
+#   * invokes the per-OS bundler (WiX → .msi, hdiutil → .dmg,
+#     linuxdeploy → .AppImage + .deb),
+#   * creates / updates the draft release inline (no separate publish
+#     job).
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build-and-publish:
-    name: Build and publish to PyPI
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # required for OIDC trusted publishing
-      contents: read    # required so actions/checkout@v6 can read the repo
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+          - os: macos-latest
+            label: macos
+          - os: windows-latest
+            label: windows
+
+    name: bundle-${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+      - name: Install Linux Tauri deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            build-essential \
+            file \
+            libgtk-3-dev
 
-      - name: Build
-        run: uv build
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            src-tauri
+
+      - name: Build + bundle (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No code-signing — leave TAURI_SIGNING_PRIVATE_KEY etc unset
+          # so the bundler skips signing/notarization. This produces
+          # unsigned artifacts; users go through the SmartScreen /
+          # Gatekeeper bypass documented in
+          # docs/guides/install-desktop.md.
+        with:
+          # tauri.conf.json lives under src-tauri/.
+          projectPath: src-tauri
+          # Reuse the GitHub-provided tag for the release name. The
+          # `__VERSION__` placeholder gets substituted by the action
+          # against the bumped Cargo.toml version.
+          tagName: ${{ github.ref_name }}
+          releaseName: 'condash ${{ github.ref_name }}'
+          releaseBody: |
+            Unsigned Tauri build of condash.
+
+            Install bypass per OS: see docs/guides/install-desktop.md.
+
+            - Windows: SmartScreen → "More info" → "Run anyway".
+            - macOS: System Settings → Privacy & Security → "Open Anyway".
+            - Linux: `chmod +x` the AppImage, run.
+          releaseDraft: true
+          prerelease: false
