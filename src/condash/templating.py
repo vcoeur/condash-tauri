@@ -39,6 +39,18 @@ def _subtree_count(group: dict) -> int:
     return len(group.get("files") or []) + sum(_subtree_count(g) for g in group.get("groups") or [])
 
 
+def _dirname(path: str) -> str:
+    """Parent-path filter — everything before the last ``/`` (empty if none).
+
+    Used from the ``card_actions`` macro to derive the item folder from
+    the README path without calling Python's ``str.rsplit`` directly
+    (which is not supported by minijinja on the Rust side). Both engines
+    consume the same template, so both register this filter.
+    """
+    idx = path.rfind("/")
+    return path[:idx] if idx >= 0 else ""
+
+
 @lru_cache(maxsize=1)
 def env() -> Environment:
     """Return the process-wide Jinja environment, built on first access."""
@@ -51,6 +63,7 @@ def env() -> Environment:
     )
     environment.filters["embed"] = _embed_data
     environment.filters["subtree_count"] = _subtree_count
+    environment.filters["dirname"] = _dirname
     return environment
 
 

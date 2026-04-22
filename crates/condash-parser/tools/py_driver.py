@@ -78,6 +78,74 @@ def _run_collect(condash_src: str, base_dir: Path) -> int:
     return 0
 
 
+def _run_render(condash_src: str, base_dir: Path) -> int:
+    """Emit rendered HTML for every card and knowledge node/card.
+
+    Shape: ``{"cards": {slug: html}, "knowledge_groups": {rel_dir: html},
+    "knowledge_cards": {path: html}}``. The Rust side reproduces the
+    same keys and diffs byte-for-byte.
+    """
+    ctx = _build_ctx(condash_src, base_dir)
+    from condash.parser import collect_items, collect_knowledge  # noqa: E402
+    from condash.render import (  # noqa: E402
+        _render_history,
+        _render_knowledge,
+        render_card_fragment,
+        render_knowledge_card_fragment,
+        render_knowledge_group_fragment,
+    )
+
+    items = collect_items(ctx)
+    knowledge = collect_knowledge(ctx)
+
+    cards = {item["slug"]: render_card_fragment(item) for item in items}
+
+    knowledge_groups: dict[str, str] = {}
+    knowledge_cards: dict[str, str] = {}
+
+    def _walk(node):
+        if node is None:
+            return
+        knowledge_groups[node["rel_dir"]] = render_knowledge_group_fragment(node)
+        if node.get("index"):
+            knowledge_cards[node["index"]["path"]] = render_knowledge_card_fragment(node["index"])
+        for entry in node.get("body", []):
+            knowledge_cards[entry["path"]] = render_knowledge_card_fragment(entry)
+        for child in node.get("children", []):
+            _walk(child)
+
+    _walk(knowledge)
+
+    # render_page substitution pipeline depends on git_scan (later
+    # slice) + a pinned timestamp + pinned version. Instead of mocking
+    # the whole chain here, we compare the two expensive sub-trees the
+    # diff actually cares about — history and the knowledge-tree
+    # render. The caller will diff render_page as a whole once
+    # git_scan lands.
+    history = _render_history(ctx, items)
+    knowledge_tree = _render_knowledge(knowledge)
+
+    out = {
+        "cards": cards,
+        "knowledge_groups": knowledge_groups,
+        "knowledge_cards": knowledge_cards,
+        "history": history,
+        "knowledge_tree": knowledge_tree,
+    }
+    json.dump(out, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    print(
+        (
+            f"driver: render cards={len(cards)}"
+            f" knowledge_groups={len(knowledge_groups)}"
+            f" knowledge_cards={len(knowledge_cards)}"
+        ),
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _run_fingerprints(condash_src: str, base_dir: Path) -> int:
     """Emit {overall, project_nodes, knowledge_nodes} for fingerprint diff.
 
@@ -124,12 +192,13 @@ def main() -> int:
     ap.add_argument("--base-dir", required=True, help="conception base_dir for RenderCtx")
     ap.add_argument(
         "--mode",
-        choices=("per-readme", "collect", "fingerprints"),
+        choices=("per-readme", "collect", "fingerprints", "render"),
         default="per-readme",
         help=(
             "per-readme = stream one {path,data} per line; "
             "collect = emit a single {items,knowledge} doc; "
-            "fingerprints = emit {overall, project_nodes, knowledge_nodes} hashes"
+            "fingerprints = emit {overall, project_nodes, knowledge_nodes} hashes; "
+            "render = emit {cards, knowledge_groups, knowledge_cards} HTML strings"
         ),
     )
     args = ap.parse_args()
@@ -139,6 +208,8 @@ def main() -> int:
         return _run_collect(args.condash_src, base_dir)
     if args.mode == "fingerprints":
         return _run_fingerprints(args.condash_src, base_dir)
+    if args.mode == "render":
+        return _run_render(args.condash_src, base_dir)
     return _run_per_readme(args.condash_src, base_dir)
 
 

@@ -1,0 +1,23 @@
+[package]
+name = "condash-render"
+version = "0.1.0"
+description = "HTML rendering for the conception dashboard. Rust port of condash/render.py + templates/."
+authors = ["Alice Voland <alice@vcoeur.com>"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[dependencies]
+condash-parser = { path = "../condash-parser" }
+condash-state  = { path = "../condash-state" }
+minijinja = { version = "2", features = ["loader", "builtins"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[[bin]]
+name = "render-diff"
+path = "src/bin/render_diff.rs"
+
+[lints]
+workspace = true

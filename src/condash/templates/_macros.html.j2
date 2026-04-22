@@ -1,7 +1,7 @@
 {# Shared macros used across card.html.j2, knowledge_tree.html.j2, and history.html.j2. #}
 
 {% macro step(step, file_path) %}
-{% set dot = {"done": "✓", "progress": "~", "abandoned": "—", "open": ""}.get(step.status, "") %}
+{% set dot = "✓" if step.status == "done" else ("~" if step.status == "progress" else ("—" if step.status == "abandoned" else "")) %}
 <div class="step {{ step.status }}" data-file="{{ file_path }}" data-line="{{ step.line }}">
   <span class="drag-handle" onpointerdown="stepPointerDown(event)">⠿</span>
   <span class="status-dot status-{{ step.status }}"
@@ -38,7 +38,7 @@
 
 
 {% macro file_entry(n) %}
-{% set label = n.name[:-3] if n.name.endswith('.md') else n.name %}
+{% set label = n.name[:-3] if n.name[-3:] == '.md' else n.name %}
 <div class="note-item" data-kind="{{ n.kind | default('md') }}"
   onclick="openNotePreview({{ n.path | embed }},'{{ n.name }}')">{{ label }}</div>
 {% endmacro %}
@@ -109,7 +109,7 @@
 
 
 {% macro card_actions(item, icons) %}
-{% set rel_dir = item.path.rsplit('/', 1)[0] ~ '/' %}
+{% set rel_dir = (item.path | dirname) ~ '/' %}
 {% set work_title = 'Work on — insert "work on ' ~ item.slug ~ '" in the focused terminal tab' %}
 <div class="card-actions">
   <button class="git-action-btn card-action-work-on"
