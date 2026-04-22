@@ -31,9 +31,12 @@ To skip the native window entirely, set `native = false` in your config and open
 git clone https://github.com/vcoeur/condash.git
 cd condash
 uv sync --all-extras
+make frontend               # bundle assets/src/{js,css}/ → assets/dist/ (esbuild via npx)
 uv run condash --version
 uv run condash
 ```
+
+`make frontend` is only needed when the source under `src/condash/assets/src/` changes — the built `dist/bundle.{js,css}` files are committed so `pip install condash` from sdist works without a Node toolchain. It invokes `esbuild` transiently through `npx --yes`, so no `node_modules/` is created.
 
 ## First launch
 

@@ -186,9 +186,23 @@ On Linux without `DISPLAY`, the native window fails silently and the HTTP server
 
 Electron would triple install size and add an update-manager problem. pywebview uses whatever native webview the OS already ships, so the Python dependency stack stays the binary. Downside: every platform's webview has quirks (see PDF.js below), but they're quirks we can work around in a few hundred lines of Python.
 
-## Vendored assets
+## The dashboard bundle
 
-The dashboard's non-trivial client-side dependencies are **vendored into the package**, not fetched from a CDN. Two of them:
+The dashboard's own JavaScript and CSS used to live as a single ~8 000-line `dashboard.html` with inline `<script>` + `<style>` blocks. v0.20.0 split the two out:
+
+- **Source** lives under `src/condash/assets/src/{js,css}/` — one CSS module per concern (`themes.css`, `cards.css`, `modals.css`, `terminal.css`, `notes.css`) and, for JavaScript, `dashboard-main.js` (the bulk of the behaviour, still a single module for now — see below), plus `markdown-preview.js` and `cm6-mount.js` for the two surfaces that need the CodeMirror + PDF.js bindings isolated. `entry.js` is the esbuild entrypoint.
+- **Build step** is `make frontend`. It invokes esbuild transiently via `npx --yes esbuild@<pinned>` — **no `node_modules/` is ever created**; the tool runs, writes its output, and exits. Output lands in `src/condash/assets/dist/bundle.{js,css}`.
+- **Committed output.** The built `dist/bundle.{js,css}` files are **committed** to git, so `pip install condash` / `uv sync` work on a machine with no Node toolchain. `make frontend` is only needed when you edit a source file under `assets/src/`.
+- **Serving.** `/assets/dist/{rel_path}` is a path-validated static route in [`routes/static.py`](https://github.com/vcoeur/condash/blob/main/src/condash/routes/static.py), same traversal-hardened pattern as `/vendor/<name>/`.
+- **Shell discipline.** `dashboard.html` is ~440 LOC and structural-only. `tests/test_dashboard_shell_size.py` caps the line count and fails the suite if a new `<script>` or `<style>` block is re-introduced — a guard against drift back to the old monolithic file.
+
+Why esbuild and not Vite: no dev server is needed (FastAPI already serves the static bundle), the split didn't buy its cost back in HMR, and the smaller dep surface matters for a tool that's sometimes installed in sandboxed environments.
+
+Why a single `dashboard-main.js` for now: the 247 declarations in the original inline script coexisted as implicit globals (`_persistTabState`, `_rebindDashHandlers`, `_cmViews`, …). Rewriting every cross-call to an explicit import/export was out of scope for the v0.20.0 PR. A full extraction plan — 11 region-modules in dependency order, with the three cross-module cycles to break — exists as a follow-up tracked in the conception project that drove this split.
+
+## Vendored third-party assets
+
+External client-side dependencies are **vendored into the package**, not fetched from a CDN. Two of them:
 
 ### PDF.js
 
