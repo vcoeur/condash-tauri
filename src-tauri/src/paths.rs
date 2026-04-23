@@ -49,6 +49,13 @@ static VALID_ITEM_NOTES_FILE_RE: Lazy<Regex> = Lazy::new(|| {
         .expect("VALID_ITEM_NOTES_FILE_RE compiles")
 });
 
+/// Item directory itself — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`, with or
+/// without the trailing slash. Mirrors `_VALID_ITEM_DIR_RE` from `paths.py`.
+static VALID_ITEM_DIR_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/?$")
+        .expect("VALID_ITEM_DIR_RE compiles")
+});
+
 /// `<name>.<ext>` — `_VALID_NOTE_FILENAME_RE`. Used to validate the target
 /// of create_note / rename_note.
 pub static VALID_NOTE_FILENAME_RE: Lazy<Regex> =
@@ -130,6 +137,18 @@ pub fn validate_note_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
 /// (item READMEs, loose files alongside the README, …).
 pub fn is_item_notes_file(rel_path: &str) -> bool {
     VALID_ITEM_NOTES_FILE_RE.is_match(rel_path)
+}
+
+/// Validate a project-item folder path (`projects/YYYY-MM/<slug>/`) under
+/// `base_dir`. Mirrors `paths._validate_item_dir`. Used by `/open-folder`
+/// so the "open folder in file manager" card button resolves against the
+/// conception tree (not the workspace/worktrees sandbox).
+pub fn validate_item_dir(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
+    let full = safe_resolve(base_dir, rel_path, &[&VALID_ITEM_DIR_RE], false)?;
+    if !full.is_dir() {
+        return None;
+    }
+    Some(full)
 }
 
 /// Resolve `subdir` (relative to `item_dir`) and verify the result stays

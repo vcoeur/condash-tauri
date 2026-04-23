@@ -227,6 +227,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/open-folder", post(post_open_folder))
         .route("/open-external", post(post_open_external))
         .route("/open-doc", post(post_open_doc))
+        .route("/recent-screenshot", get(get_recent_screenshot))
         // Hard-refresh hook — rebuild RenderCtx from disk + invalidate
         // cached slices. `refreshAll` in the frontend hits this before
         // `location.reload()`.
@@ -1820,7 +1821,14 @@ async fn post_open_folder(
     if p.path.trim().is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "path required");
     }
-    let Some(validated) = validate_open_path(&state.ctx, &p.path) else {
+    // Item folders live inside the conception tree (base_dir), not the
+    // workspace/worktrees sandbox — the card-button passes a path like
+    // `projects/2026-04/2026-04-23-slug/` relative to base_dir. Resolve
+    // against base_dir, and fall back to the workspace sandbox for any
+    // other folder target a future caller might feed in.
+    let validated = crate::paths::validate_item_dir(&state.ctx.base_dir, &p.path)
+        .or_else(|| validate_open_path(&state.ctx, &p.path));
+    let Some(validated) = validated else {
         return error_json(StatusCode::FORBIDDEN, "path out of sandbox");
     };
     let value = validated.to_string_lossy().into_owned();
@@ -1900,6 +1908,105 @@ async fn post_open_doc(
     match crate::openers::try_chain(&chain, "path", &value) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
         None => error_json(StatusCode::BAD_GATEWAY, "no doc opener succeeded"),
+    }
+}
+
+// ---------------------------------------------------------------------
+// `/recent-screenshot` — data source for the Ctrl+Shift+V screenshot-paste
+// shortcut. Returns the absolute path of the newest image in the
+// configured `terminal.screenshot_dir` (falls back to an XDG-aware
+// default). Shape mirrors the Python route so the existing frontend
+// consumer (`pasteRecentScreenshot` in dashboard-main.js) works unchanged:
+// `{path: <abs>, dir: <abs>}` on success, `{path: null, dir: <abs>,
+// reason: <message>}` when the directory is missing, unreadable, or empty.
+// ---------------------------------------------------------------------
+
+const SCREENSHOT_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp"];
+
+/// Best-guess default location for OS screenshots. Honours
+/// `$XDG_PICTURES_DIR` (standard XDG user-dirs key); otherwise falls back
+/// to `~/Pictures/Screenshots` on Linux and `~/Desktop` on macOS. Mirrors
+/// `config.default_screenshot_dir` from the Python build.
+fn default_screenshot_dir() -> std::path::PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_PICTURES_DIR") {
+        if !xdg.is_empty() {
+            return std::path::PathBuf::from(xdg).join("Screenshots");
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let base = std::path::PathBuf::from(&home);
+    if cfg!(target_os = "macos") {
+        base.join("Desktop")
+    } else {
+        base.join("Pictures").join("Screenshots")
+    }
+}
+
+fn resolved_screenshot_dir(ctx: &condash_state::RenderCtx) -> std::path::PathBuf {
+    match ctx.terminal.screenshot_dir.as_deref() {
+        Some(s) if !s.is_empty() => {
+            // Expand a leading `~/` against $HOME; anything else is passed through.
+            if let Some(rest) = s.strip_prefix("~/") {
+                let home = std::env::var("HOME").unwrap_or_default();
+                std::path::PathBuf::from(home).join(rest)
+            } else {
+                std::path::PathBuf::from(s)
+            }
+        }
+        _ => default_screenshot_dir(),
+    }
+}
+
+async fn get_recent_screenshot(State(state): State<AppState>) -> Response {
+    let dir = resolved_screenshot_dir(&state.ctx);
+    let dir_str = dir.to_string_lossy().into_owned();
+    let payload_err = |reason: &str| {
+        json_response(&serde_json::json!({
+            "path": serde_json::Value::Null,
+            "dir": dir_str,
+            "reason": reason,
+        }))
+    };
+    if !dir.exists() {
+        return payload_err("directory does not exist");
+    }
+    if !dir.is_dir() {
+        return payload_err("configured path is not a directory");
+    }
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(iter) => iter,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return payload_err("permission denied");
+        }
+        Err(e) => return payload_err(&format!("read error: {e}")),
+    };
+    let mut newest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ext_ok = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| SCREENSHOT_IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+            .unwrap_or(false);
+        if !ext_ok {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let Ok(mtime) = meta.modified() else { continue };
+        if newest.as_ref().is_none_or(|(prev, _)| mtime > *prev) {
+            newest = Some((mtime, path));
+        }
+    }
+    match newest {
+        Some((_, path)) => json_response(&serde_json::json!({
+            "path": path.to_string_lossy(),
+            "dir": dir_str,
+            "reason": "",
+        })),
+        None => payload_err("no image files found"),
     }
 }
 
