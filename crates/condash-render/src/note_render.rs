@@ -12,8 +12,8 @@
 //! Kasten-style resolver is out of scope for the note-modal port.
 
 use std::path::Path;
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use pulldown_cmark::{html as md_html, Options, Parser};
 use regex::Regex;
 
@@ -21,8 +21,9 @@ use crate::h;
 
 /// `[[target]]` or `[[target|label]]`. Target may contain `/`, `.`, `-`,
 /// `_`; label is anything non-`]`.
-static WIKILINK_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("wikilink regex compiles"));
+static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("wikilink regex compiles")
+});
 
 /// Render a note for the view pane. `rel_path` is relative to the
 /// conception tree; `full_path` is the resolved absolute path (already

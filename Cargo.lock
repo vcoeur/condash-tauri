@@ -626,7 +626,6 @@ dependencies = [
  "http-body-util",
  "mime_guess",
  "notify",
- "once_cell",
  "portable-pty",
  "rand 0.8.6",
  "regex",
@@ -651,7 +650,6 @@ name = "condash-mutations"
 version = "0.1.0"
 dependencies = [
  "condash-parser",
- "once_cell",
  "regex",
  "serde",
  "tempfile",
@@ -662,7 +660,6 @@ name = "condash-parser"
 version = "0.1.0"
 dependencies = [
  "md-5",
- "once_cell",
  "regex",
  "serde",
  "serde_json",
@@ -677,7 +674,6 @@ dependencies = [
  "condash-parser",
  "condash-state",
  "minijinja",
- "once_cell",
  "pulldown-cmark",
  "regex",
  "serde",
@@ -691,7 +687,6 @@ version = "0.1.0"
 dependencies = [
  "condash-parser",
  "md-5",
- "once_cell",
  "regex",
  "serde",
  "tempfile",
