@@ -19,7 +19,7 @@ The fastest path is a prebuilt installer from the [GitHub Releases page](https:/
 | macOS | `condash_<version>_<arch>.dmg` |
 | Windows | `condash_<version>_x64_en-US.msi` |
 
-The builds are unsigned — your OS will ask you to confirm once on first launch. See [Install the desktop app](../guides/install-desktop.md) for the per-platform bypass.
+The builds are unsigned — your OS will ask you to confirm once on first launch. See [Install](../get-started/install.md) for the per-platform bypass.
 
 If you'd rather build from source, clone the repo and run:
 

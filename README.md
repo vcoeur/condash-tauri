@@ -16,7 +16,7 @@ Download the installer for your platform from the [GitHub Releases page](https:/
 | macOS    | `condash_<version>_<arch>.dmg` |
 | Windows  | `condash_<version>_x64_en-US.msi` |
 
-The builds are **unsigned** on purpose — signing Windows + macOS binaries costs $180–400/year and condash is single-developer-scale. Each OS asks for confirmation once on first launch; see the [Install the desktop app guide](https://condash.vcoeur.com/guides/install-desktop/) for the per-platform gesture.
+The builds are **unsigned** on purpose — signing Windows + macOS binaries costs $180–400/year and condash is single-developer-scale. Each OS asks for confirmation once on first launch; see the [Install guide](https://condash.vcoeur.com/get-started/install/) for the per-platform gesture.
 
 ## Build from source
 

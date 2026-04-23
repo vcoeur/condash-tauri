@@ -71,6 +71,12 @@ markdown_extensions:
 nav:
   - Home: index.md
 
+  - Get started:
+    - get-started/index.md
+    - Install: get-started/install.md
+    - Releases: get-started/releases.md
+    - First launch: get-started/first-launch.md
+
   - Tutorials:
     - tutorials/index.md
     - First run: tutorials/first-run.md
@@ -79,7 +85,6 @@ nav:
 
   - Guides:
     - guides/index.md
-    - Install the desktop app: guides/install-desktop.md
     - Configure the conception path: guides/configure-conception-path.md
     - Repositories and open-with buttons: guides/repositories-and-open-with.md
     - Use the embedded terminal: guides/terminal.md

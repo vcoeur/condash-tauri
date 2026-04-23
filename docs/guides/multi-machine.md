@@ -25,7 +25,7 @@ The one thing that isn't a file is the conception path itself — that's `CONDAS
 
 Each machine needs its own condash build. Two options:
 
-- **Download from GitHub Releases.** Each release ships a per-OS installer: `.AppImage` / `.deb` on Linux, `.dmg` on macOS, `.msi` on Windows. See [Install the desktop app](install-desktop.md) for the first-launch bypass each OS asks for.
+- **Download from GitHub Releases.** Each release ships a per-OS installer: `.AppImage` / `.deb` on Linux, `.dmg` on macOS, `.msi` on Windows. See [Install](../get-started/install.md) for the first-launch bypass each OS asks for.
 - **Build from source.** Clone the repo, then `make setup && make frontend && make build`. Handy when you want to match a specific commit across machines.
 
 The two machines don't need to run the same condash version — the HTTP API, README format, and config files are stable across minor versions.
