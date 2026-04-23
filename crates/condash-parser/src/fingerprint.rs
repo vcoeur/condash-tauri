@@ -137,8 +137,8 @@ fn item_fingerprint_tuple(readme: &ItemReadme, files: &ItemTree) -> PyValue {
     PyValue::Tuple(vec![
         PyValue::Str(readme.slug.clone()),
         PyValue::Str(readme.title.clone()),
-        PyValue::Str(readme.priority.clone()),
-        PyValue::Str(readme.kind.clone()),
+        PyValue::Str(readme.priority.as_str().to_string()),
+        PyValue::Str(readme.kind.as_str().to_string()),
         apps_tuple(&readme.apps),
         PyValue::Str(readme.summary.clone()),
         sections_tuple(readme),
@@ -155,7 +155,7 @@ fn card_content_data(readme: &ItemReadme, files: &ItemTree) -> PyValue {
     PyValue::Tuple(vec![
         PyValue::Str(readme.slug.clone()),
         PyValue::Str(readme.title.clone()),
-        PyValue::Str(readme.kind.clone()),
+        PyValue::Str(readme.kind.as_str().to_string()),
         apps_tuple(&readme.apps),
         PyValue::Str(readme.summary.clone()),
         sections_tuple(readme),
@@ -235,7 +235,11 @@ pub fn compute_project_node_fingerprints(items: &[Item]) -> HashMap<String, Stri
 
     // Per-card hashes.
     for item in items {
-        let id = format!("projects/{}/{}", item.readme.priority, item.readme.slug);
+        let id = format!(
+            "projects/{}/{}",
+            item.readme.priority.as_str(),
+            item.readme.slug
+        );
         out.insert(id, hash(&card_content_data(&item.readme, &item.files)));
     }
 
@@ -264,7 +268,12 @@ pub fn compute_project_node_fingerprints(items: &[Item]) -> HashMap<String, Stri
     // Whole-tab membership hash.
     let mut tab_pairs: Vec<(String, String)> = items
         .iter()
-        .map(|i| (i.readme.priority.clone(), i.readme.slug.clone()))
+        .map(|i| {
+            (
+                i.readme.priority.as_str().to_string(),
+                i.readme.slug.clone(),
+            )
+        })
         .collect();
     tab_pairs.sort();
     let tab_tuple = PyValue::Tuple(
@@ -440,7 +449,7 @@ mod tests {
                 slug: "foo".into(),
                 title: "Foo".into(),
                 date: "".into(),
-                priority: "now".into(),
+                priority: crate::Priority::Now,
                 invalid_status: None,
                 apps: vec![],
                 severity: None,
@@ -458,7 +467,7 @@ mod tests {
                 done: 1,
                 total: 1,
                 path: "x".into(),
-                kind: "project".into(),
+                kind: crate::Kind::Project,
             },
             files: ItemTree::default(),
         };

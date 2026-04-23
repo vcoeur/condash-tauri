@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::deliverables::{parse_deliverables, Deliverable};
 use crate::regexes::{HEADING2_RE, HEADING3_RE, METADATA_RE};
 use crate::sections::{parse_sections, Section};
-use crate::Priority;
+use crate::{Kind, Priority};
 
 /// Maximum summary length in *codepoints* (count user-visible glyphs,
 /// not bytes). When exceeded, the summary is truncated to
@@ -30,7 +30,7 @@ pub struct ItemReadme {
     pub slug: String,
     pub title: String,
     pub date: String,
-    pub priority: String,
+    pub priority: Priority,
     pub invalid_status: Option<String>,
     pub apps: Vec<String>,
     pub severity: Option<String>,
@@ -40,7 +40,7 @@ pub struct ItemReadme {
     pub done: usize,
     pub total: usize,
     pub path: String,
-    pub kind: String,
+    pub kind: Kind,
 }
 
 /// Parse one item's README content into an [`ItemReadme`].
@@ -221,34 +221,37 @@ fn extract_summary(lines: &[&str], first_section_idx: Option<usize>) -> String {
     }
 }
 
-/// Coerce a raw `**Status**:` value into a known priority. Returns
-/// `(priority, invalid_status)` where `invalid_status` holds the original
-/// raw string (case preserved) when the value wasn't in [`Priority::ALL`].
-fn resolve_status(raw: Option<&str>) -> (String, Option<String>) {
+/// Coerce a raw `**Status**:` value into a known [`Priority`]. Returns
+/// `(priority, invalid_status)` where `invalid_status` holds the
+/// original raw string (case preserved) when the value wasn't a known
+/// priority; an empty or unknown value defaults the priority to
+/// `Backlog`.
+fn resolve_status(raw: Option<&str>) -> (Priority, Option<String>) {
     let raw = raw.map(|s| s.trim()).unwrap_or("");
     if raw.is_empty() {
-        return ("backlog".to_string(), None);
+        return (Priority::Backlog, None);
     }
-    let lowered = raw.to_lowercase();
-    if Priority::from_lowercase(&lowered).is_some() {
-        (lowered, None)
-    } else {
-        ("backlog".to_string(), Some(raw.to_string()))
+    match Priority::from_lowercase(&raw.to_lowercase()) {
+        Some(p) => (p, None),
+        None => (Priority::Backlog, Some(raw.to_string())),
     }
 }
 
 /// Resolve item kind from `**Kind**:` header, then the caller-provided
-/// fallback, then the hardcoded `"project"` default. Python equivalent:
-/// `meta.get("kind", "").lower() or kind or "project"`.
-fn resolve_kind(from_meta: Option<&str>, fallback: Option<&str>) -> String {
-    let from_meta = from_meta.map(|s| s.to_lowercase()).unwrap_or_default();
-    if !from_meta.is_empty() {
-        from_meta
-    } else if let Some(k) = fallback {
-        k.to_string()
-    } else {
-        "project".to_string()
+/// fallback, then the hardcoded `Project` default. Unknown strings in
+/// either the header or the fallback fall through to the next layer.
+fn resolve_kind(from_meta: Option<&str>, fallback: Option<&str>) -> Kind {
+    if let Some(raw) = from_meta {
+        if let Some(k) = Kind::from_lowercase(&raw.to_lowercase()) {
+            return k;
+        }
     }
+    if let Some(raw) = fallback {
+        if let Some(k) = Kind::from_lowercase(&raw.to_lowercase()) {
+            return k;
+        }
+    }
+    Kind::Project
 }
 
 #[cfg(test)]
@@ -309,8 +312,8 @@ Evaluate whether to port condash, and if so execute that port.
         let r = parse(md);
         assert_eq!(r.title, "Port condash to Rust + Tauri");
         assert_eq!(r.date, "2026-04-21");
-        assert_eq!(r.kind, "project");
-        assert_eq!(r.priority, "now");
+        assert_eq!(r.kind, Kind::Project);
+        assert_eq!(r.priority, Priority::Now);
         assert_eq!(r.invalid_status, None);
         assert_eq!(r.apps, vec!["condash"]);
         assert_eq!(r.severity, None);
@@ -334,21 +337,21 @@ Evaluate whether to port condash, and if so execute that port.
     #[test]
     fn missing_status_defaults_to_backlog() {
         let r = parse("# T\n\n## Goal\n\nbody\n");
-        assert_eq!(r.priority, "backlog");
+        assert_eq!(r.priority, Priority::Backlog);
         assert_eq!(r.invalid_status, None);
     }
 
     #[test]
     fn unknown_status_records_invalid_preserving_case() {
         let r = parse("# T\n\n**Status**: InProgress\n\n## Goal\n\nbody\n");
-        assert_eq!(r.priority, "backlog");
+        assert_eq!(r.priority, Priority::Backlog);
         assert_eq!(r.invalid_status, Some("InProgress".to_string()));
     }
 
     #[test]
     fn valid_status_is_lowercased() {
         let r = parse("# T\n\n**Status**: NOW\n\n## Goal\n\nbody\n");
-        assert_eq!(r.priority, "now");
+        assert_eq!(r.priority, Priority::Now);
         assert_eq!(r.invalid_status, None);
     }
 
@@ -400,7 +403,7 @@ Evaluate whether to port condash, and if so execute that port.
             Some("project"),
         )
         .unwrap();
-        assert_eq!(got.kind, "incident");
+        assert_eq!(got.kind, Kind::Incident);
     }
 
     #[test]
@@ -413,13 +416,13 @@ Evaluate whether to port condash, and if so execute that port.
             Some("document"),
         )
         .unwrap();
-        assert_eq!(got.kind, "document");
+        assert_eq!(got.kind, Kind::Document);
     }
 
     #[test]
     fn kind_defaults_to_project_without_fallback() {
         let r = parse("# T\n\n## G\n\nbody\n");
-        assert_eq!(r.kind, "project");
+        assert_eq!(r.kind, Kind::Project);
     }
 
     #[test]

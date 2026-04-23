@@ -15,14 +15,10 @@ use std::io;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use condash_parser::sections::CheckboxStatus;
-use regex::Regex;
-
 use condash_parser::regexes::{CHECKBOX_RE, HEADING2_RE, HEADING3_RE, METADATA_RE, STATUS_RE};
-
-/// Priority values accepted by [`set_priority`]. Order mirrors Python's
-/// `PRIORITIES` tuple in `parser.py`.
-pub const PRIORITIES: &[&str] = &["now", "soon", "later", "backlog", "review", "done"];
+use condash_parser::sections::CheckboxStatus;
+use condash_parser::Priority;
+use regex::Regex;
 
 /// `## Steps` — matches exactly what Python's
 /// `re.match(r"^##\s+Steps", line, re.IGNORECASE)` matches: line starts
@@ -61,19 +57,18 @@ const DONE_MARK_BIG_X: &str = "- [X]";
 const PROGRESS_MARK: &str = "- [~]";
 const ABANDONED_MARK: &str = "- [-]";
 
-/// Rewrite the `**Status**: …` metadata line, or insert a new one below
-/// the existing metadata block. Returns `Ok(false)` if `priority` is not
-/// in [`PRIORITIES`]; Python's `_set_priority` returns `False` in the
-/// same case.
+/// Rewrite the `**Status**: …` metadata line, or insert a new one
+/// below the existing metadata block. Returns `Ok(false)` when
+/// `priority` is not a known [`Priority`] value.
 ///
 /// The `**Status** : value` (space before colon) vs `**Status**: value`
-/// choice mirrors the surrounding metadata style — Python looks at the
-/// first metadata line's spacing when inserting a new status line, so
-/// the port does the same.
+/// choice mirrors the surrounding metadata style — the first metadata
+/// line's spacing decides how new ones are inserted.
 pub fn set_priority(path: &Path, priority: &str) -> io::Result<bool> {
-    if !PRIORITIES.iter().any(|p| *p == priority) {
+    let Some(priority) = Priority::from_lowercase(priority) else {
         return Ok(false);
-    }
+    };
+    let priority = priority.as_str();
 
     let text = fs::read_to_string(path)?;
     let mut lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();

@@ -35,13 +35,13 @@ fn source_weight(src: &str) -> i64 {
     }
 }
 
-fn status_to_subtab(status: &str) -> &'static str {
+fn status_to_subtab(status: condash_parser::Priority) -> &'static str {
+    use condash_parser::Priority::*;
     match status {
-        "now" | "review" => "current",
-        "soon" | "later" => "next",
-        "backlog" => "backlog",
-        "done" => "done",
-        _ => "current",
+        Now | Review => "current",
+        Soon | Later => "next",
+        Backlog => "backlog",
+        Done => "done",
     }
 }
 
@@ -296,13 +296,13 @@ pub fn search_items(ctx: &RenderCtx, items: &[Item], query: &str) -> Vec<SearchR
             continue;
         }
 
-        let status = &item.readme.priority;
+        let status = item.readme.priority;
         let header_text = format!(
             "{} {} {} {} {}",
             item.readme.title,
             item.readme.slug,
-            item.readme.kind,
-            status,
+            item.readme.kind.as_str(),
+            status.as_str(),
             item.readme.apps.join(" "),
         );
         let header_lower = header_text.to_lowercase();
@@ -462,8 +462,8 @@ pub fn search_items(ctx: &RenderCtx, items: &[Item], query: &str) -> Vec<SearchR
             SearchResult {
                 slug: item.readme.slug.clone(),
                 title: item.readme.title.clone(),
-                kind: item.readme.kind.clone(),
-                status: status.clone(),
+                kind: item.readme.kind.as_str().into(),
+                status: status.as_str().into(),
                 subtab: status_to_subtab(status).into(),
                 path: item.readme.path.clone(),
                 month,

@@ -27,6 +27,4 @@ pub use files::{
     CreateItemResult, CreateNoteResult, CreateSubdirResult, ItemKind, NewItemSpec, RenameResult,
     StoreUploadsResult, UploadRejection, WriteNoteResult,
 };
-pub use steps::{
-    add_step, edit_step, remove_step, reorder_all, set_priority, toggle_checkbox, PRIORITIES,
-};
+pub use steps::{add_step, edit_step, remove_step, reorder_all, set_priority, toggle_checkbox};

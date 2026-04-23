@@ -108,4 +108,12 @@ impl Kind {
             _ => None,
         }
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Kind::Project => "project",
+            Kind::Incident => "incident",
+            Kind::Document => "document",
+        }
+    }
 }
