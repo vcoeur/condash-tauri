@@ -243,6 +243,7 @@ fn prompt_for_conception_path(initial: ConceptionPathUnset) -> Option<PathBuf> {
             Ok(()) => {
                 let cfg = user_config::UserConfig {
                     conception_path: Some(picked.clone()),
+                    ..Default::default()
                 };
                 if let Err(e) = user_config::save(&cfg) {
                     // Don't fail the launch on a save failure — the
@@ -329,6 +330,7 @@ mod resolve_tests {
             Some(PathBuf::from("/from-env")),
             Some(UserConfig {
                 conception_path: Some(PathBuf::from("/from-file")),
+                ..Default::default()
             }),
             None,
         )
@@ -342,6 +344,7 @@ mod resolve_tests {
             Some(PathBuf::from("")),
             Some(UserConfig {
                 conception_path: Some(PathBuf::from("/from-file")),
+                ..Default::default()
             }),
             None,
         )
@@ -355,6 +358,7 @@ mod resolve_tests {
             None,
             Some(UserConfig {
                 conception_path: Some(PathBuf::from("/from-file")),
+                ..Default::default()
             }),
             None,
         )
@@ -377,6 +381,7 @@ mod resolve_tests {
             None,
             Some(UserConfig {
                 conception_path: None,
+                ..Default::default()
             }),
             None,
         )

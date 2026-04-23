@@ -8,7 +8,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use condash_lib::config::{build_ctx, configuration_path};
+use condash_lib::config::{build_ctx, build_ctx_with_user, configuration_path};
+use condash_lib::user_config::{OpenWithSlotYaml, TerminalYaml, UserConfig};
 
 const FIXTURE: &str = r#"
 workspace_path: /tmp/vcoeur
@@ -170,4 +171,126 @@ fn build_ctx_rejects_invalid_yaml() {
         err.to_string().to_lowercase().contains("yaml") || err.to_string().contains("parsing"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn settings_yaml_terminal_overrides_configuration_yml() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(configuration_path(tmp.path()), FIXTURE).unwrap();
+
+    let user = UserConfig {
+        terminal: Some(TerminalYaml {
+            shortcut: Some("Ctrl+Alt+T".into()),
+            launcher_command: Some("zellij".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let ctx = build_ctx_with_user(tmp.path(), String::new(), Some(&user)).unwrap();
+
+    // Fields set in settings.yaml win.
+    assert_eq!(ctx.terminal.shortcut.as_deref(), Some("Ctrl+Alt+T"));
+    assert_eq!(ctx.terminal.launcher_command.as_deref(), Some("zellij"));
+    // Fields not set in settings.yaml fall through to configuration.yml.
+    assert_eq!(ctx.terminal.shell.as_deref(), Some("/bin/zsh"));
+    assert_eq!(
+        ctx.terminal.move_tab_left_shortcut.as_deref(),
+        Some("Ctrl+Left")
+    );
+}
+
+#[test]
+fn settings_yaml_pdf_viewer_replaces_tree_chain() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(configuration_path(tmp.path()), FIXTURE).unwrap();
+
+    let user = UserConfig {
+        pdf_viewer: Some(vec!["xdg-open {path}".into()]),
+        ..Default::default()
+    };
+    let ctx = build_ctx_with_user(tmp.path(), String::new(), Some(&user)).unwrap();
+    assert_eq!(ctx.pdf_viewer, vec!["xdg-open {path}".to_string()]);
+}
+
+#[test]
+fn settings_yaml_empty_pdf_viewer_falls_through() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(configuration_path(tmp.path()), FIXTURE).unwrap();
+
+    let user = UserConfig {
+        pdf_viewer: Some(vec![]),
+        ..Default::default()
+    };
+    let ctx = build_ctx_with_user(tmp.path(), String::new(), Some(&user)).unwrap();
+    assert_eq!(
+        ctx.pdf_viewer,
+        vec!["evince {path}".to_string(), "okular {path}".to_string()]
+    );
+}
+
+#[test]
+fn settings_yaml_open_with_merges_per_slot() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(configuration_path(tmp.path()), FIXTURE).unwrap();
+
+    let mut slots = std::collections::HashMap::new();
+    // Existing slot — replace the commands, keep the tree's label.
+    slots.insert(
+        "main_ide".to_string(),
+        OpenWithSlotYaml {
+            label: None,
+            commands: vec!["rust-rover {path}".into()],
+        },
+    );
+    // New slot absent from the tree — gets added with its own label.
+    slots.insert(
+        "terminal".to_string(),
+        OpenWithSlotYaml {
+            label: Some("Open terminal here".into()),
+            commands: vec!["ghostty --working-directory={path}".into()],
+        },
+    );
+    let user = UserConfig {
+        open_with: Some(slots),
+        ..Default::default()
+    };
+    let ctx = build_ctx_with_user(tmp.path(), String::new(), Some(&user)).unwrap();
+
+    let main = ctx.open_with.get("main_ide").expect("main_ide present");
+    assert_eq!(main.label, "Open in main IDE"); // tree's label survives
+    assert_eq!(main.commands, vec!["rust-rover {path}".to_string()]);
+
+    // Untouched tree slot stays intact.
+    let sec = ctx
+        .open_with
+        .get("secondary_ide")
+        .expect("secondary_ide present");
+    assert_eq!(sec.label, "Open in VS Code");
+
+    let term = ctx.open_with.get("terminal").expect("terminal added");
+    assert_eq!(term.label, "Open terminal here");
+    assert_eq!(
+        term.commands,
+        vec!["ghostty --working-directory={path}".to_string()]
+    );
+}
+
+#[test]
+fn settings_yaml_only_still_populates_ctx() {
+    // No configuration.yml on disk — settings.yaml provides the
+    // preferences; workspace / repositories stay empty.
+    let tmp = tempfile::tempdir().unwrap();
+    let user = UserConfig {
+        terminal: Some(TerminalYaml {
+            shortcut: Some("Ctrl+`".into()),
+            ..Default::default()
+        }),
+        pdf_viewer: Some(vec!["xdg-open {path}".into()]),
+        ..Default::default()
+    };
+    let ctx = build_ctx_with_user(tmp.path(), String::new(), Some(&user)).unwrap();
+    assert_eq!(ctx.terminal.shortcut.as_deref(), Some("Ctrl+`"));
+    assert_eq!(ctx.pdf_viewer, vec!["xdg-open {path}".to_string()]);
+    assert!(ctx.workspace.is_none());
+    assert!(ctx.repo_structure.is_empty());
 }

@@ -1,18 +1,36 @@
-//! Per-user persistent settings — the file condash writes after the
-//! first-run prompt so the next launch doesn't need the env var or a
-//! fresh GUI dialog.
+//! Per-user persistent settings — the per-machine companion to the
+//! tree-level `configuration.yml`.
 //!
-//! Stored at `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` as a
-//! flat YAML document with a single key:
+//! Stored at `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`.
+//! Schema:
 //!
 //! ```yaml
 //! conception_path: /home/alice/src/vcoeur/conception
+//! terminal:
+//!   shortcut: Ctrl+T
+//!   launcher_command: claude
+//! pdf_viewer:
+//!   - xdg-open {path}
+//!   - evince {path}
+//! open_with:
+//!   main_ide:
+//!     label: Open in main IDE
+//!     commands: [idea {path}]
 //! ```
+//!
+//! Every field is optional. `conception_path` tells condash *which*
+//! tree to render; the other three carry per-machine overrides for
+//! keys that also live in the tree's `configuration.yml`. See the
+//! design note in
+//! `projects/2026-04/2026-04-23-condash-rust-audit/notes/09-settings-split-schema.md`
+//! for rationale and the precedence rule (settings.yaml wins on
+//! overlap, field by field).
 //!
 //! Read order of precedence when resolving the conception tree lives in
 //! [`crate::resolve_conception_path`]: env var → this file → first-run
 //! prompt (Tauri only) → hard error.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,11 +39,56 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UserConfig {
-    /// Absolute path to the conception tree. Optional in the struct so a
-    /// future settings.yaml with other keys can still deserialize when
-    /// this one is missing — callers decide whether absence is fatal.
+    /// Absolute path to the conception tree. Optional so callers can
+    /// decide whether absence is fatal (first-run picker vs hard error).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conception_path: Option<PathBuf>,
+
+    /// Per-machine overrides for `terminal.*` fields in the tree's
+    /// `configuration.yml`. Missing keys fall through to the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalYaml>,
+
+    /// Per-machine PDF-viewer fallback chain. When present and
+    /// non-empty, replaces the tree's `pdf_viewer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf_viewer: Option<Vec<String>>,
+
+    /// Per-machine "Open with …" slot overrides. Merged per-slot with
+    /// the tree's `open_with`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_with: Option<HashMap<String, OpenWithSlotYaml>>,
+}
+
+/// One `terminal:` block — fields mirror the tree's `configuration.yml`
+/// shape. Missing / empty strings mean "fall through to the tree / to
+/// the built-in default".
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TerminalYaml {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot_paste_shortcut: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub move_tab_left_shortcut: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub move_tab_right_shortcut: Option<String>,
+}
+
+/// One `open_with.<slot>:` entry. Either field may be absent; a
+/// missing `label` falls through to the tree's value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpenWithSlotYaml {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<String>,
 }
 
 /// Resolve the on-disk settings file path. Returns `None` when neither
@@ -117,6 +180,7 @@ mod tests {
         let path = tmp.path().join("nested").join("settings.yaml");
         let cfg = UserConfig {
             conception_path: Some(PathBuf::from("/tmp/conception")),
+            ..Default::default()
         };
         save_to(&path, &cfg).unwrap();
         let loaded = load_from(&path).unwrap().unwrap();
