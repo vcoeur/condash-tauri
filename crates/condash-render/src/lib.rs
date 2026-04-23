@@ -48,22 +48,18 @@ pub fn h(text: &str) -> String {
     out
 }
 
-/// Priority ordering — maps the lowercase priority string to a sort
-/// key. Unknown / missing priorities sort as 9 ("after everything").
-fn pri_order(priority: &str) -> i32 {
-    match priority {
-        "now" => 0,
-        "soon" => 1,
-        "later" => 2,
-        "backlog" => 3,
-        "review" => 4,
-        "done" => 5,
-        _ => 9,
-    }
+/// Priorities in user-visible column order, rendered as lowercase
+/// strings for the template layer.
+pub fn priorities() -> [&'static str; 6] {
+    [
+        condash_parser::Priority::Now.as_str(),
+        condash_parser::Priority::Soon.as_str(),
+        condash_parser::Priority::Later.as_str(),
+        condash_parser::Priority::Backlog.as_str(),
+        condash_parser::Priority::Review.as_str(),
+        condash_parser::Priority::Done.as_str(),
+    ]
 }
-
-/// Priorities in user-visible order, shared with Python.
-pub const PRIORITIES: &[&str] = &["now", "soon", "later", "backlog", "review", "done"];
 
 /// First pending step across all sections, or `None`. Mirrors
 /// `_next_step` — "pending" = `open` or `progress`; `abandoned` isn't
@@ -96,7 +92,7 @@ pub fn render_card(item: &Item) -> String {
     let total = total_files(&item.files);
     let ctx = context! {
         item => Value::from_serialize(item),
-        priorities => Value::from_serialize(PRIORITIES),
+        priorities => Value::from_serialize(priorities()),
         next_step => next_step(item).unwrap_or(Value::from(())),
         files_tree => Value::from_serialize(&item.files),
         files_total => total,
@@ -212,13 +208,12 @@ pub fn render_page(
     version: &str,
     live_runners: &git_render::LiveRunners,
 ) -> String {
-    // Sort: by (pri_order, slug[:10]), then within each priority reverse
-    // by slug[:10]. Matches Python's two-pass sort exactly.
+    // Sort: by priority (Now < Soon < … < Done — the enum's derived
+    // Ord uses variant declaration order), then within each priority
+    // reverse by slug[:10].
     let mut sorted: Vec<&Item> = items.iter().collect();
     sorted.sort_by(|a, b| {
-        let pa = pri_order(&a.readme.priority);
-        let pb = pri_order(&b.readme.priority);
-        pa.cmp(&pb).then_with(|| {
+        a.readme.priority.cmp(&b.readme.priority).then_with(|| {
             a.readme.slug[..a.readme.slug.len().min(10)]
                 .cmp(&b.readme.slug[..b.readme.slug.len().min(10)])
         })
@@ -227,9 +222,9 @@ pub fn render_page(
     let mut ordered: Vec<&Item> = Vec::with_capacity(sorted.len());
     let mut i = 0usize;
     while i < sorted.len() {
-        let pri = &sorted[i].readme.priority;
+        let pri = sorted[i].readme.priority;
         let mut j = i;
-        while j < sorted.len() && &sorted[j].readme.priority == pri {
+        while j < sorted.len() && sorted[j].readme.priority == pri {
             j += 1;
         }
         let mut group: Vec<&Item> = sorted[i..j].to_vec();
@@ -265,12 +260,12 @@ pub fn render_page(
 
     let (mut cur, mut next, mut bl, mut dn) = (0usize, 0usize, 0usize, 0usize);
     for it in &all_items {
-        match it.readme.priority.as_str() {
-            "now" | "review" => cur += 1,
-            "soon" | "later" => next += 1,
-            "backlog" => bl += 1,
-            "done" => dn += 1,
-            _ => {}
+        use condash_parser::Priority::*;
+        match it.readme.priority {
+            Now | Review => cur += 1,
+            Soon | Later => next += 1,
+            Backlog => bl += 1,
+            Done => dn += 1,
         }
     }
 
@@ -322,16 +317,16 @@ mod tests {
     use super::*;
     use condash_parser::{
         sections::{CheckboxStatus, Section, SectionItem},
-        Deliverable, ItemReadme, ItemTree,
+        Deliverable, ItemReadme, ItemTree, Kind, Priority,
     };
 
-    fn simple_item(slug: &str, priority: &str) -> Item {
+    fn simple_item(slug: &str, priority: Priority) -> Item {
         Item {
             readme: ItemReadme {
                 slug: slug.into(),
                 title: format!("Title {slug}"),
                 date: "2026-04-22".into(),
-                priority: priority.into(),
+                priority,
                 invalid_status: None,
                 apps: vec!["condash".into()],
                 severity: None,
@@ -354,7 +349,7 @@ mod tests {
                 done: 0,
                 total: 1,
                 path: format!("projects/2026-04/{slug}/README.md"),
-                kind: "project".into(),
+                kind: Kind::Project,
             },
             files: ItemTree::default(),
         }
@@ -367,7 +362,7 @@ mod tests {
 
     #[test]
     fn render_card_produces_card_div() {
-        let item = simple_item("2026-04-22-foo", "now");
+        let item = simple_item("2026-04-22-foo", Priority::Now);
         let html = render_card(&item);
         eprintln!("=== HTML BEGIN ===\n{html}\n=== HTML END ===");
         assert!(html.contains("class=\"card collapsed\""));
@@ -377,7 +372,7 @@ mod tests {
 
     #[test]
     fn render_card_fragment_matches_render_card() {
-        let item = simple_item("slug", "soon");
+        let item = simple_item("slug", Priority::Soon);
         assert_eq!(render_card_fragment(&item), render_card(&item));
     }
 

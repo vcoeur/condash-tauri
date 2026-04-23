@@ -19,8 +19,6 @@ use condash_parser::{Kind, Priority};
 use regex::Regex;
 use serde::Serialize;
 
-use crate::steps::PRIORITIES;
-
 // ---------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------
@@ -779,9 +777,9 @@ pub fn create_item(
         }
     };
     if Priority::from_lowercase(&status_raw).is_none() {
-        let joined = PRIORITIES
+        let joined = Priority::ALL
             .iter()
-            .map(|p| format!("'{p}'"))
+            .map(|p| format!("'{}'", p.as_str()))
             .collect::<Vec<_>>()
             .join(", ");
         return Ok(CreateItemResult::Err {

@@ -131,7 +131,7 @@ mod tests {
 
         let item_out = parse_readme(base, &item.join("README.md"), None).unwrap();
         assert_eq!(item_out.readme.slug, "2026-04-22-foo");
-        assert_eq!(item_out.readme.priority, "now");
+        assert_eq!(item_out.readme.priority, crate::Priority::Now);
         assert_eq!(
             item_out.readme.path,
             "projects/2026-04/2026-04-22-foo/README.md"
