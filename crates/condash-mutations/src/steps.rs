@@ -13,9 +13,9 @@
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use condash_parser::sections::CheckboxStatus;
-use once_cell::sync::Lazy;
 use regex::Regex;
 
 use condash_parser::regexes::{CHECKBOX_RE, HEADING2_RE, HEADING3_RE, METADATA_RE, STATUS_RE};
@@ -29,27 +29,27 @@ pub const PRIORITIES: &[&str] = &["now", "soon", "later", "backlog", "review", "
 /// with `##`, at least one whitespace, then `Steps` (case-insensitive).
 /// No `\b` anchor on purpose — Python's `re.match` doesn't either, so
 /// a heading like `## Steps (draft)` still counts as the Steps section.
-static STEPS_HEADING_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^##\s+Steps").expect("STEPS_HEADING_RE compiles"));
+static STEPS_HEADING_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^##\s+Steps").expect("STEPS_HEADING_RE compiles"));
 
 /// Sections that must appear *after* a freshly-created `## Steps` block.
 /// When the README has no Steps section, `_add_step` inserts one in front
 /// of the first Notes/Timeline/Chronologie heading it finds.
-static NOTES_OR_TIMELINE_RE: Lazy<Regex> = Lazy::new(|| {
+static NOTES_OR_TIMELINE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^##\s+(?:Notes|Timeline|Chronologie)\b")
         .expect("NOTES_OR_TIMELINE_RE compiles")
 });
 
 /// Any `## …` / `### …` / deeper heading — used by `add_step`'s
 /// explicit-section path to find where the target section ends.
-static ANY_HEADING_LEVEL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(#{2,})\s+(.+)$").expect("ANY_HEADING_LEVEL_RE compiles"));
+static ANY_HEADING_LEVEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(#{2,})\s+(.+)$").expect("ANY_HEADING_LEVEL_RE compiles"));
 
 /// Same as [`ANY_HEADING_LEVEL_RE`] but groups only the `#` prefix —
 /// cheap enough to keep as a second regex; saves a capture allocation
 /// in `_add_step`'s per-line scan inside an existing Steps section.
-static ANY_HEADING_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(#{2,})\s+").expect("ANY_HEADING_RE compiles"));
+static ANY_HEADING_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(#{2,})\s+").expect("ANY_HEADING_RE compiles"));
 
 /// The literal string checkbox patterns Python's `_toggle_checkbox` tests
 /// against. Kept as separate `&str`s (rather than a regex) because the

@@ -4,41 +4,43 @@
 //! sites feed them line-by-line, so the default `regex` crate
 //! behaviour (where `^` is start-of-string) is what we want.
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
+
 use regex::Regex;
 
 /// `**Key**: value` metadata line at the top of an item README.
-pub static METADATA_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\*\*(.+?)\*\*\s*:\s*(.+)$").expect("METADATA_RE compiles"));
+pub static METADATA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\*\*(.+?)\*\*\s*:\s*(.+)$").expect("METADATA_RE compiles"));
 
 /// `- [x] text`, `- [ ] text`, `- [~] text`, `- [-] text` checklist entry.
 /// Capture groups: indent, status char, body.
-pub static CHECKBOX_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(\s*)-\s*\[([ xX~\-])\]\s+(.+)$").expect("CHECKBOX_RE compiles"));
+pub static CHECKBOX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\s*)-\s*\[([ xX~\-])\]\s+(.+)$").expect("CHECKBOX_RE compiles")
+});
 
 /// `## Heading`.
-pub static HEADING2_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^##\s+(.+)$").expect("HEADING2_RE compiles"));
+pub static HEADING2_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^##\s+(.+)$").expect("HEADING2_RE compiles"));
 
 /// `### Heading`.
-pub static HEADING3_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^###\s+(.+)$").expect("HEADING3_RE compiles"));
+pub static HEADING3_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^###\s+(.+)$").expect("HEADING3_RE compiles"));
 
 /// `**Status**: …` metadata line. Case-insensitive to match Python's
 /// `re.IGNORECASE` — used by callers that just need to test presence.
-pub static STATUS_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^\*\*Status\*\*\s*:\s*.*$").expect("STATUS_RE compiles"));
+pub static STATUS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\*\*Status\*\*\s*:\s*.*$").expect("STATUS_RE compiles"));
 
 /// `- [Label](path.pdf) — optional description` in the Deliverables section.
-pub static DELIVERABLE_RE: Lazy<Regex> = Lazy::new(|| {
+pub static DELIVERABLE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"-\s+\[([^\]]+)\]\(([^)]+\.pdf)\)(?:\s*[—–-]\s*(.+))?$")
         .expect("DELIVERABLE_RE compiles")
 });
 
 /// `YYYY-MM-DD-slug` folder slug grammar: lowercase ASCII + digits, single
 /// hyphens only.
-pub static VALID_SLUG_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").expect("VALID_SLUG_RE compiles"));
+pub static VALID_SLUG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").expect("VALID_SLUG_RE compiles"));
 
 #[cfg(test)]
 mod tests {

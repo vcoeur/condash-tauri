@@ -11,65 +11,66 @@
 //! 4. Optionally require the resolved entry be a file on disk.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// Common item-path prefix — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`.
 const VALID_ITEM_PREFIX: &str = r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/";
 
 /// `projects/YYYY-MM/YYYY-MM-DD-<slug>/README.md`.
-static VALID_README_RE: Lazy<Regex> = Lazy::new(|| {
+static VALID_README_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!("{VALID_ITEM_PREFIX}README\\.md$")).expect("VALID_README_RE compiles")
 });
 
 /// `<item>/<anything>.md`.
-static VALID_NOTE_RE: Lazy<Regex> = Lazy::new(|| {
+static VALID_NOTE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}[\w./-]+\.md$")).expect("VALID_NOTE_RE compiles")
 });
 
 /// `knowledge/<file>.md`. Matches `knowledge/` at any depth.
-static VALID_KNOWLEDGE_NOTE_RE: Lazy<Regex> = Lazy::new(|| {
+static VALID_KNOWLEDGE_NOTE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^knowledge/(?:[\w.-]+/)*[\w.-]+\.md$").expect("VALID_KNOWLEDGE_NOTE_RE compiles")
 });
 
 /// Any file at any depth inside an item directory.
-static VALID_ITEM_FILE_RE: Lazy<Regex> = Lazy::new(|| {
+static VALID_ITEM_FILE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}[\w./-]+$")).expect("VALID_ITEM_FILE_RE compiles")
 });
 
 /// Restricted to files directly under `<item>/notes/` — used by rename
 /// (only notes are user-renamable).
-pub(crate) static VALID_ITEM_NOTES_FILE_RE: Lazy<Regex> = Lazy::new(|| {
+pub(crate) static VALID_ITEM_NOTES_FILE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}notes/[\w./-]+$"))
         .expect("VALID_ITEM_NOTES_FILE_RE compiles")
 });
 
 /// Item directory itself — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`, with
 /// or without the trailing slash.
-static VALID_ITEM_DIR_RE: Lazy<Regex> = Lazy::new(|| {
+static VALID_ITEM_DIR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/?$")
         .expect("VALID_ITEM_DIR_RE compiles")
 });
 
 /// `<name>.<ext>` — validates the target filename of create_note /
 /// rename_note.
-pub static VALID_NOTE_FILENAME_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[\w.-]+\.[A-Za-z0-9]+$").expect("VALID_NOTE_FILENAME_RE compiles"));
+pub static VALID_NOTE_FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[\w.-]+\.[A-Za-z0-9]+$").expect("VALID_NOTE_FILENAME_RE compiles")
+});
 
 /// Bare filename allowed for the rename target's new stem.
-pub static VALID_NEW_STEM_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[\w.-]+$").expect("VALID_NEW_STEM_RE compiles"));
+pub static VALID_NEW_STEM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\w.-]+$").expect("VALID_NEW_STEM_RE compiles"));
 
 /// Subdirectory path (possibly nested). Used by `resolve_under_item`
 /// to reject anything that doesn't look like a sequence of `[\w.-]+`
 /// segments.
-pub static VALID_SUBDIR_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[\w.-]+(/[\w.-]+)*$").expect("VALID_SUBDIR_RE compiles"));
+pub static VALID_SUBDIR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\w.-]+(/[\w.-]+)*$").expect("VALID_SUBDIR_RE compiles"));
 
 /// Upload filename regex — more permissive than the note regex to
 /// accept typical Camera/PDF exports (spaces, parentheses).
-pub static VALID_UPLOAD_FILENAME_RE: Lazy<Regex> = Lazy::new(|| {
+pub static VALID_UPLOAD_FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[\w. \-()]+\.[A-Za-z0-9]+$").expect("VALID_UPLOAD_FILENAME_RE compiles")
 });
 

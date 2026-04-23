@@ -98,10 +98,11 @@ fn html_escape(s: &str) -> String {
     out
 }
 
-/// Python's `re.sub(r"\s+", " ", text).strip()`.
+/// Collapse any run of whitespace to a single space and strip both
+/// ends. Uses `regex` so Unicode whitespace (non-breaking space, CJK
+/// ideographic space, …) is handled the same as ASCII.
 fn collapse_whitespace(text: &str) -> String {
-    // Using regex to match Python's unicode-aware `\s+` precisely.
-    static WS_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
+    static WS_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = WS_RE.get_or_init(|| Regex::new(r"\s+").unwrap());
     re.replace_all(text, " ").trim().to_string()
 }

@@ -12,10 +12,10 @@
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::UNIX_EPOCH;
 
 use condash_parser::{Kind, Priority};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Serialize;
 
@@ -143,11 +143,12 @@ impl RenameResult {
     }
 }
 
-static VALID_NEW_STEM_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[\w.-]+$").expect("VALID_NEW_STEM_RE compiles"));
+static VALID_NEW_STEM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\w.-]+$").expect("VALID_NEW_STEM_RE compiles"));
 
-static VALID_NOTE_FILENAME_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[\w.-]+\.[A-Za-z0-9]+$").expect("VALID_NOTE_FILENAME_RE compiles"));
+static VALID_NOTE_FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[\w.-]+\.[A-Za-z0-9]+$").expect("VALID_NOTE_FILENAME_RE compiles")
+});
 
 /// Rename `full_path` — which must already have been validated as a file
 /// under `<item>/notes/` — to `<same_dir>/<new_stem><same_ext>`. Returns
@@ -363,7 +364,7 @@ pub fn create_notes_subdir(
 // store_uploads
 // ---------------------------------------------------------------------
 
-static VALID_UPLOAD_FILENAME_RE: Lazy<Regex> = Lazy::new(|| {
+static VALID_UPLOAD_FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[\w. \-()]+\.[A-Za-z0-9]+$").expect("VALID_UPLOAD_FILENAME_RE compiles")
 });
 
@@ -610,8 +611,8 @@ impl CreateItemResult {
 const ENVIRONMENTS: &[&str] = &["PROD", "STAGING", "DEV"];
 const SEVERITIES: &[&str] = &["low", "medium", "high"];
 
-static VALID_SLUG_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").expect("VALID_SLUG_RE compiles"));
+static VALID_SLUG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").expect("VALID_SLUG_RE compiles"));
 
 fn render_apps(apps_raw: &str) -> String {
     apps_raw

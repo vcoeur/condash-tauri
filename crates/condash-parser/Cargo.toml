@@ -5,11 +5,10 @@ description = "Parser for conception item READMEs and the knowledge tree."
 authors = ["Alice Voland <alice@vcoeur.com>"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.80"
 
 [dependencies]
 regex = "1"
-once_cell = "1"
 serde = { version = "1", features = ["derive"] }
 md-5 = "0.10"
 
