@@ -74,20 +74,20 @@ See [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/conda
 
 Hashes are MD5 truncated to 16 hex chars. MD5 is fine here — this is an equality check, not a security primitive, and the 64-bit output is plenty to avoid collisions on trees of a few thousand items.
 
-## Config: env var plus tree-level YAML
+## Config: tree-level YAML plus per-user YAML
 
-condash reads configuration from two places:
+condash reads configuration from two YAML files at distinct scopes:
 
-- **The `CONDASH_CONCEPTION_PATH` environment variable.** Tells condash which tree to render. Defaults to `$HOME/src/vcoeur/conception`. That's the only piece of configuration that has to live outside the tree, because the tree itself doesn't know where it lives on disk.
-- **Two YAML files inside the tree**, under `<conception_path>/config/`:
-  - `repositories.yml` — workspace layout, repo grouping, `open_with` command chains. Team-shared; commit it.
-  - `preferences.yml` — per-machine scoping for this tree (PDF viewer chain, terminal shortcuts). Gitignored.
+- **`<conception_path>/configuration.yml`** — versioned inside the tree. Owns the workspace contract: `workspace_path`, `worktrees_path`, `repositories` (with optional `run:` / `force_stop:` per repo). Team-shared.
+- **`${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`** — per-user, outside the tree. Owns `conception_path` (which tree to render) plus the three blocks that naturally differ per machine: `terminal`, `pdf_viewer`, `open_with`.
 
-Splitting between the two YAML files is a *what does this describe* question, not a *how do you edit it* question. `repositories.yml` describes the team's shape — workspace layout, repo structure, "open with IntelliJ" chains — and should be identical for every teammate. `preferences.yml` describes one developer's preferences on one tree on one machine; committing it would force the team onto your terminal shortcut.
+`CONDASH_CONCEPTION_PATH` remains as an override for `conception_path` — useful for scratch runs and CI fixtures.
+
+Splitting across the two files is a *what scope does this belong to* question. `configuration.yml` describes the team's shape; it should be identical for every teammate. `settings.yaml` describes one developer's preferences on one machine; committing it would force the team onto your terminal shortcut.
 
 ### Example
 
-`<conception>/config/repositories.yml`, committed:
+`<conception>/configuration.yml`, committed:
 
 ```yaml
 workspace_path: /home/alice/src
@@ -100,24 +100,29 @@ repositories:
   secondary:
     - conception
     - condash
-open_with:
-  main_ide: { label: "Open in IntelliJ",   commands: ["idea {path}"] }
-  terminal: { label: "Open in Ghostty",    commands: ["ghostty --working-directory={path}"] }
 ```
 
-`<conception>/config/preferences.yml`, **not** committed (gitignored):
+`${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`, per-user, not in any tree:
 
 ```yaml
+conception_path: /home/alice/src/vcoeur/conception
 terminal:
   shortcut: "Ctrl+Shift+`"
   screenshot_paste_shortcut: "Ctrl+Alt+V"
+open_with:
+  main_ide:
+    label: "Open in IntelliJ"
+    commands: ["idea {path}"]
+  terminal:
+    label: "Open in Ghostty"
+    commands: ["ghostty --working-directory={path}"]
 ```
 
-The result: teammates who clone the tree get the same `workspace_path` shape and `open_with` chains; my keyboard shortcut override stays local.
+The result: teammates who clone the tree get the same `workspace_path` shape and `repositories`; my keyboard shortcut override and IDE launcher paths stay local.
 
-### On machine-local configuration
+### Precedence
 
-An earlier design had a third file — a per-machine TOML — for settings that don't belong in either YAML (ports, PDF viewer, the native-window toggle). The current build gets by without it: the conception path comes from the environment, everything tree-scoped lives in the two YAMLs, and the few remaining per-machine toggles are either compile-time defaults or reachable via env vars. A future release may bring the TOML back for users who want a persistent machine-local override surface that isn't a shell rc file; for now there is no such file and the loader doesn't look for one.
+On overlap, `settings.yaml` wins, merged field by field. See the [config reference](../reference/config.md) for the exact rules.
 
 See [multi-machine setup](../guides/multi-machine.md) for how to structure a two-machine workflow.
 

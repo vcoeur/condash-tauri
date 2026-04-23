@@ -39,7 +39,7 @@ Switch to the **Code** tab. Three helio repos render as rows: `helio`, `helio-we
 
 Each repo has four icon buttons: README preview, code browser, embedded terminal, and "open in main IDE". Click the IDE icon on `helio` — your main editor launches in that directory.
 
-The launcher command chain lives in `config/repositories.yml`, under `open_with.main_ide.commands`. The dashboard tries each command until one succeeds. See [Repositories and open-with buttons](../guides/repositories-and-open-with.md) for how to wire your own editor in.
+The launcher command chain lives in `configuration.yml`, under `open_with.main_ide.commands`. The dashboard tries each command until one succeeds. See [Repositories and open-with buttons](../guides/repositories-and-open-with.md) for how to wire your own editor in.
 
 ## 3. Run the repro in the embedded terminal
 
@@ -60,7 +60,7 @@ You get a `thread 'main' panicked at 'attempt to subtract with overflow'` — co
 
 The terminal has two useful quality-of-life features:
 
-- **Screenshot paste** — press `Ctrl+Shift+V` anywhere in the dashboard and condash inserts the absolute path of the newest file in your configured screenshot directory into the active terminal prompt. Useful for "take a screenshot of the crash → paste the path into an `ls -la` or a `cat`". Configurable under the gear modal's Preferences tab.
+- **Screenshot paste** — press `Ctrl+Shift+V` anywhere in the dashboard and condash inserts the absolute path of the newest file in your configured screenshot directory into the active terminal prompt. Useful for "take a screenshot of the crash → paste the path into an `ls -la` or a `cat`". Configure `terminal.screenshot_dir` in `settings.yaml` (see [Config reference](../reference/config.md)).
 - **Multiple tabs** — click the `+` in the terminal pane header to open a second tab; each tab keeps its own bash session and scrollback even when you toggle the pane closed.
 
 See [Use the embedded terminal](../guides/terminal.md) for the full feature set.

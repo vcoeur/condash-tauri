@@ -14,7 +14,7 @@ The embedded terminal is a real PTY over a WebSocket. `bash` (or your configured
 Two ways:
 
 - Click the `>_` icon in the dashboard header.
-- Press the configured toggle shortcut. Default is `` Ctrl+` ``; change it under `terminal.shortcut` in `preferences.yml`.
+- Press the configured toggle shortcut. Default is `` Ctrl+` ``; change it under `terminal.shortcut` in `settings.yaml`.
 
 ![Terminal pane open beneath the dashboard](../assets/screenshots/terminal-light.png#only-light)
 ![Terminal pane open beneath the dashboard](../assets/screenshots/terminal-dark.png#only-dark)
@@ -62,7 +62,7 @@ Clipboard-based paste (`Ctrl+V`) also works for regular text, and uses the OS cl
 
 ## Configuration surface
 
-Everything lives under `terminal:` in `<conception_path>/config/preferences.yml`:
+Everything lives under `terminal:` in `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`:
 
 ```yaml
 terminal:
@@ -77,14 +77,9 @@ terminal:
 
 See the [config reference](../reference/config.md) for the full key table with defaults.
 
-## Editing shortcuts via the gear modal
+## Editing shortcuts
 
-The gear modal's **Preferences** tab has form fields for every `[terminal]` key:
-
-![Gear modal — Preferences tab with terminal settings](../assets/screenshots/gear-modal-preferences-light.png#only-light)
-![Gear modal — Preferences tab with terminal settings](../assets/screenshots/gear-modal-preferences-dark.png#only-dark)
-
-Saves go to `preferences.yml`. The shortcut field shows a live "press the combination" capture when you click into it — less error-prone than hand-typing `KeyboardEvent.key` names.
+Edit `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` directly — `settings.yaml` is hand-edited today; the gear modal only edits the tree-level `configuration.yml`. Changes land on the next launch. To test a new shortcut quickly, set it, relaunch, and press the combination.
 
 ## Platform note
 

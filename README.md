@@ -36,20 +36,20 @@ make build                 # produce the signed installer under src-tauri/target
 For running the HTTP surface headless (useful for Playwright, curl, or hacking the server without the GUI deps):
 
 ```bash
-make serve                 # runs condash-serve against $HOME/src/vcoeur/conception
+make serve                 # runs condash-serve against the tree configured in settings.yaml
 CONDASH_CONCEPTION_PATH=/other/tree make serve
 ```
 
 ## First launch
 
-`condash` reads `CONDASH_CONCEPTION_PATH` to find your tree (default: `$HOME/src/vcoeur/conception`). On first launch, click the gear icon in the dashboard header and set the path in the **General** tab of the Configuration modal. The change takes effect on the next window launch.
+On first launch with no tree configured, `condash` opens a folder picker and writes your choice to `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`. Subsequent launches reuse the saved path. Override with the `CONDASH_CONCEPTION_PATH` env var for one-shot runs.
 
-All other configuration — the workspace of code repos, the "open in IDE" launchers, per-machine preferences — lives in two YAML files **inside the conception tree**:
+Configuration lives in two YAML files:
 
-- `<conception_path>/config/repositories.yml` — versioned with the tree, describes the workspace shape and "open with" commands.
-- `<conception_path>/config/preferences.yml` — local machine overrides (PDF viewer, terminal shortcut).
+- `<conception_path>/configuration.yml` — tree-level, versioned with the tree. Owns `workspace_path`, `worktrees_path`, `repositories` (with optional `run:` / `force_stop:`).
+- `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` — per-user, per-machine. Owns `conception_path`, `terminal`, `pdf_viewer`, `open_with`.
 
-Full schema: [Config files reference](https://condash.vcoeur.com/reference/config/).
+On overlap, `settings.yaml` wins field by field. Full schema: [Config files reference](https://condash.vcoeur.com/reference/config/).
 
 ## What it does
 

@@ -7,7 +7,7 @@ description: Point condash at your workspace, group repos into primary / seconda
 
 **When to read this.** The **Code** tab shows the wrong repos, or the wrong repos are in the primary card, or the "open in IDE" button launches the wrong thing (or nothing).
 
-Everything on this page lives in `<conception_path>/config/repositories.yml`. This file is versioned with the tree — changes propagate to every teammate who pulls. Per-machine overrides go in `preferences.yml` (see [Multi-machine setup](multi-machine.md)).
+Everything on this page lives in `<conception_path>/configuration.yml`. This file is versioned with the tree — changes propagate to every teammate who pulls. Per-machine overrides go in `settings.yaml` (see [Multi-machine setup](multi-machine.md)).
 
 ## Workspace and worktrees paths
 
@@ -61,7 +61,7 @@ The `submodules` entry is an inline map (`{name: …, submodules: […]}`), not 
 
 ## The three `open_with` slots
 
-Each repo row has three icon buttons: **main IDE**, **secondary IDE**, **terminal**. Wire them in `repositories.yml`:
+Each repo row has three icon buttons: **main IDE**, **secondary IDE**, **terminal**. Wire them in `configuration.yml`:
 
 ```yaml
 open_with:
@@ -89,18 +89,13 @@ The fallback chain is the key feature: on machine A where `idea` resolves, you g
 
 Commands are parsed with `shlex`, so quoting works the way you'd expect: `"/Applications/JetBrains Toolbox/idea.app" {path}` is a single argv[0] + `{path}`.
 
-Built-in defaults for the three slots reproduce the previous IntelliJ / VS Code / terminal behaviour, so a `repositories.yml` without any `open_with` section still gives functional buttons. Override only the slots you want to customise.
+Built-in defaults for the three slots reproduce the previous IntelliJ / VS Code / terminal behaviour, so a `configuration.yml` without any `open_with` section still gives functional buttons. Override only the slots you want to customise.
 
 ## Editing via the gear modal
 
-Click the gear icon in the header, switch to the **Repositories** tab:
+Click the gear icon in the header to open a plain-text YAML editor backed by `configuration.yml`. Save is atomic (temp file → rename) and changes to `open_with` / `pdf_viewer` / `terminal` reload the dashboard live; `workspace_path`, `worktrees_path`, and the `repositories` list need a restart (the save dialog tells you which).
 
-![Gear modal — Repositories tab](../assets/screenshots/gear-modal-repositories-light.png#only-light)
-![Gear modal — Repositories tab](../assets/screenshots/gear-modal-repositories-dark.png#only-dark)
-
-Form fields for `workspace_path`, `worktrees_path`, and the primary / secondary lists. Saves write `repositories.yml` atomically and reload the dashboard live. Add new repos to the primary list by dragging them up from the OTHERS card on the dashboard itself.
-
-`open_with` is not currently exposed in the modal — edit `repositories.yml` directly for launcher changes.
+Prefer overriding IDE launcher paths per machine? Put the override in `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` instead — `settings.yaml` wins on overlap. See [Multi-machine setup](multi-machine.md).
 
 ## Starting a dev server from the row
 

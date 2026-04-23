@@ -68,7 +68,7 @@ Refresh the dashboard; the PDF badge lights up and the viewer picks up the file.
 
 ## Overriding the viewer
 
-If you'd rather open PDFs in your OS-native viewer (Evince, Okular, Preview, Sumatra, …), configure the `pdf_viewer` fallback chain in `preferences.yml`:
+If you'd rather open PDFs in your OS-native viewer (Evince, Okular, Preview, Sumatra, …), configure the `pdf_viewer` fallback chain in `settings.yaml`:
 
 ```yaml
 pdf_viewer:

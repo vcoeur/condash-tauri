@@ -11,7 +11,7 @@ The dashboard's **write surface is small**. It touches three places only:
 
 1. An item's `README.md` (step + status edits).
 2. Files under an item's root, mostly the `notes/` subdirectory (create, rename, upload, overwrite).
-3. The two tree-level YAML files — `<conception_path>/config/repositories.yml` and `<conception_path>/config/preferences.yml`.
+3. The tree-level `<conception_path>/configuration.yml`.
 
 It does **not** touch `.git/`, does not move or rename item directories, does not run shell commands other than the user-configured `open_with.*` / `pdf_viewer` / `terminal.launcher_command` chains.
 
@@ -90,13 +90,15 @@ See [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/bl
 
 ## Config edits
 
-Two YAML files under `<conception_path>/config/` can be written from the gear modal.
+The tree-level `<conception_path>/configuration.yml` can be written from the gear modal.
 
 | Action | HTTP | Trigger | Effect |
 |---|---|---|---|
-| Save config | `POST /config` | Gear modal "Save" | Writes `repositories.yml` and / or `preferences.yml`. All writes are atomic (`.tmp` + rename) and preserve comments outside the managed blocks. |
+| Save config | `POST /configuration` | Gear modal "Save" | Atomically replaces `configuration.yml` with the raw YAML from the textarea. Parse errors return 400 before anything lands on disk. |
 
-A handful of fields (listen port, webview-host toggle) require a restart — the response surfaces those in `restart_required` so the dashboard can warn the user. Every other field reloads live by rebuilding `RenderCtx`.
+`settings.yaml` is not written by any route — edit it by hand; condash reads it on the next launch.
+
+Most changes reload live by rebuilding `RenderCtx`. Structural changes (`workspace_path`, `worktrees_path`, `repositories` list) need a restart — the save dialog surfaces which.
 
 See [Config files](config.md) for the full key schema and which file owns which key.
 

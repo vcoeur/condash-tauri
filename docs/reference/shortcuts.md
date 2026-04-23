@@ -41,7 +41,7 @@ Inside the CodeMirror edit pane:
 
 ## Embedded terminal — pane-level
 
-These live at the dashboard level and can fire from outside the terminal pane (e.g. toggle it open from anywhere). Configurable via the `terminal:` block in `preferences.yml`. Shortcut strings follow the `KeyboardEvent.key` convention — modifiers are `Ctrl`, `Shift`, `Alt`, `Meta`.
+These live at the dashboard level and can fire from outside the terminal pane (e.g. toggle it open from anywhere). Configurable via the `terminal:` block in `settings.yaml` (preferred, per-machine) or `configuration.yml` (tree default). Shortcut strings follow the `KeyboardEvent.key` convention — modifiers are `Ctrl`, `Shift`, `Alt`, `Meta`.
 
 | Default | Action | Config key |
 |---|---|---|
@@ -96,4 +96,4 @@ This keeps `` Ctrl+` `` from firing while you're typing in the history-tab searc
 
 ## Reloading shortcut changes
 
-`terminal:` shortcut changes saved via the gear modal take effect **live** — the page re-reads `/config` on save and rebuilds the parsed shortcut specs. No restart needed. Changes made by hand-editing `preferences.yml` require a page refresh.
+`terminal:` shortcut changes saved via the gear modal take effect **live** — the page re-reads `/config` on save and rebuilds the parsed shortcut specs. No restart needed. Changes made by hand-editing `configuration.yml` or `settings.yaml` require a page refresh.

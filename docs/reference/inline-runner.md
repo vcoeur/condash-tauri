@@ -43,7 +43,7 @@ Rules:
 - **Inheritance is off.** A parent's `run:` doesn't cascade to its submodules; a submodule without its own `run:` has no Run button. This is deliberate — a repo's top-level dev command is almost never what a subdir wants.
 - `run` lives on the inline-map form. If you still have a bare-string repo entry, promote it to `{ name: …, run: "…" }` when you add a runner.
 
-The gear modal's **Repositories** tab doesn't expose `run:` yet; edit `repositories.yml` directly for now.
+The gear modal's YAML editor lets you tweak `run:` directly in `configuration.yml` — no special UI.
 
 ## The Run button lifecycle
 

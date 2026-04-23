@@ -28,8 +28,7 @@ conception/
 │           └── README.md
 ├── knowledge/                                ← optional, explorer tab
 │   └── …
-└── config/                                   ← repositories.yml + preferences.yml
-    └── repositories.yml
+└── configuration.yml                         ← tree-level config
 ```
 
 Rules, enforced or conventional:

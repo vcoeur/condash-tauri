@@ -5,7 +5,7 @@ description: The two condash binaries and how to configure them.
 
 # CLI
 
-condash ships two binaries. Neither takes subcommands or flags — everything that used to live behind a flag is now either an environment variable or a tab in the in-app gear modal.
+condash ships two binaries. Neither takes subcommands or flags — everything that used to live behind a flag is now either an environment variable or a line in `settings.yaml` / `configuration.yml`.
 
 ## At a glance
 
@@ -34,7 +34,7 @@ A developer-oriented binary that runs the same HTTP server without opening a win
 condash-serve
 ```
 
-Prints the bound URL (e.g. `http://127.0.0.1:11111`) and keeps running until you `Ctrl+C`. Open the URL in your normal browser.
+Prints the bound URL (e.g. `http://127.0.0.1:43217`) and keeps running until you `Ctrl+C`. Open the URL in your normal browser. Without `CONDASH_PORT`, the OS assigns any free port — the URL varies across launches.
 
 Reasons to use `condash-serve`:
 
@@ -44,19 +44,20 @@ Reasons to use `condash-serve`:
 
 ## Configuration
 
-Neither binary reads flags. The two places configuration lives:
+Neither binary reads flags. Configuration lives in three layers (see [Config files](config.md) for the full schema):
 
 1. **Environment variables** — three of them, all prefixed `CONDASH_`:
 
    | Variable | Meaning |
    |---|---|
-   | `CONDASH_CONCEPTION_PATH` | Absolute path to the conception tree to render. Defaults to `$HOME/src/vcoeur/conception`. |
+   | `CONDASH_CONCEPTION_PATH` | Absolute path to the conception tree to render. Overrides `conception_path` in `settings.yaml`. |
    | `CONDASH_ASSET_DIR` | Override the embedded dashboard bundle with a live directory on disk. Dev-only. |
-   | `CONDASH_PORT` | Pin the listen port of `condash-serve`. Defaults to a free port in `11111–12111`. |
+   | `CONDASH_PORT` | Pin the listen port of `condash-serve`. Unset → any free port. |
 
    See [Environment variables](env.md) for the full list.
 
-2. **The gear modal in the dashboard.** Click the gear icon in the top right of the window. Three tabs — **General**, **Repositories**, **Preferences** — cover the tree-level YAML config (`<conception_path>/config/repositories.yml`, `<conception_path>/config/preferences.yml`). Saves are atomic and reload live.
+2. **`settings.yaml`** at `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` — per-user, per-machine. Holds `conception_path` plus the three blocks that naturally differ per machine: `terminal`, `pdf_viewer`, `open_with`.
+3. **`configuration.yml`** at `<conception_path>/configuration.yml` — per-tree, versioned in git. Holds `workspace_path`, `worktrees_path`, `repositories` (incl. `run:` / `force_stop:`). Edit it by hand or through the gear icon in the dashboard header (plain-text YAML editor).
 
 ## What's not in the CLI
 

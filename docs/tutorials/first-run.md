@@ -49,9 +49,7 @@ Inspect what you got:
 ```
 ~/conception-demo/
 ├── README.md
-├── config/
-│   ├── preferences.yml
-│   └── repositories.yml
+├── configuration.yml
 ├── projects/
 │   ├── 2026-03/         # items created last month (2 done)
 │   └── 2026-04/         # 7 items created this month (3 now, 1 review, 1 soon, 1 later, 1 backlog)
@@ -65,15 +63,15 @@ Everything is plain Markdown. Open `projects/2026-04/2026-04-02-fuzzy-search-v2/
 
 ## 3. Point condash at the tree
 
-condash reads the conception tree location from the `CONDASH_CONCEPTION_PATH` environment variable. Default is `$HOME/src/vcoeur/conception`.
+On first launch with no tree configured, condash opens a native folder picker and writes your choice to `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`. Pick `~/conception-demo` the first time and the next launches reuse it automatically.
 
-The quickest way to try the demo tree for a single run is:
+For a one-shot run without touching the saved path, set the env var:
 
 ```bash
 CONDASH_CONCEPTION_PATH=~/conception-demo condash
 ```
 
-To make it persistent, export the variable from your shell's rc file (`~/.bashrc`, `~/.zshrc`, or the equivalent). Or, once the window is open, click the gear icon in the dashboard header and set the path in the **General** tab — that writes it to `~/conception-demo/config/preferences.yml` for next time.
+To make a different tree the default, either re-launch with the picker (delete `settings.yaml` first) or edit `conception_path` in `settings.yaml` by hand.
 
 ## 4. Launch
 
@@ -96,11 +94,11 @@ Take two minutes to click through:
 - **Next** — the soon bucket. One project (`json-export`).
 - **Backlog** — one project, parked.
 - **Done** — two archived items from the previous month.
-- **Code** — three repos: condash scanned `workspace_path: /tmp/conception-demo-workspace` from `config/repositories.yml` and found one `.git/` per entry. (If the Code tab shows 0, the workspace path on your machine doesn't exist yet — we'll set that up properly in [Your first project](first-project.md).)
+- **Code** — three repos: condash scanned `workspace_path: /tmp/conception-demo-workspace` from `configuration.yml` and found one `.git/` per entry. (If the Code tab shows 0, the workspace path on your machine doesn't exist yet — we'll set that up properly in [Your first project](first-project.md).)
 - **Knowledge** — the `knowledge/` tree rendered as an explorer: `conventions.md` at the root, `Internal` and `Topics` folders with index files.
 - **History** — full-text search across every item + note. Type `fuzzy` to see ranked matches.
 
-Click the gear icon in the top right to see the **Configuration** modal with three tabs — General / Repositories / Preferences. The General tab holds the conception path and a few per-machine defaults; the other two map directly to `conception-demo/config/repositories.yml` and `conception-demo/config/preferences.yml` (tree-versioned). You'll use this modal in the next tutorial.
+Click the gear icon in the top right to see the **Configuration** modal — a plain-text YAML editor backed by `conception-demo/configuration.yml`. Save is atomic (temp file → rename). Per-machine preferences (`terminal`, `pdf_viewer`, `open_with`) live separately in `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` and are hand-edited. You'll use this modal in the next tutorial.
 
 ## 6. Close the window
 
@@ -109,9 +107,9 @@ Closing the native window exits condash. Relaunch with `condash` whenever you wa
 ## What you just learned
 
 - Installing condash is either a one-click installer from GitHub Releases or three `make` targets from source.
-- `CONDASH_CONCEPTION_PATH` plus the gear modal is the whole setup flow. The path is the only thing you must set.
+- The first-launch folder picker plus `CONDASH_CONCEPTION_PATH` is the whole setup flow. The path is the only thing you must set.
 - The dashboard renders the files as-is on every page load. There's no database, no watcher, no cache.
-- The tree carries two YAML config files in `config/` — one team-shared (`repositories.yml`), one per-machine (`preferences.yml`). We'll dig into that split in [Configure the conception path](../guides/configure-conception-path.md).
+- The tree carries two YAML config files in `config/` — one team-shared (`configuration.yml`), one per-machine (`settings.yaml`). We'll dig into that split in [Configure the conception path](../guides/configure-conception-path.md).
 
 ## Next
 
