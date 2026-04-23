@@ -31,7 +31,6 @@ rand = "0.8"
 rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
-tower-http = { version = "0.6", features = ["fs"] }
 notify = "8"
 futures-util = { version = "0.3", default-features = false }
 tokio-stream = { version = "0.1", features = ["sync"] }
