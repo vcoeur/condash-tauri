@@ -1,11 +1,9 @@
-//! History-tab search backend — Rust port of `src/condash/search.py`.
+//! History-tab search backend.
 //!
 //! Broadens the Projects-tab string filter: matches README bodies,
 //! note + text-file content, and filenames. Returns per-project hits
-//! with HTML-escaped snippets and `<mark>` wrapping, scored with the
-//! same weights the Python build uses. Output structure matches
-//! Python's dict one-for-one so `search-diff` can equality-check the
-//! JSON.
+//! with HTML-escaped snippets and `<mark>` wrapping, scored by source
+//! (title > header > body > filename) and recency.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -26,7 +24,8 @@ const MAX_CONTENT_BYTES: u64 = 512 * 1024;
 
 const SNIPPET_RADIUS: usize = 60;
 
-/// Source-weight table. Matches Python's `_SOURCE_WEIGHTS`.
+/// Source-weight table — a title hit outranks a body hit so the
+/// ranking feels intuitive for "where did I write this?" queries.
 fn source_weight(src: &str) -> i64 {
     match src {
         "title" => 4,
@@ -111,17 +110,14 @@ fn build_snippet(text: &str, tokens: &[String], radius: usize) -> String {
     if text.is_empty() || tokens.is_empty() {
         return String::new();
     }
-    // All index math is done in char-space (not bytes) so the output
-    // matches Python's `str.find` / slicing exactly — Python 3 strings
-    // are arrays of code points, whereas Rust's `str::find` returns a
-    // byte offset. For ASCII text the two agree; for French content
-    // with accents or em-dashes they don't.
+    // All index math is done in char-space (not bytes). Rust's
+    // `str::find` returns a byte offset, which is fine for ASCII but
+    // slices mid-codepoint on French content with accents or em-dashes.
     let text_chars: Vec<char> = text.chars().collect();
     let hay_chars: Vec<char> = text.to_lowercase().chars().collect();
     // `to_lowercase()` can in theory change char count (rare Unicode
     // edge cases like `İ` → `i̇`). For the conception corpus this
-    // doesn't happen, and Python's `str.lower()` has the same quirk —
-    // falling out of parity there is a non-issue.
+    // doesn't happen, so we don't re-align the indices after lowercasing.
 
     let mut best: Option<(usize, usize)> = None;
     for tok in tokens {

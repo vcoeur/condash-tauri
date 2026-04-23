@@ -1,8 +1,8 @@
 //! File-extension classifier — drives the preview dispatcher.
 //!
-//! Rust port of `_note_kind` in `src/condash/parser.py`. The extension
-//! lists mirror the Python `_IMAGE_EXTS` / `_PDF_EXTS` / `_TEXT_EXTS`
-//! sets one-for-one; anything else classifies as `binary`.
+//! A note file is routed to one of four preview paths — markdown,
+//! image, pdf, text — based on its extension. Anything outside the
+//! lists below classifies as `binary` and is not previewable.
 
 use std::path::Path;
 

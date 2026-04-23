@@ -1,10 +1,8 @@
-//! Regex primitives, 1:1 with `parser.py`'s module-level constants.
+//! Regex primitives shared across parse steps.
 //!
-//! None of the Python regexes use lookaround or backrefs, so the Rust
-//! `regex` crate ports them directly. All patterns are single-line and
-//! anchored with `^`/`$` — the call sites feed them line-by-line, so the
-//! default crate behaviour (where `^` is start-of-string) matches Python's
-//! `re.match` semantics exactly.
+//! All patterns are single-line and anchored with `^`/`$` — the call
+//! sites feed them line-by-line, so the default `regex` crate
+//! behaviour (where `^` is start-of-string) is what we want.
 
 use once_cell::sync::Lazy;
 use regex::Regex;

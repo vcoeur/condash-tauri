@@ -1,17 +1,10 @@
-//! `parse_readme` body, ported as a pure function.
+//! `parse_readme_content` — the pure parsing step.
 //!
-//! Python's `parse_readme(ctx, path, kind)` does three things that this
-//! Rust port splits apart:
-//!
-//! 1. Reads the file off disk and computes `slug` / `path` / `item_dir`
-//!    from `path.parent.relative_to(ctx.base_dir)`. Filesystem + config.
-//! 2. Parses the file content into an item dict. Pure.
-//! 3. Calls `_list_item_tree(ctx, path.parent)` for the `files` field.
-//!    Filesystem.
-//!
-//! This module only handles (2). The Phase 2 route layer wraps it with
-//! the filesystem reads and the files-tree walk. Keeping the parse pure
-//! is what makes the Python↔Rust diff test tractable.
+//! This module takes the README body as a string and produces an
+//! [`ItemReadme`]. The filesystem reads (loading the file, walking the
+//! item directory for the `files` field) live one layer up in
+//! [`crate::collect`], which makes this function trivial to exercise
+//! from unit tests without touching the disk.
 
 use std::collections::HashMap;
 
@@ -22,15 +15,16 @@ use crate::regexes::{HEADING2_RE, HEADING3_RE, METADATA_RE};
 use crate::sections::{parse_sections, Section};
 use crate::Priority;
 
-/// Maximum summary length in *codepoints* (matches Python's `len(str)`).
-/// When exceeded, the summary is truncated to `SUMMARY_MAX - 3` codepoints
-/// and `...` is appended, so the final string is exactly `SUMMARY_MAX`.
+/// Maximum summary length in *codepoints* (count user-visible glyphs,
+/// not bytes). When exceeded, the summary is truncated to
+/// `SUMMARY_MAX - 3` codepoints and `...` is appended, so the final
+/// string is exactly `SUMMARY_MAX`.
 const SUMMARY_MAX: usize = 300;
 const SUMMARY_HEAD: usize = 297;
 
-/// Parsed item README. Field order + names mirror the Python dict so that
-/// `serde_json::to_value` equals the Python output key-by-key (modulo the
-/// `files` key, which the filesystem wrapper fills in later).
+/// Parsed item README. The `files` field is filled in by the collector
+/// one layer up — it lives on this struct for ergonomic template
+/// rendering but isn't populated by the pure parse step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemReadme {
     pub slug: String,
@@ -51,16 +45,13 @@ pub struct ItemReadme {
 
 /// Parse one item's README content into an [`ItemReadme`].
 ///
-/// `content` is the raw UTF-8 text of the file. `slug` is the item folder
-/// name (`path.parent.name` in Python). `rel_path` is the README path
-/// relative to `ctx.base_dir`. `item_dir` is the item folder relative to
-/// `ctx.base_dir` — i.e. `rel_path` with the trailing `/README.md` lopped.
-/// `fallback_kind` matches Python's optional `kind` argument: used when
-/// the README has no `**Kind**:` header.
+/// `content` is the raw UTF-8 text of the file. `slug` is the item
+/// folder name. `rel_path` is the README path relative to
+/// `ctx.base_dir`; `item_dir` is the same minus the trailing
+/// `/README.md`. `fallback_kind` is used only when the README has no
+/// `**Kind**:` header.
 ///
-/// Returns `None` only when `content` itself is empty (matching Python's
-/// `if not lines: return None` — Python never actually hits that since
-/// `"".split("\n") == [""]`, but we keep parity).
+/// Returns `None` when `content` is empty.
 pub fn parse_readme_content(
     content: &str,
     slug: &str,

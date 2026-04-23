@@ -1,25 +1,19 @@
-//! Filesystem-driven staleness push — Rust port of `src/condash/events.py`.
+//! Filesystem-driven staleness push.
 //!
 //! The watcher emits coarse per-tab events (`projects` / `knowledge` /
 //! `code`) whenever a watched path changes. The SSE handler in
-//! `server.rs` subscribes to the bus and streams events to the browser;
-//! the frontend treats every event as a hint to re-poll `/check-updates`.
+//! `server.rs` subscribes to the bus and streams events to the
+//! browser; the frontend treats every event as a hint to re-poll
+//! `/check-updates`.
 //!
-//! The merged `configuration.yml` is intentionally *not* watched —
-//! edits come from the in-app YAML editor which explicitly triggers a
+//! `configuration.yml` itself is intentionally *not* watched — edits
+//! come from the in-app YAML editor which explicitly triggers a
 //! `RenderCtx` rebuild on Save. Out-of-band edits (hand-edit from a
 //! different tool) require the user to reopen the modal or restart.
 //!
-//! Two differences from the Python original:
-//!
-//! 1. The fan-out uses a `tokio::sync::broadcast` channel instead of a
-//!    hand-rolled subscriber list + per-subscriber `asyncio.Queue`. The
-//!    broadcast channel gives us lagging-subscriber semantics for free
-//!    (the client re-polls on lag, which is the same fall-back the
-//!    reconciler already provides).
-//! 2. Config hot-reload is the config modal's responsibility — it
-//!    rebuilds the `RenderCtx` in-band after a successful save and the
-//!    event bus stays out of that path.
+//! Fan-out uses a `tokio::sync::broadcast` channel, which gives us
+//! lagging-subscriber semantics for free: the client re-polls on lag,
+//! which is the same fall-back the reconciler already provides.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,11 +25,10 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 /// Drop duplicate events per tab within this window — a single editor
-/// save often produces swap-file + metadata-touch events too. Matches
-/// Python's `_DEBOUNCE_SECONDS`.
+/// save often produces swap-file + metadata-touch events too.
 pub const DEBOUNCE: Duration = Duration::from_millis(750);
 
-/// Payload emitted by the watcher. Wire format matches Python —
+/// Payload emitted by the watcher. Wire format is
 /// `{"tab": <tab>, "ts": <seconds>, "file": <leaf>?}`.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct EventPayload {

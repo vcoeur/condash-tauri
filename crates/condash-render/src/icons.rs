@@ -1,14 +1,11 @@
-//! Static SVG icon strings — Rust port of `render.py::_ICON_SVGS`.
+//! Static SVG icon strings.
 //!
 //! Every icon appears as a raw `<svg>…</svg>` string so the template
-//! engine can emit it with `{{ icons.foo | safe }}`. Kept in a single
-//! module to mirror Python's dict; the enum is constructed once per
-//! render and serialised into the minijinja `Value` tree.
+//! engine can emit it with `{{ icons.foo | safe }}`. The struct is
+//! constructed once per render and serialised into the minijinja
+//! `Value` tree.
 
 /// Named SVG icons referenced by the dashboard templates.
-///
-/// Field names mirror the Python dict keys so the templates — which
-/// live alongside the wheel — can be reused unchanged.
 pub struct Icons;
 
 macro_rules! def_icons {

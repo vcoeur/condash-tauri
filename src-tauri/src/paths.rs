@@ -1,11 +1,8 @@
-//! Path validation for user-supplied paths. Mirrors the subset of
-//! `src/condash/paths.py` that the write-side routes need — the
-//! `_safe_resolve` helper plus the regex-gated validators
-//! (`_validate_path`, `validate_note_path`, …) and small helpers the
-//! mutation handlers depend on (`_resolve_under_item`,
-//! `_VALID_NOTE_FILENAME_RE`, …).
+//! Path validation for user-supplied paths used by the write-side
+//! routes: a `safe_resolve` helper plus regex-gated validators for
+//! READMEs, notes, item dirs, and filenames.
 //!
-//! Every validator follows the same shape Python does:
+//! Every validator follows the same four-step shape:
 //!
 //! 1. Reject empty / NUL / literal `..` outright.
 //! 2. Gate with one or more regexes.
@@ -21,60 +18,57 @@ use regex::Regex;
 /// Common item-path prefix — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`.
 const VALID_ITEM_PREFIX: &str = r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/";
 
-/// `projects/YYYY-MM/YYYY-MM-DD-<slug>/README.md` — `_VALID_PATH_RE`.
+/// `projects/YYYY-MM/YYYY-MM-DD-<slug>/README.md`.
 static VALID_README_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!("{VALID_ITEM_PREFIX}README\\.md$")).expect("VALID_README_RE compiles")
 });
 
-/// `<item>/<anything>.md` — `_VALID_NOTE_RE` in `paths.py`.
+/// `<item>/<anything>.md`.
 static VALID_NOTE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}[\w./-]+\.md$")).expect("VALID_NOTE_RE compiles")
 });
 
-/// `knowledge/<file>.md` — `_VALID_KNOWLEDGE_NOTE_RE`. Matches `knowledge/`
-/// at any depth.
+/// `knowledge/<file>.md`. Matches `knowledge/` at any depth.
 static VALID_KNOWLEDGE_NOTE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^knowledge/(?:[\w.-]+/)*[\w.-]+\.md$").expect("VALID_KNOWLEDGE_NOTE_RE compiles")
 });
 
-/// Any file at any depth inside an item directory — `_VALID_ITEM_FILE_RE`.
+/// Any file at any depth inside an item directory.
 static VALID_ITEM_FILE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}[\w./-]+$")).expect("VALID_ITEM_FILE_RE compiles")
 });
 
 /// Restricted to files directly under `<item>/notes/` — used by rename
-/// (only notes are user-renamable). `_VALID_ITEM_NOTES_FILE_RE`.
+/// (only notes are user-renamable).
 pub(crate) static VALID_ITEM_NOTES_FILE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}notes/[\w./-]+$"))
         .expect("VALID_ITEM_NOTES_FILE_RE compiles")
 });
 
-/// Item directory itself — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`, with or
-/// without the trailing slash. Mirrors `_VALID_ITEM_DIR_RE` from `paths.py`.
+/// Item directory itself — `projects/YYYY-MM/YYYY-MM-DD-<slug>/`, with
+/// or without the trailing slash.
 static VALID_ITEM_DIR_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^projects/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[\w.-]+/?$")
         .expect("VALID_ITEM_DIR_RE compiles")
 });
 
-/// `<name>.<ext>` — `_VALID_NOTE_FILENAME_RE`. Used to validate the target
-/// of create_note / rename_note.
+/// `<name>.<ext>` — validates the target filename of create_note /
+/// rename_note.
 pub static VALID_NOTE_FILENAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[\w.-]+\.[A-Za-z0-9]+$").expect("VALID_NOTE_FILENAME_RE compiles"));
 
-/// Simple bare-filename regex allowed for rename new-stem. Matches what
-/// `mutations.py` inlines as `re.match(r"^[\w.-]+$", new_stem)`.
+/// Bare filename allowed for the rename target's new stem.
 pub static VALID_NEW_STEM_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[\w.-]+$").expect("VALID_NEW_STEM_RE compiles"));
 
-/// Subdirectory path (possibly nested) — `_VALID_SUBDIR_RE`. Used by
-/// `resolve_under_item` to reject anything that doesn't look like a
-/// sequence of `[\w.-]+` segments.
+/// Subdirectory path (possibly nested). Used by `resolve_under_item`
+/// to reject anything that doesn't look like a sequence of `[\w.-]+`
+/// segments.
 pub static VALID_SUBDIR_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[\w.-]+(/[\w.-]+)*$").expect("VALID_SUBDIR_RE compiles"));
 
-/// Upload filename regex — `_VALID_UPLOAD_FILENAME_RE`. More permissive
-/// than the note regex to accept typical Camera/PDF exports (spaces,
-/// parentheses).
+/// Upload filename regex — more permissive than the note regex to
+/// accept typical Camera/PDF exports (spaces, parentheses).
 pub static VALID_UPLOAD_FILENAME_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^[\w. \-()]+\.[A-Za-z0-9]+$").expect("VALID_UPLOAD_FILENAME_RE compiles")
 });
@@ -109,16 +103,15 @@ pub fn safe_resolve(
 }
 
 /// Validate a README path (`projects/YYYY-MM/<slug>/README.md`). The
-/// README must resolve to an existing file under `base_dir`. Mirrors
-/// `paths._validate_path` (plus the step-mutation handlers' implicit
-/// require_file=true, since they immediately read the file).
+/// README must resolve to an existing file under `base_dir`. Every
+/// step-mutation handler reads the file immediately after, so
+/// `require_file=true` is hardcoded.
 pub fn validate_readme_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
     safe_resolve(base_dir, rel_path, &[&VALID_README_RE], true)
 }
 
 /// Validate a note-like path — item-tree file, `<item>/notes/*.md`, or
-/// `knowledge/**/*.md`. Mirrors `paths.validate_note_path`. The target
-/// must resolve to an existing file.
+/// `knowledge/**/*.md`. The target must resolve to an existing file.
 pub fn validate_note_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
     safe_resolve(
         base_dir,
@@ -133,9 +126,9 @@ pub fn validate_note_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
 }
 
 /// Validate a project-item folder path (`projects/YYYY-MM/<slug>/`) under
-/// `base_dir`. Mirrors `paths._validate_item_dir`. Used by `/open-folder`
-/// so the "open folder in file manager" card button resolves against the
-/// conception tree (not the workspace/worktrees sandbox).
+/// `base_dir`. Used by `/open-folder` so the "open folder in file
+/// manager" card button resolves against the conception tree (not the
+/// workspace/worktrees sandbox).
 pub fn validate_item_dir(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
     let full = safe_resolve(base_dir, rel_path, &[&VALID_ITEM_DIR_RE], false)?;
     if !full.is_dir() {
@@ -144,10 +137,9 @@ pub fn validate_item_dir(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
     Some(full)
 }
 
-/// Resolve `subdir` (relative to `item_dir`) and verify the result stays
-/// inside the item directory. Empty `subdir` resolves to `item_dir`
-/// itself. Returns `None` on traversal / regex failure. Mirrors
-/// `mutations._resolve_under_item`.
+/// Resolve `subdir` (relative to `item_dir`) and verify the result
+/// stays inside the item directory. Empty `subdir` resolves to
+/// `item_dir` itself. Returns `None` on traversal / regex failure.
 pub fn resolve_under_item(item_dir: &Path, subdir: &str) -> Option<PathBuf> {
     let trimmed = subdir.trim().trim_matches('/');
     if trimmed.is_empty() {
@@ -160,8 +152,7 @@ pub fn resolve_under_item(item_dir: &Path, subdir: &str) -> Option<PathBuf> {
         return None;
     }
     let target = item_dir.join(trimmed);
-    // Python uses `.resolve().relative_to(item_dir.resolve())`. We match
-    // that via `canonicalize` when the target exists, and a literal
+    // Use `canonicalize` when the target exists, and a literal
     // prefix check when it does not (the target may legitimately not
     // exist yet in the create_note / mkdir flows — the regex + `..`
     // reject above is enough to keep us safely inside).

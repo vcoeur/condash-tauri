@@ -12,14 +12,12 @@ use crate::regexes::{DELIVERABLE_RE, HEADING2_RE};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Deliverable {
     pub label: String,
-    /// PDF path relative to the item directory (same as Python's `path`).
+    /// PDF path relative to the item directory.
     pub path: String,
     pub desc: String,
-    /// `<item_dir>/<path>`. Absent on the raw `parse_deliverables` output;
-    /// `parse_readme_content` fills it once it knows the item directory.
-    /// Serialised as `"full_path"` matching the Python dict key; skipped
-    /// when absent so standalone `parse_deliverables` callers see the same
-    /// three-field shape as before.
+    /// `<item_dir>/<path>` — filled in by `parse_readme_content` once
+    /// it knows the item directory. Skipped when absent so standalone
+    /// `parse_deliverables` callers see the same three-field shape.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub full_path: Option<String>,
 }

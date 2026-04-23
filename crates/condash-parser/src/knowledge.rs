@@ -1,11 +1,8 @@
-//! Knowledge-tree walker shared by the knowledge and code explorer tabs.
-//!
-//! Rust port of `_knowledge_title_and_desc`, `collect_knowledge`,
-//! `collect_tree`, `_tree_node`, `find_knowledge_node`, and
-//! `find_knowledge_card` in `src/condash/parser.py`. The returned node
-//! shape matches Python's `{name, label, rel_dir, index, body, children,
-//! count}` so downstream consumers (render, fingerprints) can hand the
-//! JSON back and forth byte-identically.
+//! Knowledge-tree walker shared by the knowledge and code explorer
+//! tabs. Builds a recursive `{name, label, rel_dir, index, body,
+//! children, count}` node shape from the on-disk `knowledge/` tree;
+//! the render layer and fingerprint hasher both consume this shape
+//! directly.
 
 use std::fs;
 use std::path::Path;
@@ -229,7 +226,6 @@ pub fn find_node<'a>(tree: Option<&'a KnowledgeNode>, rel_dir: &str) -> Option<&
 }
 
 /// Return the card entry (index or body) at file `path` or `None`.
-/// Mirrors `find_knowledge_card`.
 pub fn find_card<'a>(tree: Option<&'a KnowledgeNode>, path: &str) -> Option<&'a KnowledgeCard> {
     let tree = tree?;
     if let Some(idx) = tree.index.as_ref() {
@@ -291,7 +287,7 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let p = td.path().join("x.md");
         write(&p, "# T\n\nEllipsis ok...\n");
-        // rstrip('.') strips every trailing dot — matches Python.
+        // Every trailing dot is stripped — `"foo."` and `"foo…"` collapse.
         let (_t, d) = knowledge_title_and_desc(&p);
         assert_eq!(d, "Ellipsis ok");
     }
@@ -302,8 +298,8 @@ mod tests {
         let p = td.path().join("x.md");
         // `---` lines and `#` lines are skipped; the first other non-blank
         // line wins. YAML-frontmatter keys between fences leak through on
-        // purpose — condash's parser is intentionally cheap, matching
-        // Python's parse behavior.
+        // purpose — the parser is intentionally cheap and doesn't model
+        // frontmatter structurally.
         write(&p, "# Title\n\n## A subheading\n\nActual body line.\n");
         let (t, d) = knowledge_title_and_desc(&p);
         assert_eq!(t, "Title");
@@ -316,7 +312,6 @@ mod tests {
         let p = td.path().join("x.md");
         write(&p, "---\nmeta: here\n---\n# Title\n\nActual body.\n");
         // `---` lines skipped, `meta: here` is a plain line → taken as desc.
-        // This mirrors the Python parser one-for-one.
         let (_t, d) = knowledge_title_and_desc(&p);
         assert_eq!(d, "meta: here");
     }

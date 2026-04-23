@@ -1,6 +1,6 @@
-//! Inline dev-server runner registry — Rust port of `runners.py`.
+//! Inline dev-server runner registry.
 //!
-//! Each repo (or sub-repo) with a `run:` template in `repositories.yml`
+//! Each repo (or sub-repo) with a `run:` template in `configuration.yml`
 //! gets a keyed slot here. `/api/runner/start` spawns a PTY under
 //! [`PtyRegistry`][crate::pty::PtyRegistry] and stashes it in the
 //! registry; `/api/runner/stop` SIGTERMs + SIGKILLs with a grace window.
@@ -214,7 +214,7 @@ pub async fn stop(
     // manually so the UI isn't left showing "running" on a dead
     // process.
     if session.exit_code_now().is_none() {
-        *session.exit_code.lock().expect("exit mutex") = Some(-15); // matches Python's -SIGTERM convention
+        *session.exit_code.lock().expect("exit mutex") = Some(-15); // -SIGTERM convention: negate the signal number the runner was killed with
         *session.stamp.lock().expect("stamp mutex") = next_stamp();
     }
     let _ = runners.remove(key);

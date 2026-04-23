@@ -72,11 +72,10 @@ impl WriteNoteResult {
     }
 }
 
-/// Atomically rewrite `full_path` with `content`. Refuses when the on-
-/// disk mtime doesn't match `expected_mtime` so a stale editor never
-/// silently overwrites out-of-band edits. When `expected_mtime` is
-/// `None`, skips the guard (matches Python's `if expected_mtime is not
-/// None`).
+/// Atomically rewrite `full_path` with `content`. Refuses when the
+/// on-disk mtime doesn't match `expected_mtime` so a stale editor
+/// never silently overwrites out-of-band edits. When `expected_mtime`
+/// is `None`, skips the guard.
 pub fn write_note(
     full_path: &Path,
     content: &str,
@@ -569,8 +568,8 @@ impl From<ItemKind> for Kind {
     }
 }
 
-/// Input spec for `create_item`. Mirrors the keyword-arguments shape of
-/// the Python helper.
+/// Input spec for `create_item` — the fields the `/create-item` and
+/// `/api/items` routes collect from the new-item modal.
 #[derive(Debug, Default, Clone)]
 pub struct NewItemSpec {
     pub title: String,
@@ -583,9 +582,8 @@ pub struct NewItemSpec {
     pub languages: String,
 }
 
-/// `{ok, rel_path, slug, folder_name, priority, month}` or
-/// `{ok: false, reason}`. Serialised shape matches Python byte-for-byte
-/// so the existing frontend doesn't need to change.
+/// `{ok, rel_path, slug, folder_name, priority, month}` on success
+/// or `{ok: false, reason}` on a validation failure.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum CreateItemResult {

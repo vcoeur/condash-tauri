@@ -1,5 +1,5 @@
-//! Git-strip rendering — Rust port of render.py's peer-card / branch-row
-//! / runner-button / open-with helpers.
+//! Git-strip rendering — peer cards, branch rows, runner buttons,
+//! open-with launcher buttons.
 //!
 //! The public entry points take a [`LiveRunners`] map keyed by runner
 //! key. Each entry records the checkout that owns the session and the
@@ -18,7 +18,8 @@ use crate::h;
 use crate::icons::Icons;
 use crate::templating::embed_attr;
 
-/// Canonical runner-registry key. Mirrors `_runner_key` in Python.
+/// Canonical runner-registry key. Sub-repos use `<repo>--<sub>` to
+/// keep each submodule's runner session distinct from the parent's.
 pub fn runner_key(repo_name: &str, sub_name: Option<&str>) -> String {
     match sub_name {
         None => repo_name.to_string(),

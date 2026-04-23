@@ -664,8 +664,8 @@ async fn post_note_upload(
                 }
             }
             _ => {
-                // Silently drop unknown fields — matches Python which
-                // only picks `item_readme`, `subdir`, `file` keys.
+                // Silently drop unknown fields — the route contract
+                // is `item_readme`, `subdir`, `file`; extras are ignored.
                 let _ = field.bytes().await;
             }
         }
@@ -1468,8 +1468,9 @@ async fn handle_runner_ws(mut socket: axum::extract::ws::WebSocket, state: AppSt
 }
 
 /// Validate a filesystem path as an in-sandbox directory under
-/// `ctx.workspace` or `ctx.worktrees`. Rust port of
-/// `paths._validate_open_path` from `paths.py`.
+/// `ctx.workspace` or `ctx.worktrees`. Used by the opener routes so
+/// the shell-command-dispatching helpers only see paths the user
+/// legitimately asked condash to manage.
 fn validate_open_path(ctx: &condash_state::RenderCtx, path: &str) -> Option<std::path::PathBuf> {
     if path.is_empty() || path.contains('\0') {
         return None;
@@ -1895,18 +1896,17 @@ async fn post_open_doc(
 // `/recent-screenshot` — data source for the Ctrl+Shift+V screenshot-paste
 // shortcut. Returns the absolute path of the newest image in the
 // configured `terminal.screenshot_dir` (falls back to an XDG-aware
-// default). Shape mirrors the Python route so the existing frontend
-// consumer (`pasteRecentScreenshot` in dashboard-main.js) works unchanged:
-// `{path: <abs>, dir: <abs>}` on success, `{path: null, dir: <abs>,
-// reason: <message>}` when the directory is missing, unreadable, or empty.
+// default). Response shape:
+//   `{path: <abs>, dir: <abs>}` on success, or
+//   `{path: null, dir: <abs>, reason: <message>}` when the directory
+//   is missing, unreadable, or empty.
 // ---------------------------------------------------------------------
 
 const SCREENSHOT_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp"];
 
 /// Best-guess default location for OS screenshots. Honours
-/// `$XDG_PICTURES_DIR` (standard XDG user-dirs key); otherwise falls back
-/// to `~/Pictures/Screenshots` on Linux and `~/Desktop` on macOS. Mirrors
-/// `config.default_screenshot_dir` from the Python build.
+/// `$XDG_PICTURES_DIR` (standard XDG user-dirs key); otherwise falls
+/// back to `~/Pictures/Screenshots` on Linux and `~/Desktop` on macOS.
 fn default_screenshot_dir() -> std::path::PathBuf {
     if let Ok(xdg) = std::env::var("XDG_PICTURES_DIR") {
         if !xdg.is_empty() {

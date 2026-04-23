@@ -32,7 +32,8 @@ impl CheckboxStatus {
         }
     }
 
-    /// Mirror `status in ("done", "abandoned")` from the Python parser.
+    /// Both `done` and `abandoned` count as "this step is finished"
+    /// for the progress-bar math — the difference is only visual.
     pub fn is_done(self) -> bool {
         matches!(self, CheckboxStatus::Done | CheckboxStatus::Abandoned)
     }

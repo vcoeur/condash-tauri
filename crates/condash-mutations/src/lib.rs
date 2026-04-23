@@ -1,21 +1,23 @@
-//! README.md write-side mutations — Rust port of `src/condash/mutations.py`.
+//! README.md write-side mutations.
 //!
-//! Phase 3 slice 1 covered the six step-mutation helpers behind the
-//! `/toggle`, `/add-step`, `/remove-step`, `/edit-step`, `/set-priority`,
-//! and `/reorder-all` routes ([`steps`]).
+//! Two surfaces:
 //!
-//! Phase 3 slice 3 adds the file-level write helpers ([`files`]) behind
-//! `/note`, `/note/rename`, `/note/create`, `/note/mkdir`, `/note/upload`,
-//! and `/create-item`.
+//! - [`steps`] — the six step-mutation helpers behind `/toggle`,
+//!   `/add-step`, `/remove-step`, `/edit-step`, `/set-priority`, and
+//!   `/reorder-all`.
+//! - [`files`] — file-level write helpers behind `/note`,
+//!   `/note/rename`, `/note/create`, `/note/mkdir`, `/note/upload`,
+//!   and `/create-item`.
 //!
-//! Every helper reads the target file(s) as UTF-8 (or raw bytes for
-//! uploads), mutates in place, and writes back — byte-identical to the
-//! Python port, including the trailing-newline convention Python's
-//! `str.split("\n")` + `"\n".join(...)` round-trips.
+//! Every helper reads the target file as UTF-8 (or raw bytes for
+//! uploads), mutates in place, and writes back — preserving the
+//! trailing-newline convention that `str::split('\n').collect::<_>()
+//! .join('\n')` round-trips.
 //!
-//! The helpers are pure with respect to [`RenderCtx`][condash_state::RenderCtx]
-//! — path validation is the caller's job (see `src-tauri/src/paths.rs`)
-//! and these functions take already-resolved absolute paths.
+//! The helpers are pure with respect to
+//! [`RenderCtx`][condash_state::RenderCtx] — path validation is the
+//! caller's job (see `src-tauri/src/paths.rs`) and these functions
+//! take already-resolved absolute paths.
 
 pub mod files;
 pub mod steps;

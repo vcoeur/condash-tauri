@@ -1,7 +1,7 @@
 [package]
 name = "condash-parser"
 version = "0.1.0"
-description = "Parser for conception item READMEs and the knowledge tree. Rust port of condash/src/condash/parser.py."
+description = "Parser for conception item READMEs and the knowledge tree."
 authors = ["Alice Voland <alice@vcoeur.com>"]
 license = "MIT"
 edition = "2021"

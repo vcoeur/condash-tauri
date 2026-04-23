@@ -29,9 +29,10 @@ use condash_state::{collect_git_repos, RenderCtx};
 use minijinja::context;
 use minijinja::value::Value;
 
-/// HTML-escape a string — mirror of Python's `html.escape(str(text))`.
-/// minijinja's autoescape covers most cases, but direct string
-/// interpolation (e.g. into substitution placeholders) still needs it.
+/// HTML-escape a string for insertion into page body or attribute
+/// text. minijinja's autoescape covers most template contexts, but
+/// direct string interpolation (e.g. into substitution placeholders)
+/// still needs this.
 pub fn h(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -47,8 +48,8 @@ pub fn h(text: &str) -> String {
     out
 }
 
-/// Priority ordering — matches Python's `PRI_ORDER` dict lookup where
-/// missing priorities sort as 9 ("after everything").
+/// Priority ordering — maps the lowercase priority string to a sort
+/// key. Unknown / missing priorities sort as 9 ("after everything").
 fn pri_order(priority: &str) -> i32 {
     match priority {
         "now" => 0,
@@ -198,12 +199,12 @@ pub fn render_history(ctx: &RenderCtx, items: &[Item]) -> String {
     templating::render("history.html.j2", tctx)
 }
 
-/// Public entry point for `/`. Port of `render_page`.
+/// Public entry point for `/` — the full dashboard HTML.
 ///
 /// `items` is typically `cache.get_items(ctx)`; `knowledge` is
-/// `cache.get_knowledge(ctx)`. `version` is rendered verbatim into the
-/// `{{VERSION}}` placeholder — the Tauri host passes its own version
-/// string (or propagates the Python wheel version in dual-build mode).
+/// `cache.get_knowledge(ctx)`. `version` is rendered verbatim into
+/// the `{{VERSION}}` placeholder — the Tauri host passes its own
+/// version string from `env!("CARGO_PKG_VERSION")`.
 pub fn render_page(
     ctx: &RenderCtx,
     items: &[Item],

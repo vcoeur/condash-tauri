@@ -1,19 +1,13 @@
-//! Immutable runtime context — Rust port of `context.py::RenderCtx`.
-//!
-//! The Python module carries a dataclass with `base_dir`, `workspace`,
-//! `worktrees`, `repo_structure`, `open_with`, `pdf_viewer`, `repo_run`,
-//! and `template`. Phase 2 only needs the read-only subset: `base_dir`
-//! for the parser, `template` for the dashboard shell. The config-heavy
-//! fields (`open_with`, `pdf_viewer`, `repo_run`, `repo_structure`) are
-//! stubbed as empty collections and will grow as mutations + openers +
-//! runners land in Phases 3–4.
+//! Immutable runtime context — the read-only data every rendering and
+//! mutation helper needs. Built once per effective config and swapped
+//! into the shared app state whenever the config modal posts a new
+//! body.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// One section of the repository explorer tab: a label (e.g. `"Primary"`)
-/// with a list of `(repo_name, submodules)` pairs. Matches Python's
-/// `list[tuple[str, list[tuple[str, list[str]]]]]` verbatim in shape.
+/// with an ordered list of repo entries.
 #[derive(Debug, Clone, Default)]
 pub struct RepoSection {
     pub label: String,
@@ -27,22 +21,20 @@ pub struct RepoEntry {
     pub submodules: Vec<String>,
 }
 
-/// One "Open with …" slot config entry. Mirrors Python's
-/// `OpenWithSlot`: the user-visible `label` drives rendering, and the
-/// `commands` fallback chain is tried in order by the openers layer.
-/// Each command is a shell template with `{path}` substitution — the
-/// first that exits 0 wins.
+/// One "Open with …" slot config entry. The user-visible `label`
+/// drives rendering, and the `commands` fallback chain is tried in
+/// order by the openers layer. Each command is a shell template with
+/// `{path}` substitution — the first that exits 0 wins.
 #[derive(Debug, Clone, Default)]
 pub struct OpenWithSlot {
     pub label: String,
     pub commands: Vec<String>,
 }
 
-/// Embedded-terminal preferences. Carries the Python
-/// `TerminalConfig` fields verbatim, all optional so the YAML
-/// round-trip via the plain-text config modal preserves whatever
-/// the user wrote. The renderer applies built-in defaults when a
-/// field is `None`.
+/// Embedded-terminal preferences. All fields optional so the YAML
+/// round-trip via the plain-text config modal preserves whatever the
+/// user wrote; the renderer applies built-in defaults when a field is
+/// `None`.
 #[derive(Debug, Clone, Default)]
 pub struct TerminalPrefs {
     pub shell: Option<String>,

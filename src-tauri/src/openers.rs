@@ -1,12 +1,11 @@
 //! External-launcher helpers — one place to spawn IDE / file-manager /
 //! PDF-viewer / browser processes, detached from the condash lifetime.
 //!
-//! Port of `src/condash/openers.py` (Python build). Shape: take a
-//! shell-template fallback chain, substitute `{path}` (or `{url}`),
-//! spawn each in order until one exits 0 within a short window.
-//! Spawning is detached via `/bin/sh -c` with all standard streams
-//! redirected to `/dev/null`, so condash doesn't hold the child's
-//! output buffers and the process outlives the window.
+//! Take a shell-template fallback chain, substitute `{path}` (or
+//! `{url}`), and spawn each in order until one exits 0 within a short
+//! window. Spawning is detached via `/bin/sh -c` with all standard
+//! streams redirected to `/dev/null`, so condash doesn't hold the
+//! child's output buffers and the process outlives the window.
 
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};

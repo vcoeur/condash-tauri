@@ -1,9 +1,8 @@
-//! `minijinja` environment + custom filters — Rust port of
-//! `condash/templating.py`.
+//! `minijinja` environment + custom filters.
 //!
-//! The Jinja2 templates from `crates/condash-render/templates/` are embedded via
-//! `include_str!` so they ship inside the binary. Two custom filters
-//! match the Python env:
+//! The Jinja2 templates under `crates/condash-render/templates/` are
+//! embedded via `include_str!` so they ship inside the binary. Two
+//! custom filters are registered:
 //!
 //! - `embed`: JSON-encode then swap `'`→`\'` and `"`→`'` so the result
 //!   is safe to drop into an HTML attribute. Returns a safe string
@@ -45,15 +44,16 @@ pub fn embed_attr<T: serde::Serialize>(value: &T) -> String {
 
 fn embed_json_string(json: &str) -> String {
     let ascii = ensure_ascii(json);
-    // `json.dumps(x).replace("'", "\\'").replace('"', "'")` — the
-    // replacements are applied in order: escape single quotes first,
-    // then swap the outer double quotes for singles.
+    // Escape single quotes first, then swap the outer double quotes
+    // for singles — in that order, so the final string is safe to
+    // drop inside a single-quoted HTML attribute.
     ascii.replace('\'', "\\'").replace('"', "'")
 }
 
 /// Replace every non-ASCII codepoint with `\uXXXX` (or a UTF-16
-/// surrogate pair for > U+FFFF). Mirrors Python's
-/// `json.dumps(..., ensure_ascii=True)`.
+/// surrogate pair for > U+FFFF). The `embed` filter emits JSON
+/// literals inside HTML attributes; keeping them ASCII avoids having
+/// to reason about the enclosing page's encoding.
 fn ensure_ascii(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -112,9 +112,7 @@ fn markupsafe_formatter(out: &mut Output, state: &State, value: &Value) -> Resul
 }
 
 fn dirname_filter(path: String) -> String {
-    // Parent-path filter: everything before the last `/`. Mirrors the
-    // Python filter of the same name in templating.py. Both engines
-    // consume the same macro so both register this.
+    // Parent-path filter: everything before the last `/`.
     match path.rfind('/') {
         Some(i) => path[..i].to_string(),
         None => String::new(),
@@ -122,7 +120,7 @@ fn dirname_filter(path: String) -> String {
 }
 
 fn subtree_count_filter(group: Value) -> Result<i64, Error> {
-    // Python: len(group.get("files") or []) + sum(subtree_count(g) for g in group.get("groups") or [])
+    // Recursive file count: own files + sum of children's counts.
     let files_len = match group.get_attr("files") {
         Ok(files) if !files.is_undefined() && !files.is_none() => match files.len() {
             Some(n) => n as i64,
@@ -145,16 +143,15 @@ fn subtree_count_filter(group: Value) -> Result<i64, Error> {
 
 static ENV: OnceLock<Environment<'static>> = OnceLock::new();
 
-/// Return the process-wide minijinja environment, built on first access.
-///
-/// Mirrors Python's `@lru_cache(maxsize=1) env()` pattern.
+/// Return the process-wide minijinja environment, built on first
+/// access and cached for the rest of the process's lifetime.
 pub fn env() -> &'static Environment<'static> {
     ENV.get_or_init(build_env)
 }
 
 fn build_env() -> Environment<'static> {
     let mut env = Environment::new();
-    // Autoescape for .html/.j2 — matches Python's select_autoescape.
+    // Autoescape for .html/.j2 — JS/CSS/etc. templates stay raw.
     env.set_auto_escape_callback(|name| {
         if name.ends_with(".html") || name.ends_with(".j2") || name.ends_with(".htm") {
             AutoEscape::Html
@@ -163,26 +160,18 @@ fn build_env() -> Environment<'static> {
         }
     });
 
-    // Whitespace control — Python's env sets both trim_blocks and
-    // lstrip_blocks. minijinja 2.19+ exposes the same knobs. Without
-    // them the two engines diverge on every template that leads with
-    // `{% import %}` (or any tag on its own line), producing stray
-    // `\n` or `  ` prefixes Python's build doesn't emit.
+    // trim_blocks + lstrip_blocks: without them every template that
+    // leads with `{% import %}` (or any tag on its own line) emits a
+    // stray `\n` or `  ` prefix into the rendered HTML.
     env.set_trim_blocks(true);
     env.set_lstrip_blocks(true);
 
-    // Custom formatter: markupsafe-compatible HTML escape. minijinja's
-    // default escape encodes `/` as `&#x2f;`, which Python Jinja2 (via
-    // markupsafe) doesn't do — so the two engines diverge on every
-    // attribute that carries a path. This formatter matches Python's
-    // exact output: escape only `& < > " '`, render `"` as `&#34;` and
-    // `'` as `&#39;` (markupsafe's canonical forms).
+    // Custom formatter: markupsafe-style HTML escape. minijinja's
+    // default escape encodes `/` as `&#x2f;`, which breaks every
+    // attribute carrying a path (e.g. `href="/foo/bar"`). The
+    // formatter below escapes only `& < > " '`, rendering `"` as
+    // `&#34;` and `'` as `&#39;`.
     env.set_formatter(markupsafe_formatter);
-
-    // trim_blocks / lstrip_blocks — match Python's env configuration.
-    // minijinja's `keep_trailing_newline` is the inverse of Jinja's
-    // default; Python Jinja trims the newline after a block. minijinja
-    // default also trims, so no flip needed here.
 
     env.add_template("_macros.html.j2", MACROS_TEMPLATE)
         .unwrap();

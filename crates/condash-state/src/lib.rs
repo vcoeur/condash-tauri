@@ -1,15 +1,15 @@
 //! Runtime context + workspace cache for condash.
 //!
-//! Rust port of `src/condash/context.py` + `src/condash/cache.py`.
-//! Split into two modules that mirror their Python counterparts:
-//!
-//! - [`ctx`] — immutable runtime context built from a config. Threaded
-//!   through every helper that needs config (base_dir, workspace, repo
-//!   structure, etc). Module-globals in Python live here instead.
+//! - [`ctx`] — immutable runtime context built from a config.
+//!   Threaded through every helper that needs config (base_dir,
+//!   workspace, repo structure, …).
 //! - [`cache`] — memoize the hot read paths (`collect_items`,
 //!   `collect_knowledge`) behind an `RwLock` so reads from route
-//!   handlers are safe alongside invalidations driven by the filesystem
-//!   watcher.
+//!   handlers are safe alongside invalidations driven by the
+//!   filesystem watcher.
+//! - [`git`] — per-repo HEAD / branch / dirty-count queries, shelled
+//!   out to `git` rather than via `libgit2`.
+//! - [`search`] — the history-tab search backend.
 
 pub mod cache;
 pub mod ctx;

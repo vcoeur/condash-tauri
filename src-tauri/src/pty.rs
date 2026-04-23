@@ -1,5 +1,4 @@
-//! PTY session lifecycle for the embedded terminal — Rust port of
-//! `src/condash/pty.py`.
+//! PTY session lifecycle for the embedded terminal.
 //!
 //! A PTY's lifetime is decoupled from any single WebSocket: a tab refresh
 //! should detach the viewer without killing the shell. Each session lives
@@ -100,7 +99,7 @@ impl PtySession {
         w.flush()
     }
 
-    /// Resize the PTY. Clamps to `>=2` rows/cols (matches Python).
+    /// Resize the PTY. Clamps to `>=2` rows/cols: many TUIs crash on 0/1.
     pub fn resize(&self, cols: u16, rows: u16) {
         let cols = cols.max(2);
         let rows = rows.max(2);

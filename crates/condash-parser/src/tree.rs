@@ -1,8 +1,7 @@
 //! Item files-tree — `files` field on a parsed item README.
 //!
-//! Rust port of `_list_item_tree` + `_flatten_tree_paths` in
-//! `src/condash/parser.py`. Filesystem-walking, unlike the rest of the
-//! crate, so tests exercise it against `tempfile`-built fixtures.
+//! Filesystem-walking, unlike the rest of the crate, so tests
+//! exercise this module against `tempfile`-built fixtures.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::note_kind::note_kind;
 
-/// One leaf file inside an item's tree. Mirrors the Python dict shape:
-/// `{name, path, kind}` where `path` is relative to `ctx.base_dir`.
+/// One leaf file inside an item's tree. `path` is relative to
+/// `ctx.base_dir`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileEntry {
     pub name: String,
@@ -20,7 +19,7 @@ pub struct FileEntry {
     pub kind: String,
 }
 
-/// One subdirectory group. Mirrors `{rel_dir, label, files, groups}`.
+/// One subdirectory group — `{rel_dir, label, files, groups}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupEntry {
     pub rel_dir: String,

@@ -1,10 +1,8 @@
-//! Tauri host entry point. Phase 2 slice 5 wires axum in under the
-//! webview: we start an HTTP server on a free localhost port, warm the
-//! workspace cache, and navigate the main window to `http://127.0.0.1:<port>/`.
-//!
-//! The dashboard JS and templates are unchanged from the Python build —
-//! they all speak plain HTTP fetches, so pointing the webview at our
-//! axum server is the only integration delta.
+//! Tauri host entry point. Wires axum in under the webview: we start
+//! an HTTP server on a free localhost port, warm the workspace cache,
+//! and navigate the main window to `http://127.0.0.1:<port>/`. The
+//! dashboard JS and templates speak plain HTTP fetches, so pointing
+//! the webview at the local axum server is the only integration delta.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

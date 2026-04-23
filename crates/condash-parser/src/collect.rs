@@ -1,7 +1,5 @@
-//! Disk-reading wrappers around `parse_readme_content` + `list_item_tree`.
-//!
-//! Rust port of `parse_readme` (the disk-reading entry point) and
-//! `collect_items` in `src/condash/parser.py`.
+//! Disk-reading wrappers around `parse_readme_content` and
+//! `list_item_tree` — glue the pure parse step to the filesystem.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,9 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::readme::{parse_readme_content, ItemReadme};
 use crate::tree::{list_item_tree, ItemTree};
 
-/// A parsed README combined with its files-tree. Mirrors the Python
-/// `parse_readme` return value — the same dict, just with a typed
-/// `files` field instead of an untyped one.
+/// A parsed README combined with its files-tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
     #[serde(flatten)]
@@ -21,9 +17,9 @@ pub struct Item {
     pub files: ItemTree,
 }
 
-/// Read one README off disk and assemble the `Item`. Returns `None` on
-/// read / UTF-8 failures — matching Python which logs a warning and
-/// skips the item in that case.
+/// Read one README off disk and assemble the `Item`. Returns `None`
+/// on read / UTF-8 failures — the collector silently skips unreadable
+/// items so one malformed README doesn't fail the whole `/` render.
 pub fn parse_readme(
     base_dir: &Path,
     readme_path: &Path,
@@ -45,9 +41,8 @@ pub fn parse_readme(
 }
 
 /// Find and parse every item README under `<base_dir>/projects/`.
-///
-/// Mirrors Python's `collect_items`: walks the `*/*/README.md` glob in
-/// sorted order, skips items that fail to parse, returns the rest.
+/// Walks the `*/*/README.md` glob in sorted order so the output is
+/// deterministic; items that fail to parse are skipped silently.
 pub fn collect_items(base_dir: &Path) -> Vec<Item> {
     let projects = base_dir.join("projects");
     if !projects.is_dir() {
@@ -63,8 +58,8 @@ pub fn collect_items(base_dir: &Path) -> Vec<Item> {
         .collect()
 }
 
-/// Walk `projects/*/*/README.md` — exactly two levels of subdirectory,
-/// matching the Python `base.glob("*/*/README.md")` shape.
+/// Walk `projects/*/*/README.md` — exactly two levels of subdirectory
+/// (month then slug), matching the on-disk layout.
 fn collect_readmes(projects: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let Ok(months) = fs::read_dir(projects) else {

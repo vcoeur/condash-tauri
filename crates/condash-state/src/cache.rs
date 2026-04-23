@@ -1,4 +1,4 @@
-//! Filesystem-walk memoization — Rust port of `cache.py::WorkspaceCache`.
+//! Filesystem-walk memoization.
 //!
 //! Without a cache every request re-walks the conception tree: `/`,
 //! `/check-updates`, `/fragment`, and `/search-history` all call
@@ -7,14 +7,12 @@
 //!
 //! [`WorkspaceCache`] memoizes the two hot paths behind an `RwLock` so
 //! reads from Tauri route handlers are cheap and stay safe alongside
-//! invalidations driven by the filesystem watcher. The watcher coarsely
-//! routes tab events (`projects` / `knowledge`) to [`invalidate_items`]
-//! and [`invalidate_knowledge`] — matching Python's coarse-by-design
-//! invalidation scheme.
-//!
-//! The wikilink cache from Python lives separately in Phase 3 with the
-//! render layer; putting it here would force a dependency on a crate
-//! that doesn't exist yet.
+//! invalidations driven by the filesystem watcher. The watcher
+//! coarsely routes tab events (`projects` / `knowledge`) to
+//! [`invalidate_items`] and [`invalidate_knowledge`] — invalidating a
+//! whole tab on any event inside it keeps the invalidation logic tiny
+//! and a single cold rebuild is fast enough (<50 ms on a ~200-item
+//! tree) that sub-key invalidation isn't worth the book-keeping.
 //!
 //! [`invalidate_items`]: WorkspaceCache::invalidate_items
 //! [`invalidate_knowledge`]: WorkspaceCache::invalidate_knowledge

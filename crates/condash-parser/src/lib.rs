@@ -1,16 +1,17 @@
-//! Rust port of condash's markdown parser (`src/condash/parser.py`).
+//! Parser for conception item READMEs and the knowledge tree.
 //!
-//! Layered by side-effect:
-//!   - Pure string-level primitives: `regexes`, `sections`, `deliverables`,
-//!     `readme` (`parse_readme_content`), `note_kind`.
-//!   - Filesystem-walking: `tree` (`list_item_tree`), `knowledge`
-//!     (`collect_knowledge` + tree walker), `collect` (`parse_readme` +
-//!     `collect_items`).
+//! Layered by side-effect so unit tests can exercise the pure core
+//! without touching the disk:
 //!
-//! Fingerprint helpers (`_compute_fingerprint`, `compute_*_node_fingerprints`)
-//! land alongside the `/check-updates` route port, not here — they depend
-//! on matching Python's `repr()` output for cross-build stability, which
-//! is easier to settle once the cache + route layer is in place.
+//!   - Pure string-level primitives: [`regexes`], [`sections`],
+//!     [`deliverables`], [`readme`] (`parse_readme_content`),
+//!     [`note_kind`].
+//!   - Filesystem-walking: [`tree`] (`list_item_tree`), [`knowledge`]
+//!     (`collect_knowledge` + tree walker), [`collect`]
+//!     (`parse_readme` + `collect_items`).
+//!   - [`fingerprint`] — cross-build-stable hashing for
+//!     `/check-updates`; see the module docs for the `repr()`-style
+//!     normalisation it performs.
 
 pub mod collect;
 pub mod deliverables;
@@ -37,9 +38,9 @@ pub use readme::{parse_readme_content, ItemReadme};
 pub use sections::{parse_sections, CheckboxStatus, Section, SectionItem};
 pub use tree::{flatten_tree_paths, list_item_tree, FileEntry, GroupEntry, ItemTree};
 
-/// Ordered priority / status enum. The order of variants mirrors Python's
-/// `PRIORITIES` tuple — call sites that sort by `as usize` get the same
-/// total order the Python dashboard uses.
+/// Ordered priority / status enum. Variant order is load-bearing:
+/// sort-by-`as usize` yields the dashboard's canonical column order
+/// (now → soon → later → backlog → review → done).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -63,9 +64,9 @@ impl Priority {
         Priority::Done,
     ];
 
-    /// Match Python's lowercase string parsing; returns `None` for unknown
-    /// values (parse_readme coerces those to `Backlog` and records the raw
-    /// input in `invalid_status`).
+    /// Parse a lowercase string; returns `None` for unknown values.
+    /// `parse_readme_content` coerces unknowns to `Backlog` and
+    /// records the raw input in the item's `invalid_status` field.
     pub fn from_lowercase(value: &str) -> Option<Priority> {
         match value {
             "now" => Some(Priority::Now),
