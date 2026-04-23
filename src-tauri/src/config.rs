@@ -1,13 +1,20 @@
-//! Config loader — reads `<conception>/configuration.yml` into a
-//! [`RenderCtx`].
+//! Config loader — reads `<conception>/configuration.yml` and
+//! overlays the per-machine `settings.yaml` into a [`RenderCtx`].
 //!
-//! Flat YAML: the top level carries both the workspace layout
-//! (`workspace_path`, `worktrees_path`, `repositories`, `open_with`)
-//! and the user preferences (`pdf_viewer`, `terminal`). Replaces the
-//! old split between `config/repositories.yml` and
-//! `config/preferences.yml` — those split files are still written on
-//! disk for the retired Python build (`condash-python`) but condash no
-//! longer reads them.
+//! Two layers:
+//!
+//! - **Tree-level** `configuration.yml` owns the workspace contract
+//!   (`workspace_path`, `worktrees_path`, `repositories.*`, including
+//!   each repo's `run:` + `force_stop:`). Versioned in git.
+//! - **Per-user** `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`
+//!   owns machine-local preferences (`terminal.*`, `pdf_viewer`,
+//!   `open_with.*`). Not versioned. On overlap, settings.yaml wins —
+//!   see the design note at
+//!   `projects/2026-04/2026-04-23-condash-rust-audit/notes/09-settings-split-schema.md`.
+//!
+//! Tree-level `configuration.yml` keeps reading `terminal` /
+//! `pdf_viewer` / `open_with` so old trees continue to work; the docs
+//! recommend moving those keys to `settings.yaml`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -16,6 +23,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use condash_state::{OpenWithSlot, RenderCtx, RepoEntry, RepoSection, TerminalPrefs};
 use serde::Deserialize;
+
+use crate::user_config::{self, UserConfig};
 
 #[derive(Debug, Deserialize, Default)]
 struct ConfigurationYaml {
@@ -170,11 +179,27 @@ pub fn write_configuration(conception_path: &Path, body: &str) -> Result<PathBuf
 
 /// Build a [`RenderCtx`] for the conception tree at `conception_path`.
 ///
-/// Reads `<conception>/configuration.yml` when present; falls back to
-/// a minimal ctx when absent (no workspace, no git strip, no
-/// preferences). `template` is the dashboard shell HTML — loaded once
-/// by the caller so render helpers don't re-read the asset per request.
+/// Reads `<conception>/configuration.yml` when present, then overlays
+/// `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` via
+/// [`user_config::load`]. Falls back to a minimal ctx when both
+/// sources are absent. `template` is the dashboard shell HTML —
+/// loaded once by the caller so render helpers don't re-read the
+/// asset per request.
 pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> {
+    let user = user_config::load().unwrap_or_else(|e| {
+        eprintln!("condash: ignoring invalid settings.yaml: {e}");
+        None
+    });
+    build_ctx_with_user(conception_path, template, user.as_ref())
+}
+
+/// Testable form of [`build_ctx`] — caller provides the parsed
+/// [`UserConfig`] (or `None` to skip the settings.yaml overlay).
+pub fn build_ctx_with_user(
+    conception_path: &Path,
+    template: String,
+    user: Option<&UserConfig>,
+) -> Result<RenderCtx> {
     let yaml_path = configuration_path(conception_path);
     let mut ctx = RenderCtx {
         base_dir: conception_path.to_path_buf(),
@@ -182,15 +207,14 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
         ..Default::default()
     };
 
-    if !yaml_path.is_file() {
-        // No configuration.yml yet — return a minimal ctx; the dashboard
-        // renders without the Code tab populated.
-        return Ok(ctx);
-    }
-    let raw = fs::read_to_string(&yaml_path)
-        .with_context(|| format!("reading {}", yaml_path.display()))?;
-    let parsed: ConfigurationYaml = serde_yaml_ng::from_str(&raw)
-        .with_context(|| format!("parsing YAML at {}", yaml_path.display()))?;
+    let parsed: ConfigurationYaml = if yaml_path.is_file() {
+        let raw = fs::read_to_string(&yaml_path)
+            .with_context(|| format!("reading {}", yaml_path.display()))?;
+        serde_yaml_ng::from_str(&raw)
+            .with_context(|| format!("parsing YAML at {}", yaml_path.display()))?
+    } else {
+        ConfigurationYaml::default()
+    };
 
     ctx.workspace = parsed.workspace_path.as_deref().map(expand_tilde);
     ctx.worktrees = parsed.worktrees_path.as_deref().map(expand_tilde);
@@ -228,28 +252,103 @@ pub fn build_ctx(conception_path: &Path, template: String) -> Result<RenderCtx> 
     ctx.repo_run_templates = repo_run_templates;
     ctx.repo_force_stop_templates = repo_force_stop_templates;
 
+    // Start from the tree-level preferences, then overlay settings.yaml
+    // on a per-field basis so a partial user override only replaces the
+    // keys it actually sets.
     if let Some(open_with) = parsed.open_with {
         ctx.open_with = open_with
             .into_iter()
-            .map(|(key, slot)| {
-                let label = slot.label.unwrap_or_else(|| key.clone());
-                (
-                    key,
-                    OpenWithSlot {
-                        label,
-                        commands: slot.commands,
-                    },
-                )
-            })
+            .map(|(key, slot)| (key.clone(), open_with_slot_from(key, slot)))
             .collect();
     }
-
     ctx.pdf_viewer = parsed.pdf_viewer;
     if let Some(term) = parsed.terminal {
         ctx.terminal = term.into_prefs();
     }
 
+    if let Some(user) = user {
+        overlay_user_config(&mut ctx, user);
+    }
+
     Ok(ctx)
+}
+
+fn open_with_slot_from(key: String, slot: OpenWithSlotYaml) -> OpenWithSlot {
+    OpenWithSlot {
+        label: slot.label.unwrap_or(key),
+        commands: slot.commands,
+    }
+}
+
+/// Merge `user`'s per-machine overrides into `ctx`. Rules:
+///
+/// - `user.terminal`: each `Some(...)` field replaces the tree's
+///   value; `None` falls through.
+/// - `user.pdf_viewer`: non-empty list replaces the tree's; empty or
+///   absent falls through.
+/// - `user.open_with`: merged per slot. A user slot with commands
+///   replaces the tree's commands; a user slot that only sets `label`
+///   replaces only the label. A tree-only slot survives untouched.
+fn overlay_user_config(ctx: &mut RenderCtx, user: &UserConfig) {
+    if let Some(term) = user.terminal.as_ref() {
+        if let Some(v) = term.shell.clone().filter(|s| !s.is_empty()) {
+            ctx.terminal.shell = Some(v);
+        }
+        if let Some(v) = term.shortcut.clone().filter(|s| !s.is_empty()) {
+            ctx.terminal.shortcut = Some(v);
+        }
+        if let Some(v) = term.screenshot_dir.clone().filter(|s| !s.is_empty()) {
+            ctx.terminal.screenshot_dir = Some(v);
+        }
+        if let Some(v) = term
+            .screenshot_paste_shortcut
+            .clone()
+            .filter(|s| !s.is_empty())
+        {
+            ctx.terminal.screenshot_paste_shortcut = Some(v);
+        }
+        if let Some(v) = term.launcher_command.clone().filter(|s| !s.is_empty()) {
+            ctx.terminal.launcher_command = Some(v);
+        }
+        if let Some(v) = term
+            .move_tab_left_shortcut
+            .clone()
+            .filter(|s| !s.is_empty())
+        {
+            ctx.terminal.move_tab_left_shortcut = Some(v);
+        }
+        if let Some(v) = term
+            .move_tab_right_shortcut
+            .clone()
+            .filter(|s| !s.is_empty())
+        {
+            ctx.terminal.move_tab_right_shortcut = Some(v);
+        }
+    }
+
+    if let Some(list) = user.pdf_viewer.as_ref() {
+        if !list.is_empty() {
+            ctx.pdf_viewer = list.clone();
+        }
+    }
+
+    if let Some(slots) = user.open_with.as_ref() {
+        for (key, user_slot) in slots {
+            let entry = ctx
+                .open_with
+                .entry(key.clone())
+                .or_insert_with(|| OpenWithSlot {
+                    label: key.clone(),
+                    commands: Vec::new(),
+                });
+            if let Some(label) = user_slot.label.clone().filter(|s| !s.is_empty()) {
+                entry.label = label;
+            }
+            if !user_slot.commands.is_empty() {
+                entry.commands = user_slot.commands.clone();
+            }
+        }
+    }
 }
 
 fn entries_from(
