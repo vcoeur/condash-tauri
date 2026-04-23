@@ -7,16 +7,24 @@ description: The two YAML files condash reads — one at the conception tree roo
 
 ## At a glance
 
-condash reads **two** YAML files. They live in different places and have different scopes:
+condash reads **two** YAML files. They split responsibilities by scope:
 
 | File | Location | Scope | Owns |
 |------|----------|-------|------|
-| `configuration.yml` | `<conception_path>/configuration.yml` | Per-tree, versioned in git | `workspace_path`, `worktrees_path`, `repositories`, `open_with`, `pdf_viewer`, `terminal` |
-| `settings.yaml` | `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` | Per-user, per-machine | `conception_path` |
+| `configuration.yml` | `<conception_path>/configuration.yml` | Per-tree, versioned in git | `workspace_path`, `worktrees_path`, `repositories` (incl. `run:` / `force_stop:`) |
+| `settings.yaml` | `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` | Per-user, per-machine | `conception_path`, `terminal`, `pdf_viewer`, `open_with` |
 
-The first file is inside the conception tree you're rendering — commit it and every developer on the tree gets the same workspace layout, `open_with` commands, PDF viewer chain, and terminal shortcuts. The second file is on the machine condash runs on, and stores only the path to the tree: it tells condash *which* tree to render. Everything else is in the tree.
+The tree-level file is versioned: commit it and every teammate who pulls picks up the same workspace layout and repo wiring. The per-user file lives on the machine condash runs on — it tells condash which tree to render, and carries the preferences that naturally differ per machine (which shell, which PDF viewer, which IDE command to shell out to).
 
-That split keeps the tree portable (clone it on a new laptop and it already knows which repos to scan) while letting the local machine point at whichever tree lives where on disk.
+### Precedence on overlap
+
+For backwards compatibility, `configuration.yml` still accepts `terminal`, `pdf_viewer`, and `open_with` keys. When the same key appears in both files, **`settings.yaml` wins**, merged field by field:
+
+- `terminal.<field>` — each field set in `settings.yaml` replaces the tree's value; missing fields fall through.
+- `pdf_viewer` — a non-empty list in `settings.yaml` replaces the tree's; empty / missing falls through.
+- `open_with.<slot>` — merged per slot. A user `commands` list replaces the tree's commands; a user `label` replaces the tree's label. A slot only set in the tree survives.
+
+Concretely: move any machine-specific preference from `configuration.yml` into `settings.yaml` on each machine; leave tree-wide preferences in `configuration.yml` and every teammate gets them automatically.
 
 ## `configuration.yml` (per-tree, versioned)
 
@@ -159,15 +167,38 @@ Embedded-terminal preferences. All keys are optional; an empty string means "fal
 
 ## `settings.yaml` (per-user, per-machine)
 
-Lives at `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`. Not versioned — it holds the one thing that only makes sense locally: where the conception tree lives on this machine.
+Lives at `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml`. Not versioned. Every key is optional — a fresh install starts with the file empty (or absent) and fills it on first launch.
 
 ```yaml
 conception_path: /home/you/src/vcoeur/conception
+
+terminal:
+  shell: /bin/zsh
+  shortcut: Ctrl+T
+  launcher_command: claude
+  screenshot_dir: /home/you/Pictures/Screenshots
+
+pdf_viewer:
+  - xdg-open {path}
+  - evince {path}
+
+open_with:
+  main_ide:
+    label: Open in main IDE
+    commands:
+      - idea {path}
+      - idea.sh {path}
+  secondary_ide:
+    commands:
+      - code {path}
 ```
 
 | Key | Meaning |
 |-----|---------|
 | `conception_path` | Absolute path to the conception tree condash should render. |
+| `terminal.*` | Same keys as the tree-level `terminal` block above; any field set here overrides the tree value. Missing fields fall through. |
+| `pdf_viewer` | Fallback chain for opening PDFs. Non-empty list here replaces the tree's chain; empty or missing falls through. |
+| `open_with.<slot>.label`, `.commands` | Merged per slot. The user's `commands` replaces the tree's; the user's `label` replaces the tree's. Tree-only slots survive untouched. |
 
 Resolution order for the conception path, checked in sequence:
 
@@ -176,11 +207,13 @@ Resolution order for the conception path, checked in sequence:
 3. A first-run GUI prompt (Tauri build only). The prompt writes the chosen path back into this file so the next launch picks it up automatically.
 4. Hard error — condash refuses to start.
 
-The file is created on demand: first-run writes it; the gear modal's **General** tab writes it; you can also create it by hand.
+The file is created on demand: the first-run folder picker writes it; you can also create it by hand.
 
 ## Editing from the dashboard
 
-Click the gear icon in the header. A modal opens with a plain-text YAML editor showing the contents of `configuration.yml`. Save is atomic (temp file → rename), so a crash during save never corrupts the file. Most changes take effect immediately; a few (see below) need a restart and the save dialog tells you which.
+Click the gear icon in the header. A modal opens with a plain-text YAML editor showing the contents of `configuration.yml` — the tree-level file. Save is atomic (temp file → rename), so a crash during save never corrupts the file. Most changes take effect immediately; a few (see below) need a restart and the save dialog tells you which.
+
+Editing `settings.yaml` is hand-edit only today — no UI surface. Use your editor of choice; condash re-reads it on the next launch.
 
 Saves preserve your comments because the modal writes the raw text you edited — it does not round-trip the file through a parser.
 
