@@ -504,7 +504,7 @@ async fn post_note_rename(
     let Some(full) = crate::paths::validate_note_path(&state.ctx.base_dir, &p.path) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
-    if !crate::paths::is_item_notes_file(&p.path) {
+    if !crate::paths::VALID_ITEM_NOTES_FILE_RE.is_match(&p.path) {
         return error_json(
             StatusCode::BAD_REQUEST,
             "only files under <item>/notes/ can be renamed",

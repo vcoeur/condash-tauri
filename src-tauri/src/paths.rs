@@ -44,7 +44,7 @@ static VALID_ITEM_FILE_RE: Lazy<Regex> = Lazy::new(|| {
 
 /// Restricted to files directly under `<item>/notes/` — used by rename
 /// (only notes are user-renamable). `_VALID_ITEM_NOTES_FILE_RE`.
-static VALID_ITEM_NOTES_FILE_RE: Lazy<Regex> = Lazy::new(|| {
+pub(crate) static VALID_ITEM_NOTES_FILE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(r"{VALID_ITEM_PREFIX}notes/[\w./-]+$"))
         .expect("VALID_ITEM_NOTES_FILE_RE compiles")
 });
@@ -130,13 +130,6 @@ pub fn validate_note_path(base_dir: &Path, rel_path: &str) -> Option<PathBuf> {
         ],
         true,
     )
-}
-
-/// `true` iff `rel_path` looks like `<item>/notes/<filename>`. Used by
-/// `rename_note` to refuse renaming anything that isn't a user note
-/// (item READMEs, loose files alongside the README, …).
-pub fn is_item_notes_file(rel_path: &str) -> bool {
-    VALID_ITEM_NOTES_FILE_RE.is_match(rel_path)
 }
 
 /// Validate a project-item folder path (`projects/YYYY-MM/<slug>/`) under
@@ -255,16 +248,12 @@ mod tests {
     }
 
     #[test]
-    fn is_item_notes_file_gates_rename_source() {
-        assert!(is_item_notes_file(
-            "projects/2026-04/2026-04-22-demo/notes/first.md"
-        ));
-        assert!(!is_item_notes_file(
-            "projects/2026-04/2026-04-22-demo/README.md"
-        ));
-        assert!(!is_item_notes_file(
-            "projects/2026-04/2026-04-22-demo/loose.md"
-        ));
+    fn valid_item_notes_file_re_gates_rename_source() {
+        assert!(
+            VALID_ITEM_NOTES_FILE_RE.is_match("projects/2026-04/2026-04-22-demo/notes/first.md")
+        );
+        assert!(!VALID_ITEM_NOTES_FILE_RE.is_match("projects/2026-04/2026-04-22-demo/README.md"));
+        assert!(!VALID_ITEM_NOTES_FILE_RE.is_match("projects/2026-04/2026-04-22-demo/loose.md"));
     }
 
     #[test]
