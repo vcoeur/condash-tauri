@@ -17,14 +17,5 @@ md-5 = "0.10"
 serde_json = "1"
 tempfile = "3"
 
-# The diff harness needs JSON at runtime too; it's fine to carry serde_json
-# in the default feature set since this crate is only consumed locally.
-[dependencies.serde_json]
-version = "1"
-
-[[bin]]
-name = "parser-diff"
-path = "src/bin/parser_diff.rs"
-
 [lints]
 workspace = true
