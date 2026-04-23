@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "condash"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "anyhow",
  "axum",
@@ -654,7 +654,6 @@ dependencies = [
  "once_cell",
  "regex",
  "serde",
- "serde_json",
  "tempfile",
 ]
 
@@ -695,7 +694,6 @@ dependencies = [
  "once_cell",
  "regex",
  "serde",
- "serde_json",
  "tempfile",
 ]
 

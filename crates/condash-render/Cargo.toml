@@ -21,9 +21,5 @@ once_cell = "1"
 [dev-dependencies]
 tempfile = "3"
 
-[[bin]]
-name = "render-diff"
-path = "src/bin/render_diff.rs"
-
 [lints]
 workspace = true
