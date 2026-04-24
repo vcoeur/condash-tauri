@@ -40,6 +40,12 @@ import {
 import {
     _NOTES_OPEN_KEY, restoreNotesTreeState, initNotesTreeStateSideEffects,
 } from './sections/notes-tree-state.js';
+import {
+    _cm, _mountCm, _destroyCm, _cmRetheme,
+} from './sections/cm6-mount.js';
+import {
+    initCm6ThemeSyncSideEffects,
+} from './sections/cm6-theme-sync.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -1148,7 +1154,7 @@ var _noteNavStack = [];
    are hidden/shown by CSS. `_noteModal` tracks the state shared across
    panes so mode switches preserve user edits and mtime for the save
    contract. */
-var _noteModal = {
+export var _noteModal = {
     path: null,
     editable: false,     // false when kind is pdf/image/binary — edit modes disabled
     kind: null,          // from /note-raw
@@ -1169,7 +1175,7 @@ var _noteModal = {
 /* Flip the dirty flag and refresh the Save button. Safe to call on every
    keystroke — the button toggle is the only DOM work. Also drains any
    reload requests that were parked because the modal was dirty. */
-function _setDirty(value) {
+export function _setDirty(value) {
     var next = !!value;
     if (_noteModal.dirty === next) return;
     _noteModal.dirty = next;
@@ -1609,69 +1615,6 @@ function openDeliverable(path) {
     }).catch(function() {});
 }
 
-/* --- CodeMirror 6 mount / unmount ---
-   CM6 is loaded lazily by the <script type="module"> block at the end
-   of the document. Once ready, it sets window.__cm6 = {EditorView,
-   EditorState, basicSetup, markdown, keymap, Compartment, themeC,
-   buildTheme} and calls window.__cm6OnReady(). Before that, the "Edit"
-   toggle stays disabled. */
-var _cm = { view: null, themeC: null };
-
-function _mountCm() {
-    if (!window.__cm6) return;
-    var host = document.getElementById('note-pane-cm');
-    if (!host) return;
-    if (_cm.view) return;
-    // Clear any placeholder text.
-    host.innerHTML = '';
-    var cm6 = window.__cm6;
-    _cm.themeC = new cm6.Compartment();
-    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    var exts = [
-        cm6.basicSetup,
-        cm6.markdown(),
-        cm6.EditorView.lineWrapping,
-        cm6.keymap.of([
-            {key: 'Mod-s', preventDefault: true, run: function() { saveEdit(); return true; }},
-        ]),
-        _cm.themeC.of(cm6.buildTheme(isDark)),
-        cm6.EditorView.updateListener.of(function(u) {
-            // Reflect edits into the canonical buffer live so a mode
-            // switch doesn't need a separate capture path.
-            if (u.docChanged) {
-                _noteModal.text = u.state.doc.toString();
-                _setDirty(true);
-            }
-        }),
-    ];
-    _cm.view = new cm6.EditorView({
-        doc: _noteModal.text || '',
-        parent: host,
-        extensions: exts,
-    });
-    // Caret at offset 0, scroll to top, focus.
-    _cm.view.dispatch({selection: {anchor: 0}});
-    _cm.view.scrollDOM.scrollTop = 0;
-    _cm.view.focus();
-}
-
-function _destroyCm() {
-    if (_cm.view) { try { _cm.view.destroy(); } catch (e) {} }
-    _cm.view = null;
-    _cm.themeC = null;
-    var host = document.getElementById('note-pane-cm');
-    if (host) host.innerHTML = '';
-}
-
-/* Called by the theme toggle to repaint CM6 without remounting. */
-function _cmRetheme() {
-    if (!_cm.view || !_cm.themeC || !window.__cm6) return;
-    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    _cm.view.dispatch({
-        effects: _cm.themeC.reconfigure(window.__cm6.buildTheme(isDark)),
-    });
-}
-
 /* --- Note modal mode management ---
    Three sibling panes (view, cm, plain) live inside #note-modal-body;
    the modal's data-mode attribute drives CSS visibility. setNoteMode
@@ -1781,7 +1724,7 @@ function setNoteMode(next) {
     }
 }
 
-async function saveEdit() {
+export async function saveEdit() {
     var inner = document.getElementById('note-modal-inner');
     var mode = inner.getAttribute('data-mode');
     if (mode !== 'cm' && mode !== 'plain') return;
@@ -3216,6 +3159,7 @@ initThemeSideEffects();
 initAboutModalSideEffects();
 initNewItemModalSideEffects();
 initNotesTreeStateSideEffects();
+initCm6ThemeSyncSideEffects();
 
 // Phase 6: event-driven staleness. /events streams tab-level hints;
 // checkUpdates() runs on connect + every hint to reconcile the real
@@ -3238,15 +3182,6 @@ _startEventStream();
         }
     } catch (e) {}
 })();
-
-/* --- CodeMirror 6 theme re-sync ---
-   When the user flips dark/light, the theme-loader script in <head>
-   updates documentElement.data-theme synchronously. We watch that
-   attribute and retheme the live EditorView (no remount) so the
-   markdown editor picks up the new palette in the same frame. */
-new MutationObserver(function() {
-    if (typeof _cmRetheme === 'function') _cmRetheme();
-}).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
 
 /* --- Inline dev-server runner viewers ---
    Each `.runner-term-mount` element rendered by the repo strip gets its
