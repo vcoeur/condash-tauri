@@ -46,6 +46,11 @@ import {
 import {
     initCm6ThemeSyncSideEffects,
 } from './sections/cm6-theme-sync.js';
+import {
+    reloadState,
+    _noteModalDirty, _runnerActiveIn,
+    _defaultReloadSkipIf, _flushPendingReloads,
+} from './sections/reload-guards.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -501,7 +506,7 @@ document.addEventListener('click', function(e) {
    up looking at a half-swapped DOM. */
 var _reloadInPlaceInFlight = false;
 var _reloadInPlacePending = false;
-async function _reloadInPlace() {
+export async function _reloadInPlace() {
     // Single-flight with trailing coalesce. Two _reloadInPlace calls
     // racing (e.g. a rapid burst of SSE events) used to swap #dash-main
     // twice — and if the responses completed out-of-order (request 1
@@ -532,7 +537,7 @@ async function _reloadInPlace() {
 
         var result = focusSafeSwap(current, fresh);
         if (result.skipped) {
-            _pendingReloadInPlace = true;
+            reloadState.pendingInPlace = true;
             return;
         }
         // A successful global swap is authoritative. Clear any residual
@@ -2638,8 +2643,8 @@ export function refreshAll() {
     _nodeBaseline = null;
     _dirtyNodes = new Set();
     _clearShadowCache();
-    _pendingReloadNodes.clear();
-    _pendingReloadInPlace = false;
+    reloadState.pendingNodes.clear();
+    reloadState.pendingInPlace = false;
     _lastFingerprint = null;
     _lastGitFingerprint = null;
     // Force-invalidate the server-side items/knowledge caches before
@@ -2683,67 +2688,6 @@ function _restoreDetailsOpenState(root, map) {
     root.querySelectorAll('details[data-node-id]').forEach(function(d) {
         var id = d.getAttribute('data-node-id');
         if (id in map) d.open = map[id];
-    });
-}
-
-/* --- Reload guards (Phase 2) ---
-   The two production landmines before the overhaul: a fragment swap
-   while a runner's WebSocket is live silently kills the build; a
-   _reloadInPlace while the note modal has unsaved edits silently
-   discards them. Both are now caught by focusSafeSwap's default
-   skipIf — the swap is refused, the dirty state is preserved, and a
-   retry is queued for when the guard clears. */
-function _noteModalDirty() {
-    return !!(window._noteModal && _noteModal.dirty);
-}
-
-function _runnerActiveIn(targetEl) {
-    if (!targetEl || typeof _runnerViewers !== 'object') return false;
-    var mounts = targetEl.querySelectorAll &&
-        targetEl.querySelectorAll('.runner-term-mount');
-    if (!mounts || !mounts.length) return false;
-    var activeKeys = {};
-    for (var dk in _runnerViewers) {
-        var v = _runnerViewers[dk];
-        if (v && !v.exited && v.ws && v.ws.readyState === WebSocket.OPEN) {
-            activeKeys[v.key] = true;
-        }
-    }
-    for (var i = 0; i < mounts.length; i++) {
-        var key = mounts[i].getAttribute('data-runner-key');
-        if (key && activeKeys[key]) return true;
-    }
-    return false;
-}
-
-function _defaultReloadSkipIf(targetEl) {
-    if (_noteModalDirty()) return 'note-dirty';
-    if (_runnerActiveIn(targetEl)) return 'runner-active';
-    return null;
-}
-
-/* Pending-reload bookkeeping. When a swap is refused, we stash the
-   request and retry when the responsible guard clears. Deliberately
-   kept small: one boolean for the global rebuild, a set of node ids
-   for per-subtree reloads. */
-var _pendingReloadNodes = new Set();
-var _pendingReloadInPlace = false;
-
-function _flushPendingReloads() {
-    if (_noteModalDirty()) return;  // still blocked; caller will re-flush
-    if (_pendingReloadInPlace) {
-        _pendingReloadInPlace = false;
-        _pendingReloadNodes.clear();  // superseded by the global rebuild
-        _reloadInPlace();
-        return;
-    }
-    var retry = Array.from(_pendingReloadNodes);
-    _pendingReloadNodes.clear();
-    retry.forEach(function(id) {
-        // Runner-active guard for this specific node is re-checked by
-        // focusSafeSwap's skipIf — any still-blocked entries land back
-        // in _pendingReloadNodes via reloadNode's skipped-branch.
-        reloadNode(id);
     });
 }
 
@@ -2849,7 +2793,7 @@ function _restoreFromSnapshot(el, snap, opts) {
     });
 }
 
-async function reloadNode(nodeId) {
+export async function reloadNode(nodeId) {
     // Fall back to global reload for tab-level, group-level, and code nodes.
     if (!_supportsFragmentFetch(nodeId)) {
         _reloadInPlace();
@@ -2881,7 +2825,7 @@ async function reloadNode(nodeId) {
             // Guard tripped (runner live, or note modal dirty). Park the
             // request; _flushPendingReloads replays it when the guard
             // clears. Dirty-set + baseline are intentionally preserved.
-            _pendingReloadNodes.add(nodeId);
+            reloadState.pendingNodes.add(nodeId);
             return;
         }
         if (wasExpanded && fresh.classList && fresh.classList.contains('card')) {
@@ -3191,7 +3135,7 @@ _startEventStream();
    and creates fresh ones for any newly-inserted mounts. Pop-out mode
    detaches the inline ws in favour of a modal-hosted viewer, then
    re-attaches inline when the modal closes. */
-var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
+export var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
 var _runnerActiveModal = null;
 function _runnerDomKey(key, checkout) { return key + '|' + checkout; }
 
