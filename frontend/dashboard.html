@@ -44,44 +44,44 @@
 <div id="dash-main" class="app">
 <div class="topbar">
     <div class="tabs tabs-primary">
-        <div class="tab active" data-tab="projects" onclick="switchTab('projects')">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
-        <div class="tab" data-tab="code" onclick="switchTab('code')">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
-        <div class="tab" data-tab="knowledge" onclick="switchTab('knowledge')">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
-        <div class="tab" data-tab="history" onclick="switchTab('history')">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
+        <div class="tab active" data-tab="projects" data-action="switch-tab" data-tab="projects">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
+        <div class="tab" data-tab="code" data-action="switch-tab" data-tab="code">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
+        <div class="tab" data-tab="knowledge" data-action="switch-tab" data-tab="knowledge">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
+        <div class="tab" data-tab="history" data-action="switch-tab" data-tab="history">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
     </div>
     <div class="header-actions">
         <span id="reconnecting-pill" class="reconnecting-pill" hidden title="Lost connection to the dashboard backend — retrying…">Reconnecting…</span>
-        <button id="refresh-all-btn" class="theme-toggle" onclick="refreshAll()" title="Hard refresh — clear cached state and re-scan from disk" aria-label="Hard refresh">
+        <button id="refresh-all-btn" class="theme-toggle" data-action="refresh-all" title="Hard refresh — clear cached state and re-scan from disk" aria-label="Hard refresh">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
                 <polyline points="1 20 1 14 7 14"/>
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
         </button>
-        <div class="theme-toggle" onclick="toggleTheme()" title="Switch theme">
+        <div class="theme-toggle" data-action="toggle-theme" title="Switch theme">
             <span class="icon" id="theme-icon">&#9790;</span>
             <span id="theme-label">Dark</span>
         </div>
-        <button id="term-btn" class="theme-toggle" onclick="toggleTerminal()" title="Toggle terminal" aria-label="Toggle terminal">
+        <button id="term-btn" class="theme-toggle" data-action="toggle-terminal" title="Toggle terminal" aria-label="Toggle terminal">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="4 17 10 11 4 5"/>
                 <line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
         </button>
-        <button id="new-item-btn" class="theme-toggle" onclick="openNewItemModal()" title="New item — scaffold a project, incident, or document" aria-label="New item">
+        <button id="new-item-btn" class="theme-toggle" data-action="open-new-item-modal" title="New item — scaffold a project, incident, or document" aria-label="New item">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
         </button>
-        <button class="theme-toggle about-toggle" onclick="openAboutModal()" title="About condash" aria-label="About condash">
+        <button class="theme-toggle about-toggle" data-action="open-about-modal" title="About condash" aria-label="About condash">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/>
                 <line x1="12" y1="16" x2="12" y2="12"/>
                 <line x1="12" y1="8" x2="12.01" y2="8"/>
             </svg>
         </button>
-        <button class="theme-toggle config-toggle" onclick="openConfigModal()" title="Edit configuration" aria-label="Edit configuration">
+        <button class="theme-toggle config-toggle" data-action="open-config-modal" title="Edit configuration" aria-label="Edit configuration">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -91,13 +91,13 @@
 </div>
 <div id="setup-banner" class="setup-banner" style="display:none">
     <span><strong>Welcome to condash.</strong> Set <code>conception_path</code> to point at your conception tree (with a <code>projects/</code> directory) to get started.</span>
-    <button type="button" onclick="openConfigModal()">Configure</button>
+    <button type="button" data-action="open-config-modal">Configure</button>
 </div>
 <div id="projects-subtabs" class="tabs tabs-secondary">
-    <div class="tab active" data-subtab="current" onclick="switchSubtab('current')">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
-    <div class="tab" data-subtab="next" onclick="switchSubtab('next')">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
-    <div class="tab" data-subtab="backlog" onclick="switchSubtab('backlog')">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
-    <div class="tab" data-subtab="done" onclick="switchSubtab('done')">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
+    <div class="tab active" data-subtab="current" data-action="switch-subtab" data-subtab="current">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
+    <div class="tab" data-subtab="next" data-action="switch-subtab" data-subtab="next">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
+    <div class="tab" data-subtab="backlog" data-action="switch-subtab" data-subtab="backlog">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
+    <div class="tab" data-subtab="done" data-action="switch-subtab" data-subtab="done">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
 </div>
 <main id="main-scroll">
     <div id="projects-pane" data-node-id="projects">
@@ -125,13 +125,13 @@
     <div class="term-handle" onmousedown="termDragStart(event)" title="Drag to resize"></div>
     <div class="term-top-row">
         <div class="term-tabs term-tabs-left" id="term-tabs-left"></div>
-        <button class="term-new-tab" onclick="termNewTab('left')" title="New tab (left)" aria-label="New tab (left)">+</button>
-        <button class="term-new-tab" id="term-launcher-left" onclick="termNewLauncherTab('left')" hidden>λ</button>
+        <button class="term-new-tab" data-action="term-new-tab" data-side="left" title="New tab (left)" aria-label="New tab (left)">+</button>
+        <button class="term-new-tab" id="term-launcher-left" data-action="term-new-launcher-tab" data-side="left" hidden>λ</button>
         <span class="term-spacer"></span>
         <div class="term-tabs term-tabs-right" id="term-tabs-right"></div>
-        <button class="term-new-tab" onclick="termNewTab('right')" title="New tab (right)" aria-label="New tab (right)">+</button>
-        <button class="term-new-tab" id="term-launcher-right" onclick="termNewLauncherTab('right')" hidden>λ</button>
-        <button class="term-new-tab term-close" onclick="toggleTerminal()" title="Close terminal pane" aria-label="Close terminal pane">&times;</button>
+        <button class="term-new-tab" data-action="term-new-tab" data-side="right" title="New tab (right)" aria-label="New tab (right)">+</button>
+        <button class="term-new-tab" id="term-launcher-right" data-action="term-new-launcher-tab" data-side="right" hidden>λ</button>
+        <button class="term-new-tab term-close" data-action="toggle-terminal" title="Close terminal pane" aria-label="Close terminal pane">&times;</button>
     </div>
     <div class="term-body">
         <div class="term-side" data-side="left">
@@ -143,32 +143,32 @@
         </div>
     </div>
 </div>
-<div id="note-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNotePreview()">
+<div id="note-modal" class="note-modal-backdrop" data-action="close-on-backdrop" data-target="note-preview">
     <div class="note-modal" id="note-modal-inner" data-mode="view">
         <div class="note-modal-header">
-            <button class="note-modal-back" id="note-modal-back" onclick="noteNavBack()" aria-label="Back" title="Back to previous note" hidden>&#9664;</button>
+            <button class="note-modal-back" id="note-modal-back" data-action="note-nav-back" aria-label="Back" title="Back to previous note" hidden>&#9664;</button>
             <span class="note-modal-title" id="note-modal-title" ondblclick="startRenameNote()" title="Double-click to rename (notes/ files only)">Note</span>
             <div class="note-mode-toggle" id="note-mode-toggle" role="group" aria-label="Note mode">
-                <button class="note-mode-btn" data-mode="view" onclick="setNoteMode('view')" title="View (rendered)">View</button>
-                <button class="note-mode-btn" data-mode="cm" onclick="setNoteMode('cm')" title="Edit with syntax highlighting (Ctrl+E)">Edit</button>
-                <button class="note-mode-btn" data-mode="plain" onclick="setNoteMode('plain')" title="Plain textarea edit">Plain</button>
+                <button class="note-mode-btn" data-mode="view" data-action="set-note-mode" data-mode="view" title="View (rendered)">View</button>
+                <button class="note-mode-btn" data-mode="cm" data-action="set-note-mode" data-mode="cm" title="Edit with syntax highlighting (Ctrl+E)">Edit</button>
+                <button class="note-mode-btn" data-mode="plain" data-action="set-note-mode" data-mode="plain" title="Plain textarea edit">Plain</button>
             </div>
             <div class="note-modal-actions">
-                <button id="note-save-btn" class="note-action-btn note-action-primary" onclick="saveEdit()" style="display:none">Save</button>
-                <button class="note-modal-close" onclick="closeNotePreview()" aria-label="Close">&times;</button>
+                <button id="note-save-btn" class="note-action-btn note-action-primary" data-action="save-edit" style="display:none">Save</button>
+                <button class="note-modal-close" data-action="close-note-preview" aria-label="Close">&times;</button>
             </div>
         </div>
         <div class="note-modal-external-banner" id="note-modal-external-banner" hidden>
             <span>This note changed on disk.</span>
-            <button type="button" class="note-action-btn" onclick="_noteReconcileDismiss()">Keep my edits</button>
-            <button type="button" class="note-action-btn note-action-primary" onclick="_noteReconcileReload()">Reload from disk</button>
+            <button type="button" class="note-action-btn" data-action="note-reconcile-dismiss">Keep my edits</button>
+            <button type="button" class="note-action-btn note-action-primary" data-action="note-reconcile-reload">Reload from disk</button>
         </div>
         <div class="note-modal-search" id="note-search-bar" hidden>
             <input type="search" id="note-search-input" placeholder="Find in note…" autocomplete="off" oninput="noteSearchRun()">
             <span class="note-search-count" id="note-search-count"></span>
-            <button class="note-action-btn" onclick="noteSearchStep(-1)" title="Previous (Shift+Enter)" aria-label="Previous match">&uarr;</button>
-            <button class="note-action-btn" onclick="noteSearchStep(1)" title="Next (Enter)" aria-label="Next match">&darr;</button>
-            <button class="note-action-btn" onclick="noteSearchClose()" title="Close (Esc)" aria-label="Close search">&times;</button>
+            <button class="note-action-btn" data-action="note-search-step" data-delta="-1" title="Previous (Shift+Enter)" aria-label="Previous match">&uarr;</button>
+            <button class="note-action-btn" data-action="note-search-step" data-delta="1" title="Next (Enter)" aria-label="Next match">&darr;</button>
+            <button class="note-action-btn" data-action="note-search-close" title="Close (Esc)" aria-label="Close search">&times;</button>
         </div>
         <div class="note-modal-body" id="note-modal-body">
             <div class="note-pane note-pane-view" id="note-pane-view"></div>
@@ -180,11 +180,11 @@
         </div>
     </div>
 </div>
-<div id="about-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeAboutModal()">
+<div id="about-modal" class="note-modal-backdrop" data-action="close-on-backdrop" data-target="about-modal">
     <div class="note-modal about-modal">
         <div class="note-modal-header">
             <span class="note-modal-title">About</span>
-            <button class="note-modal-close" onclick="closeAboutModal()" aria-label="Close">&times;</button>
+            <button class="note-modal-close" data-action="close-about-modal" aria-label="Close">&times;</button>
         </div>
         <div class="note-modal-body">
             <div class="about-header">
@@ -207,11 +207,11 @@
         </div>
     </div>
 </div>
-<div id="config-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeConfigModal()">
+<div id="config-modal" class="note-modal-backdrop" data-action="close-on-backdrop" data-target="config-modal">
     <div class="note-modal config-modal config-modal-wide">
         <div class="note-modal-header">
             <span class="note-modal-title">Configuration</span>
-            <button class="note-modal-close" onclick="closeConfigModal()" aria-label="Close">&times;</button>
+            <button class="note-modal-close" data-action="close-config-modal" aria-label="Close">&times;</button>
         </div>
         <div class="note-modal-body">
             <form id="config-form" onsubmit="saveConfig(event)">
@@ -227,7 +227,7 @@
                 <div id="config-error" class="config-error" style="display:none"></div>
                 <div id="config-saved" class="config-saved" style="display:none;color:#2a7a2a;margin-top:8px"></div>
                 <div class="config-actions">
-                    <button type="button" onclick="closeConfigModal()">Cancel</button>
+                    <button type="button" data-action="close-config-modal">Cancel</button>
                     <button type="submit" class="config-save">Save</button>
                 </div>
             </form>
@@ -236,11 +236,11 @@
 </div>
 
 
-<div id="new-item-modal" class="note-modal-backdrop" onclick="if(event.target===this)closeNewItemModal()">
+<div id="new-item-modal" class="note-modal-backdrop" data-action="close-on-backdrop" data-target="new-item-modal">
     <div class="note-modal config-modal" style="max-width:560px">
         <div class="note-modal-header">
             <span class="note-modal-title">New item</span>
-            <button class="note-modal-close" onclick="closeNewItemModal()" aria-label="Close">&times;</button>
+            <button class="note-modal-close" data-action="close-new-item-modal" aria-label="Close">&times;</button>
         </div>
         <div class="note-modal-body">
             <form id="new-item-form" onsubmit="submitNewItem(event)">
@@ -303,7 +303,7 @@
                 </fieldset>
                 <div id="new-item-error" class="config-error" style="display:none"></div>
                 <div class="config-actions">
-                    <button type="button" onclick="closeNewItemModal()">Cancel</button>
+                    <button type="button" data-action="close-new-item-modal">Cancel</button>
                     <button type="submit" class="config-save">Create item</button>
                 </div>
             </form>

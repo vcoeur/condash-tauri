@@ -94,6 +94,9 @@ import {
 import {
     _setDirty,
 } from './sections/note-preview.js';
+import {
+    initActionDispatch, registerAction,
+} from './sections/action-dispatch.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -1475,6 +1478,56 @@ function startEditText(el) {
 // DOM-level side effects now that both modules have finished
 // evaluating — see the notes for P-07
 // (projects/2026-04-23-condash-frontend-extraction/notes/01-p07-tab-drag-split.md).
+/* Register all click actions rendered by the server as `data-action`
+   attrs. Keep this block in one place so the inventory is obvious — one
+   registerAction call per distinct action name, grouped by subsystem. */
+function registerDashboardActions() {
+    // Top-level navigation
+    registerAction('switch-tab',          (_e, _el, d) => switchTab(d.tab));
+    registerAction('switch-subtab',       (_e, _el, d) => switchSubtab(d.subtab));
+    registerAction('refresh-all',         () => refreshAll());
+    registerAction('toggle-theme',        () => toggleTheme());
+    registerAction('toggle-terminal',     () => toggleTerminal());
+
+    // Modals — open
+    registerAction('open-new-item-modal', () => openNewItemModal());
+    registerAction('open-about-modal',    () => openAboutModal());
+    registerAction('open-config-modal',   () => openConfigModal());
+
+    // Modals — close (explicit button, and backdrop-click variant)
+    registerAction('close-new-item-modal', () => closeNewItemModal());
+    registerAction('close-about-modal',    () => closeAboutModal());
+    registerAction('close-config-modal',   () => closeConfigModal());
+    registerAction('close-note-preview',   () => closeNotePreview());
+    registerAction('close-on-backdrop', (event, el) => {
+        if (event.target !== el) return;
+        const target = el.dataset.target;
+        if (target === 'note-preview') closeNotePreview();
+        else if (target === 'about-modal') closeAboutModal();
+        else if (target === 'config-modal') closeConfigModal();
+        else if (target === 'new-item-modal') closeNewItemModal();
+    });
+
+    // Terminal
+    registerAction('term-new-tab',          (_e, _el, d) => termNewTab(d.side));
+    registerAction('term-new-launcher-tab', (_e, _el, d) => termNewLauncherTab(d.side));
+
+    // Note preview / edit
+    registerAction('note-nav-back', () => noteNavBack());
+    registerAction('set-note-mode', (_e, _el, d) => setNoteMode(d.mode));
+    registerAction('save-edit',     () => saveEdit());
+
+    // Note reconcile modal
+    registerAction('note-reconcile-dismiss', () => _noteReconcileDismiss());
+    registerAction('note-reconcile-reload',  () => _noteReconcileReload());
+
+    // In-note search
+    registerAction('note-search-step', (_e, _el, d) => noteSearchStep(parseInt(d.delta, 10) || 0));
+    registerAction('note-search-close', () => noteSearchClose());
+}
+registerDashboardActions();
+initActionDispatch();
+
 initTabDragSideEffects();
 initThemeSideEffects();
 initAboutModalSideEffects();
