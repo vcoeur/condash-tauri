@@ -14,7 +14,7 @@
    notes/01-p07-tab-drag-split.md §D2. */
 
 import { _termCreateTab, _termSyncOpenFlag } from './tab-drag.js';
-import { termState, _termActiveTab, _termSendResize } from '../dashboard-main.js';
+import { termState, _termActiveTab, _termSendResize } from './terminal.js';
 
 async function openPath(ev, path, tool) {
     ev.stopPropagation();
@@ -107,6 +107,41 @@ function workOn(ev, slug) {
     })();
 }
 
+/* Code tab · "open with" popover.
+
+   The code-tab's per-repo strip renders a dropdown of IDE launchers
+   (IDEA, VS Code, etc.) behind a "⋯" button. Click toggles the popover;
+   a click outside closes every open popover; Escape does the same. Used
+   to live at the tail of the runner-viewers region in dashboard-main.js
+   — moved here on 2026-04-24 (P-09 cut 2) because it's pure git-row
+   wiring, not a runner concern. */
+function gitToggleOpenPopover(ev, btn) {
+    if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+    var grp = btn.closest('.open-grp');
+    if (!grp) return;
+    var popover = grp.querySelector('.open-popover');
+    if (!popover) return;
+    var isOpen = !popover.hidden;
+    gitClosePopovers();
+    if (!isOpen) popover.hidden = false;
+}
+
+function gitClosePopovers(root) {
+    var scope = root || document;
+    scope.querySelectorAll('.open-popover').forEach(function(p) { p.hidden = true; });
+}
+
+function initGitActionsSideEffects() {
+    document.addEventListener('click', function(ev) {
+        // Clicking outside any .open-grp closes every open popover.
+        if (ev.target && ev.target.closest && ev.target.closest('.open-grp')) return;
+        gitClosePopovers();
+    }, true);
+    document.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Escape') gitClosePopovers();
+    });
+}
+
 /* Per-card "open folder" button — hand the item's folder to the OS
    default file manager. Mirrors openPath's transient ok/err feedback. */
 async function openFolder(ev, relPath) {
@@ -137,4 +172,7 @@ async function openFolder(ev, relPath) {
     }
 }
 
-export { openPath, openInTerminal, workOn, openFolder };
+export {
+    openPath, openInTerminal, workOn, openFolder,
+    gitToggleOpenPopover, gitClosePopovers, initGitActionsSideEffects,
+};
