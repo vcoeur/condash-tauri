@@ -76,7 +76,7 @@ pub struct AppState {
     pub pty_registry: crate::pty::PtyRegistry,
     /// Per-process registry of inline dev-server runners — used by
     /// `/api/runner/{start,stop}` and `/ws/runner/:key`.
-    pub runner_registry: crate::runners::RunnerRegistry,
+    pub runner_registry: crate::runner_registry::RunnerRegistry,
 }
 
 /// Start the axum server on the given localhost port (`0` means any

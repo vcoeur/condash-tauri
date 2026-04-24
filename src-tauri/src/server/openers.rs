@@ -2,7 +2,7 @@
 //! `/open-external`, `/open-doc` — and `GET /recent-screenshot`.
 //!
 //! Each one validates the incoming path (URL for `/open-external`) and
-//! dispatches to the [`crate::openers`] module, which spawns a
+//! dispatches to the [`crate::launcher`] module, which spawns a
 //! detached `sh -c "<template with {path} filled in>"` and walks the
 //! configured fallback chain. Returns 200 on first success, 502 when
 //! the entire chain falls through, 400/403 on validation failures.
@@ -43,7 +43,7 @@ pub(super) async fn post_open(
         );
     }
     let value = validated.to_string_lossy().into_owned();
-    match crate::openers::try_chain(&slot.commands, "path", &value) {
+    match crate::launcher::try_chain(&slot.commands, "path", &value) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
         None => error_json(StatusCode::BAD_GATEWAY, "all commands failed"),
     }
@@ -73,7 +73,7 @@ pub(super) async fn post_open_folder(
         return error_json(StatusCode::FORBIDDEN, "path out of sandbox");
     };
     let value = validated.to_string_lossy().into_owned();
-    match crate::openers::try_chain_static(crate::openers::FOLDER_FALLBACKS, "path", &value) {
+    match crate::launcher::try_chain_static(crate::launcher::FOLDER_FALLBACKS, "path", &value) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
         None => error_json(StatusCode::BAD_GATEWAY, "no folder opener succeeded"),
     }
@@ -99,7 +99,7 @@ pub(super) async fn post_open_external(Json(p): Json<ExternalPayload>) -> impl I
     if !allowed {
         return error_json(StatusCode::BAD_REQUEST, "unsupported url scheme");
     }
-    match crate::openers::try_chain_static(crate::openers::URL_FALLBACKS, "url", url) {
+    match crate::launcher::try_chain_static(crate::launcher::URL_FALLBACKS, "url", url) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
         None => error_json(StatusCode::BAD_GATEWAY, "no url opener succeeded"),
     }
@@ -139,14 +139,14 @@ pub(super) async fn post_open_doc(
     // Prefer the user's configured pdf_viewer chain; fall back to the
     // xdg-open / gio open chain.
     let chain: Vec<String> = if state.ctx.pdf_viewer.is_empty() {
-        crate::openers::DOC_FALLBACKS
+        crate::launcher::DOC_FALLBACKS
             .iter()
             .map(|s| s.to_string())
             .collect()
     } else {
         state.ctx.pdf_viewer.clone()
     };
-    match crate::openers::try_chain(&chain, "path", &value) {
+    match crate::launcher::try_chain(&chain, "path", &value) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
         None => error_json(StatusCode::BAD_GATEWAY, "no doc opener succeeded"),
     }

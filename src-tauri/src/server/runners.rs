@@ -59,7 +59,7 @@ pub(super) async fn runner_start_route(
         }
     }
     let shell = crate::pty::resolve_terminal_shell(None);
-    match crate::runners::start(
+    match crate::runner_registry::start(
         &state.runner_registry,
         &state.pty_registry,
         key,
@@ -100,10 +100,10 @@ pub(super) async fn runner_stop_route(
         return json_response(&serde_json::json!({"ok": true, "cleared": false}));
     };
     if session.exit_code_now().is_some() {
-        crate::runners::clear_exited(&state.runner_registry, key);
+        crate::runner_registry::clear_exited(&state.runner_registry, key);
         return json_response(&serde_json::json!({"ok": true, "cleared": true, "exited": true}));
     }
-    match crate::runners::stop(
+    match crate::runner_registry::stop(
         &state.runner_registry,
         key,
         std::time::Duration::from_secs(5),
@@ -153,9 +153,9 @@ pub(super) async fn runner_force_stop_route(
     // what the request is really about.
     if let Some(session) = state.runner_registry.get(key) {
         if session.exit_code_now().is_some() {
-            crate::runners::clear_exited(&state.runner_registry, key);
+            crate::runner_registry::clear_exited(&state.runner_registry, key);
         } else {
-            let _ = crate::runners::stop(
+            let _ = crate::runner_registry::stop(
                 &state.runner_registry,
                 key,
                 std::time::Duration::from_secs(2),

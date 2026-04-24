@@ -1465,10 +1465,9 @@ function startEditText(el) {
 // The "Stale-detection polling" region (checkUpdates, _renderStale,
 // staleState, reloadNode, refreshAll, updateBaseline, …) now lives in
 // `sections/stale-poll.js`. The "SSE event stream" region
-// (_startEventStream, reconnect bookkeeping, _onConfigChanged dead
-// code) now lives in `sections/sse.js`. Both were extracted on
-// 2026-04-24 as P-09 cut 3 — see notes/05-p09-cut3.md for the design
-// decisions.
+// (_startEventStream, reconnect bookkeeping) now lives in
+// `sections/sse.js`. Both were extracted on 2026-04-24 as P-09 cut 3 —
+// see notes/05-p09-cut3.md for the design decisions.
 
 // The "Tab drag" region that used to live here (pointer-event drag,
 // tab create/close/rename, splitter drag, pane-resize drag, shortcuts,
