@@ -12,7 +12,7 @@
    registration (the first applyTheme call) is deferred to
    initThemeSideEffects(), invoked from dashboard-main.js's tail. */
 
-import { _cmViews, _currentCmTheme } from '../dashboard-main.js';
+import { _cmViews, _currentCmTheme } from './config-modal.js';
 
 function getPreferredTheme() {
     var saved = localStorage.getItem('dashboard-theme');
