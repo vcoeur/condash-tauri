@@ -21,46 +21,9 @@ import {
     termDragStart, termSplitStart, pasteRecentScreenshot,
     initTabDragSideEffects,
 } from './sections/tab-drag.js';
-
-/* --- Theme --- */
-function getPreferredTheme() {
-    var saved = localStorage.getItem('dashboard-theme');
-    if (saved) return saved;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    var icon = document.getElementById('theme-icon');
-    var label = document.getElementById('theme-label');
-    if (theme === 'dark') {
-        icon.innerHTML = '&#9790;';
-        label.textContent = 'Dark';
-    } else {
-        icon.innerHTML = '&#9788;';
-        label.textContent = 'Light';
-    }
-    // Live-swap any open CodeMirror editors to the matching theme.
-    if (window.CondashCM && typeof _cmViews === 'object') {
-        Object.keys(_cmViews).forEach(function(which) {
-            var view = _cmViews[which];
-            var ta = document.querySelector('#config-form textarea[data-yaml-file="' + which + '"]');
-            var comp = ta && ta._cmThemeComp;
-            if (view && comp) {
-                view.dispatch({ effects: comp.reconfigure(_currentCmTheme()) });
-            }
-        });
-    }
-}
-
-function toggleTheme() {
-    var current = document.documentElement.getAttribute('data-theme') || 'light';
-    var next = current === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('dashboard-theme', next);
-    applyTheme(next);
-}
-
-applyTheme(getPreferredTheme());
+import {
+    toggleTheme, initThemeSideEffects,
+} from './sections/theme.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -192,7 +155,7 @@ async function openConfigModal() {
    without ever poking at CM6 APIs. If the bundle hasn't arrived yet
    (defer script still loading) we fall back to the textarea for this
    paint; once the modal reopens, CM6 is wired. */
-var _cmViews = {};  // which → EditorView
+export var _cmViews = {};  // which → EditorView
 function _populateYamlEditor(which, body, preserveDirty) {
     var ta = document.querySelector('#config-form textarea[data-yaml-file="' + which + '"]');
     if (!ta) return;
@@ -287,7 +250,7 @@ function _populateYamlEditorCM(which, ta, body) {
     _setYamlStatus(which, 'synced');
 }
 
-function _currentCmTheme() {
+export function _currentCmTheme() {
     var theme = document.documentElement.getAttribute('data-theme') || 'light';
     return theme === 'dark' ? window.CondashCM.oneDark : [];
 }
@@ -3573,6 +3536,7 @@ export function _termRenderTabChip(tab) {
 // evaluating — see the notes for P-07
 // (projects/2026-04-23-condash-frontend-extraction/notes/01-p07-tab-drag-split.md).
 initTabDragSideEffects();
+initThemeSideEffects();
 
 // Phase 6: event-driven staleness. /events streams tab-level hints;
 // checkUpdates() runs on connect + every hint to reconcile the real
