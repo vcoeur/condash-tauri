@@ -15,7 +15,8 @@
    - Private helpers (`_searchTokens`, `_cardMatches`, `_buildSnippet`, …)
      that are implementation details of the filter logic. */
 
-import { TAB_MAP } from '../dashboard-main.js';
+import { TAB_MAP, switchTab, switchSubtab } from '../dashboard-main.js';
+import { openNotePreview } from './note-preview.js';
 
 export function updateTabCounts() {
     // Primary tabs — Projects counts active items under Projects-tab
