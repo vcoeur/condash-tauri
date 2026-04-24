@@ -24,6 +24,9 @@ import {
 import {
     toggleTheme, initThemeSideEffects,
 } from './sections/theme.js';
+import {
+    openAboutModal, closeAboutModal, initAboutModalSideEffects,
+} from './sections/about-modal.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -272,26 +275,6 @@ function _getDirtyYamlFile() {
 function closeConfigModal() {
     document.getElementById('config-modal').style.display = 'none';
 }
-
-/* --- About modal ---
-   Static content (version baked in at render time, links hit the host
-   browser via /open-external because pywebview swallows target=_blank). */
-function openAboutModal() {
-    document.getElementById('about-modal').style.display = 'flex';
-}
-function closeAboutModal() {
-    document.getElementById('about-modal').style.display = 'none';
-}
-document.addEventListener('click', function(ev) {
-    var a = ev.target.closest && ev.target.closest('#about-modal a[data-about-link]');
-    if (!a) return;
-    ev.preventDefault();
-    fetch('/open-external', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url: a.getAttribute('href')}),
-    });
-});
 
 /* --- New-item modal ---
    Lives next to the gear button. Collects the minimal fields the
@@ -3537,6 +3520,7 @@ export function _termRenderTabChip(tab) {
 // (projects/2026-04-23-condash-frontend-extraction/notes/01-p07-tab-drag-split.md).
 initTabDragSideEffects();
 initThemeSideEffects();
+initAboutModalSideEffects();
 
 // Phase 6: event-driven staleness. /events streams tab-level hints;
 // checkUpdates() runs on connect + every hint to reconcile the real
