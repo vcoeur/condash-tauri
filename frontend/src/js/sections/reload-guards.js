@@ -19,7 +19,8 @@
    callers can write `reloadState.pendingInPlace = true` without
    rebinding the import. */
 
-import { _noteModal, _reloadInPlace, reloadNode } from '../dashboard-main.js';
+import { _noteModal, _reloadInPlace } from '../dashboard-main.js';
+import { reloadNode } from './stale-poll.js';
 import { _runnerViewers } from './runner-viewers.js';
 
 const reloadState = {

@@ -66,6 +66,15 @@ import {
     runnerToggleCollapse, runnerForceStop, runnerJump, runnerPopout,
     initRunnerViewersSideEffects,
 } from './sections/runner-viewers.js';
+import {
+    staleState,
+    _renderStale, _deriveLegacyFlags,
+    checkUpdates, _scheduleCheckUpdates,
+    updateBaseline, reloadNode, refreshAll,
+} from './sections/stale-poll.js';
+import {
+    initSseSideEffects,
+} from './sections/sse.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -160,7 +169,7 @@ function _setYamlSourceHint(elId, source, expected, label) {
     el.style.display = '';
 }
 
-async function openConfigModal() {
+export async function openConfigModal() {
     var modal = document.getElementById('config-modal');
     var ta = document.getElementById('config-yaml');
     var errEl = document.getElementById('config-error');
@@ -198,7 +207,7 @@ async function openConfigModal() {
    (defer script still loading) we fall back to the textarea for this
    paint; once the modal reopens, CM6 is wired. */
 export var _cmViews = {};  // which → EditorView
-function _populateYamlEditor(which, body, preserveDirty) {
+export function _populateYamlEditor(which, body, preserveDirty) {
     var ta = document.querySelector('#config-form textarea[data-yaml-file="' + which + '"]');
     if (!ta) return;
     var dirty = ta.classList.contains('config-yaml-dirty');
@@ -302,7 +311,7 @@ function _setYamlStatus(which, label) {
     if (badge) badge.textContent = label;
 }
 
-function _getDirtyYamlFile() {
+export function _getDirtyYamlFile() {
     var dirtyTa = document.querySelector('#config-form textarea.config-yaml-editor.config-yaml-dirty');
     if (!dirtyTa) return null;
     return {
@@ -396,8 +405,8 @@ var TAB_MAP = {
 var TAB_SHOWS_HEADINGS = {current: true, next: true};
 var PRIMARY_TABS = ['projects', 'code', 'knowledge', 'history'];
 var SUBTABS = ['current', 'next', 'backlog', 'done'];
-var _activeTab = 'projects';
-var _activeSubtab = 'current';
+export var _activeTab = 'projects';
+export var _activeSubtab = 'current';
 // Map legacy `?tab=current` style URLs onto the new (primary, sub) pair.
 // History used to be a Projects sub-tab; legacy `?tab=projects&sub=history`
 // or `?tab=history-subtab` links land on the new History primary tab.
@@ -427,9 +436,9 @@ export function switchTab(tab) {
     var clickedSameTab = tab === _activeTab;
     _deriveLegacyFlags();
     var clickedTabStale =
-        ((tab === 'projects' || tab === 'history') && _itemsStale) ||
-        (tab === 'code' && _gitStale) ||
-        (tab === 'knowledge' && _knowledgeStale);
+        ((tab === 'projects' || tab === 'history') && staleState.itemsStale) ||
+        (tab === 'code' && staleState.gitStale) ||
+        (tab === 'knowledge' && staleState.knowledgeStale);
     if (!clickedSameTab && clickedTabStale) {
         // Commit the new tab first so _reloadInPlace's post-swap
         // _rebindDashHandlers → switchTab(_activeTab) lands on it.
@@ -462,7 +471,7 @@ export function switchSubtab(sub) {
     _persistTabState();
 }
 
-function _applySubtab(sub) {
+export function _applySubtab(sub) {
     document.querySelectorAll('#projects-subtabs .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-subtab') === sub);
     });
@@ -561,7 +570,7 @@ export async function _reloadInPlace() {
         // a dot based on ids the server just re-rendered for us. The
         // async updateBaseline() that follows confirms the empty set
         // against a fresh /check-updates. condash#14.
-        _dirtyNodes = new Set();
+        staleState.dirtyNodes = new Set();
         _rebindDashHandlers();
     } catch (e) {
         location.reload();
@@ -572,13 +581,6 @@ export async function _reloadInPlace() {
             _reloadInPlace();
         }
     }
-}
-
-function _tabForNodeId(id) {
-    if (id === 'projects' || id.indexOf('projects/') === 0) return 'projects';
-    if (id === 'code' || id.indexOf('code/') === 0) return 'code';
-    if (id === 'knowledge' || id.indexOf('knowledge/') === 0) return 'knowledge';
-    return null;
 }
 
 /* Re-apply state to the freshly-swapped #dash-main. Inline onclick
@@ -1896,7 +1898,7 @@ function startRenameNote() {
 */
 var _noteReconcileSuppressedUntilMtime = null;
 
-async function _reconcileNoteModal() {
+export async function _reconcileNoteModal() {
     if (!_noteModal || !_noteModal.path) return;
     var path = _noteModal.path;
     try {
@@ -2330,434 +2332,13 @@ function startEditText(el) {
     };
 }
 
-/* --- Stale-detection polling (localized, per-node) ---
-   /check-updates returns a {node_id: hash} map covering every card, group,
-   directory, and repo node in the three tabs. We keep the previous map as a
-   baseline and, each poll, compute the set of dirty ids (differ / added /
-   removed). From that set we drive:
-     - `.node-stale` on every DOM element whose own id is dirty (strong dot),
-     - `.node-stale-hint` on ancestor elements (muted dot) — so you can
-       choose to reload at any level above the actual change,
-     - the pre-existing `.stale` dot on the primary tab header (kept for
-       coarse orientation).
-   Node ids are slash-separated; ancestors are derived by trimming segments
-   from the right. */
-var _nodeBaseline = null;    // Object id → hash (null until first poll)
-var _dirtyNodes = new Set(); // ids whose current hash != baseline, or present on only one side
-var _lastFingerprint = null; // kept for back-compat with pickPriority/switchTab
-var _lastGitFingerprint = null;
-
-function _deriveLegacyFlags() {
-    // Coarse flags the existing tab-switch / mutation code still reads.
-    var items = false, git = false, knowledge = false;
-    _dirtyNodes.forEach(function(id) {
-        if (id === 'projects' || id.indexOf('projects/') === 0) items = true;
-        else if (id === 'code' || id.indexOf('code/') === 0) git = true;
-        else if (id === 'knowledge' || id.indexOf('knowledge/') === 0) knowledge = true;
-    });
-    _itemsStale = items;
-    _gitStale = git;
-    _knowledgeStale = knowledge;
-}
-
-function _ancestorsOf(id) {
-    // "projects/now/slug" → ["projects/now", "projects"]. Splits on '/';
-    // subtree IDs like wt:foo or sub:bar are single segments so this is safe.
-    var parts = id.split('/');
-    var out = [];
-    for (var i = parts.length - 1; i > 0; i--) {
-        out.push(parts.slice(0, i).join('/'));
-    }
-    return out;
-}
-
-function _renderStale() {
-    // Phase 3: the active tab auto-reloads, so per-node dots and
-    // ancestor hints are gone; the only user-visible staleness marker
-    // is a single binary dot on each *inactive* tab header.
-    // Clear any surviving Phase-1/Phase-2 markers — if a swap was
-    // guard-skipped, _renderStale re-renders with the latest state.
-    document.querySelectorAll('[data-node-id].node-stale, [data-node-id].node-stale-hint')
-        .forEach(function(el) {
-            el.classList.remove('node-stale');
-            el.classList.remove('node-stale-hint');
-        });
-    document.querySelectorAll('.group-dirty-leader')
-        .forEach(function(el) { el.classList.remove('group-dirty-leader'); });
-    document.querySelectorAll('.node-reload-btn')
-        .forEach(function(btn) { btn.remove(); });
-
-    _deriveLegacyFlags();
-    var staleByTab = {
-        projects: _itemsStale,
-        code: _gitStale,
-        knowledge: _knowledgeStale,
-        history: _itemsStale,
-    };
-    document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
-        var key = t.getAttribute('data-tab');
-        // Active tab never shows the dot — it self-refreshes.
-        var isStale = !!staleByTab[key] && key !== _activeTab;
-        t.classList.toggle('stale', isStale);
-        if (isStale) {
-            t.title = 'Click to refresh — data has changed on disk';
-        } else {
-            t.removeAttribute('title');
-        }
-    });
-}
-
-var _itemsStale = false, _gitStale = false, _knowledgeStale = false;
-
-function _diffNodes(baseline, current) {
-    var dirty = new Set();
-    if (!baseline) return dirty;
-    for (var id in current) {
-        if (baseline[id] !== current[id]) dirty.add(id);
-    }
-    for (var id2 in baseline) {
-        if (!(id2 in current)) dirty.add(id2);
-    }
-    return dirty;
-}
-
-/* Coalesce rapid checkUpdates triggers. A single user save fires
-   multiple watchdog events (the file, its directory, its parents);
-   each used to start its own fetch + fragment-swap pass, which
-   showed up as a flicker on the active tab. _scheduleCheckUpdates
-   collapses calls within a 250ms window into a single run and
-   guarantees a trailing pass so the last event isn't dropped. */
-var _checkUpdatesTimer = null;
-var _checkUpdatesInFlight = false;
-var _checkUpdatesPending = false;
-function _scheduleCheckUpdates() {
-    if (_checkUpdatesInFlight) { _checkUpdatesPending = true; return; }
-    if (_checkUpdatesTimer) return;
-    _checkUpdatesTimer = setTimeout(function() {
-        _checkUpdatesTimer = null;
-        checkUpdates();
-    }, 250);
-}
-
-async function checkUpdates() {
-    if (_checkUpdatesInFlight) { _checkUpdatesPending = true; return; }
-    _checkUpdatesInFlight = true;
-    try {
-        var res = await fetch('/check-updates');
-        if (!res.ok) return;
-        var data = await res.json();
-        var current = data.nodes || {};
-        if (_nodeBaseline === null) {
-            _nodeBaseline = current;
-            _lastFingerprint = data.fingerprint;
-            _lastGitFingerprint = data.git_fingerprint;
-        } else {
-            // Once a node is marked dirty, it stays dirty until a local or
-            // global reload updates the baseline — so the user can see there
-            // was a change even if they weren't on the tab when it happened.
-            var fresh = _diffNodes(_nodeBaseline, current);
-            fresh.forEach(function(id) { _dirtyNodes.add(id); });
-            // Phase 3: staleness on the active tab auto-resolves. Other
-            // tabs' dirty state is still tracked; their binary dot
-            // surfaces when _renderStale runs below.
-            if (fresh.size > 0) _autoReloadActiveTab(fresh);
-            // Phase 4: any staleness on an inactive tab kicks off a
-            // single background fetch of / so the next tab click can
-            // swap instantly.
-            var anyInactiveDirty = false;
-            fresh.forEach(function(id) {
-                var tab = _tabForNodeId(id);
-                if (tab && tab !== _activeTab) anyInactiveDirty = true;
-            });
-            if (anyInactiveDirty) _refreshShadowCache();
-        }
-        _renderStale();
-    } catch (e) {
-    } finally {
-        _checkUpdatesInFlight = false;
-        if (_checkUpdatesPending) {
-            _checkUpdatesPending = false;
-            _scheduleCheckUpdates();
-        }
-    }
-}
-
-function _activeTabPrefix() {
-    // History derives from the same on-disk data as Projects.
-    return _activeTab === 'history' ? 'projects' : _activeTab;
-}
-
-function _idInTab(id, tab) {
-    var prefix = tab === 'history' ? 'projects' : tab;
-    return id === prefix || id.indexOf(prefix + '/') === 0;
-}
-
-/* --- SSE event stream (Phase 6) ---
-   Replaces the 5s polling loop. Every event from /events triggers a
-   reconcile call to /check-updates; the real dirty-set computation
-   lives there, unchanged. On drop, _setReconnecting(true) surfaces
-   the pill and an exponential-backoff retry loop tries to reopen. */
-var _eventSource = null;
-var _eventReconnectTimer = null;
-var _eventReconnectDelay = 1000;
-
-/* Live YAML reload: dispatched from the SSE onmessage handler when the
-   filesystem watcher notices an external edit to repositories.yml or
-   preferences.yml. The server has already rebuilt its RenderCtx by
-   the time this fires, so the client's job is just to:
-     (a) refresh the open config modal's form in place, if any, and
-     (b) rebuild the dashboard body so server-rendered bits (repo strip,
-         open-with buttons, terminal shortcut specs) pick up the change.
-   Self-writes from POST /config are suppressed server-side, so this
-   only fires on external edits — no infinite loop. */
-var _configReloadTimer = null;
-function _onConfigChanged(payload) {
-    if (_configReloadTimer) clearTimeout(_configReloadTimer);
-    _configReloadTimer = setTimeout(async function() {
-        _configReloadTimer = null;
-        var modal = document.getElementById('config-modal');
-        var modalOpen = modal && modal.style.display !== 'none' && modal.style.display !== '';
-        if (modalOpen) {
-            // Reload the /config payload and push it through the
-            // populators, but keep the user's dirty YAML edits if
-            // any — clobbering an unsaved edit on every external
-            // write would be a foot-gun.
-            try {
-                var res = await fetch('/config', {cache: 'no-store'});
-                if (res.ok) {
-                    var cfg = await res.json();
-                    _populateYamlEditor('repositories', cfg.repositories_yaml_body || '', true);
-                    _populateYamlEditor('preferences', cfg.preferences_yaml_body || '', true);
-                    // Only refresh form fields when the YAML pane isn't dirty —
-                    // otherwise the form stays as-is and the dirty YAML drives
-                    // the upcoming save.
-                    if (!_getDirtyYamlFile()) openConfigModal();
-                }
-            } catch (e) { /* leave modal as-is on transient fetch error */ }
-        }
-        // Always refresh shortcut specs — they live outside the modal
-        // and bind global key handlers.
-        if (typeof _loadTermShortcuts === 'function') _loadTermShortcuts();
-        // Rebuild the server-rendered dashboard so the repo strip and
-        // open-with buttons reflect the new config.
-        _reloadInPlace();
-    }, 150);
-}
-
-function _startEventStream() {
-    if (typeof EventSource !== 'function') return;  // no push, stick with boot checkUpdates
-    try {
-        _eventSource = new EventSource('/events');
-    } catch (e) {
-        _setReconnecting(true);
-        _scheduleEventReconnect();
-        return;
-    }
-    _eventSource.addEventListener('hello', function() {
-        _setReconnecting(false);
-        _eventReconnectDelay = 1000;
-        // Reconcile: the stream may have missed changes during the
-        // gap. checkUpdates diffs fingerprints and picks them up.
-        checkUpdates();
-    });
-    _eventSource.addEventListener('ping', function() { /* keepalive */ });
-    _eventSource.onmessage = function(ev) {
-        // Parse the payload to dispatch on the ``tab`` field. Config
-        // events run a dedicated handler (refresh the modal if open,
-        // else in-place reload so repo strip + open-with buttons pick
-        // up the new YAML). Everything else falls through to the
-        // existing staleness pipeline.
-        var payload = null;
-        try { payload = JSON.parse(ev.data || '{}'); } catch (e) { payload = {}; }
-        // Config changes no longer stream over SSE — the watcher on
-        // config/*.yml was removed; the modal's Save path handles
-        // everything explicitly.
-        // Any other non-typed message is a staleness hint. Debounced so
-        // a burst of watcher events collapses into a single fetch + swap.
-        _scheduleCheckUpdates();
-        // Phase 7: open-note reconcile — a disk change anywhere in the
-        // watched tree might affect the currently-displayed note.
-        _reconcileNoteModal();
-    };
-    _eventSource.onerror = function() {
-        _setReconnecting(true);
-        try { _eventSource.close(); } catch (e) {}
-        _eventSource = null;
-        _scheduleEventReconnect();
-    };
-}
-
-function _scheduleEventReconnect() {
-    if (_eventReconnectTimer) return;
-    _eventReconnectTimer = setTimeout(function() {
-        _eventReconnectTimer = null;
-        _eventReconnectDelay = Math.min(_eventReconnectDelay * 2, 30000);
-        _startEventStream();
-    }, _eventReconnectDelay);
-}
-
-function _setReconnecting(on) {
-    var pill = document.getElementById('reconnecting-pill');
-    if (!pill) return;
-    if (on) pill.removeAttribute('hidden');
-    else pill.setAttribute('hidden', '');
-}
-
-function _autoReloadActiveTab(freshIds) {
-    var freshInActive = [];
-    freshIds.forEach(function(id) {
-        if (_idInTab(id, _activeTab)) freshInActive.push(id);
-    });
-    if (freshInActive.length === 0) return;
-    // If any fresh id isn't fragment-fetchable (tab roots, priority
-    // groups, History) we fall back to a single full rebuild. The
-    // focus-safe primitive and the Phase-2 guards still apply.
-    var needGlobal = freshInActive.some(function(id) {
-        return !_supportsFragmentFetch(id);
-    });
-    if (needGlobal) { _reloadInPlace(); return; }
-    // Dedupe: if both "projects/now/foo" and "projects/now/foo/sub" are
-    // dirty, reloading the parent covers the child. Without this every
-    // descendant triggers its own fragment swap and the tab flickers.
-    var minimal = _minimalRoots(freshInActive);
-    minimal.forEach(function(id) { reloadNode(id); });
-}
-
-function _minimalRoots(ids) {
-    var sorted = ids.slice().sort();
-    var out = [];
-    sorted.forEach(function(id) {
-        var covered = out.some(function(prev) {
-            return id === prev || id.indexOf(prev + '/') === 0;
-        });
-        if (!covered) out.push(id);
-    });
-    return out;
-}
-
-async function updateBaseline() {
-    try {
-        var res = await fetch('/check-updates');
-        if (!res.ok) return;
-        var data = await res.json();
-        _nodeBaseline = data.nodes || {};
-        _dirtyNodes = new Set();
-        _lastFingerprint = data.fingerprint;
-        _lastGitFingerprint = data.git_fingerprint;
-        _renderStale();
-    } catch (e) {}
-}
-
-/* Hard refresh — last-resort escape hatch. Throws away every piece of
-   client-side cached state (baseline, dirty set, shadow cache, pending
-   reloads) and does a full `location.reload()` so the browser re-parses
-   the page from scratch. Used when the soft in-place reload can't shake
-   the UI out of a bad state — e.g. a project rendered in no column, or a
-   stuck stale-dot on a tab. Tracked: condash#14. */
-export function refreshAll() {
-    _nodeBaseline = null;
-    _dirtyNodes = new Set();
-    _clearShadowCache();
-    reloadState.pendingNodes.clear();
-    reloadState.pendingInPlace = false;
-    _lastFingerprint = null;
-    _lastGitFingerprint = null;
-    // Force-invalidate the server-side items/knowledge caches before
-    // reloading so the next GET / re-walks the tree from disk. Best
-    // effort: reload unconditionally even if the POST errors, since
-    // `location.reload()` is also the user-requested action.
-    fetch('/rescan', {method: 'POST'})
-        .catch(function() {})
-        .finally(function() { location.reload(); });
-}
-
-
-export async function reloadNode(nodeId) {
-    // Fall back to global reload for tab-level, group-level, and code nodes.
-    if (!_supportsFragmentFetch(nodeId)) {
-        _reloadInPlace();
-        return;
-    }
-    try {
-        var res = await fetch('/fragment?id=' + encodeURIComponent(nodeId),
-                              {cache: 'no-store'});
-        if (!res.ok) { _reloadInPlace(); return; }
-        var html = await res.text();
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(nodeId) : nodeId;
-        var existing = document.querySelector('[data-node-id="' + esc + '"]');
-        if (!existing) { _reloadInPlace(); return; }
-
-        var tpl = document.createElement('template');
-        tpl.innerHTML = html.trim();
-        var fresh = tpl.content.firstElementChild;
-        if (!fresh) { _reloadInPlace(); return; }
-
-        // Card .collapsed/.expanded toggle is held only in the live
-        // class list; the server always re-renders the card collapsed.
-        // Preserve whatever the user had open across the swap so a
-        // localized refresh doesn't snap the card shut on them.
-        var wasExpanded = existing.classList.contains('card')
-            && !existing.classList.contains('collapsed');
-
-        var result = focusSafeSwap(existing, fresh);
-        if (result.skipped) {
-            // Guard tripped (runner live, or note modal dirty). Park the
-            // request; _flushPendingReloads replays it when the guard
-            // clears. Dirty-set + baseline are intentionally preserved.
-            reloadState.pendingNodes.add(nodeId);
-            return;
-        }
-        if (wasExpanded && fresh.classList && fresh.classList.contains('card')) {
-            fresh.classList.remove('collapsed');
-        }
-        // Notes-tree groups persist in localStorage (no data-node-id),
-        // so a per-key restore is needed after the swap.
-        restoreNotesTreeState();
-
-        // Refresh baseline BEFORE dropping dirty entries: otherwise a
-        // checkUpdates poll landing in the await-gap below would compare
-        // the post-swap current hash against the pre-swap baseline, see
-        // a diff, re-add the id to _dirtyNodes, and strand the dot on
-        // the tab forever. Updating the baseline first means a racing
-        // poll sees baseline == current and short-circuits with no diff.
-        // condash#14 (stale tab-dot after tab-away-and-back).
-        await _refreshBaselineFor(nodeId);
-        var prefix = nodeId + '/';
-        var dropped = [];
-        _dirtyNodes.forEach(function(id) {
-            if (id === nodeId || id.indexOf(prefix) === 0) dropped.push(id);
-        });
-        dropped.forEach(function(id) { _dirtyNodes.delete(id); });
-        // The server-rendered fragment is always visible (no .hidden class).
-        // Re-apply the active subtab filter so a card whose priority falls
-        // outside the current subtab slides back into its proper hidden
-        // state — and one whose priority just entered the current subtab
-        // becomes visible.
-        if (_activeTab === 'projects') _applySubtab(_activeSubtab);
-        _renderStale();
-    } catch (e) {
-        _reloadInPlace();
-    }
-}
-
-async function _refreshBaselineFor(nodeId) {
-    // Re-fetch /check-updates and adopt the current hash for the reloaded
-    // subtree so the next poll doesn't immediately re-dirty it. Other
-    // nodes' dirty state is preserved.
-    try {
-        var res = await fetch('/check-updates');
-        if (!res.ok) return;
-        var data = await res.json();
-        var current = data.nodes || {};
-        if (!_nodeBaseline) _nodeBaseline = {};
-        var prefix = nodeId + '/';
-        for (var id in current) {
-            if (id === nodeId || id.indexOf(prefix) === 0) {
-                _nodeBaseline[id] = current[id];
-            }
-        }
-    } catch (e) {}
-}
+// The "Stale-detection polling" region (checkUpdates, _renderStale,
+// staleState, reloadNode, refreshAll, updateBaseline, …) now lives in
+// `sections/stale-poll.js`. The "SSE event stream" region
+// (_startEventStream, reconnect bookkeeping, _onConfigChanged dead
+// code) now lives in `sections/sse.js`. Both were extracted on
+// 2026-04-24 as P-09 cut 3 — see notes/05-p09-cut3.md for the design
+// decisions.
 
 // The "Tab drag" region that used to live here (pointer-event drag,
 // tab create/close/rename, splitter drag, pane-resize drag, shortcuts,
@@ -2780,7 +2361,7 @@ initRunnerViewersSideEffects();
 // drops, a visible indicator surfaces and reconnect logic re-runs
 // checkUpdates() as soon as the stream is back.
 checkUpdates();
-_startEventStream();
+initSseSideEffects();
 
 /* On first load, detect an unset conception_path and surface the setup
    banner + auto-open the config modal so the user lands on the editor. */

@@ -11,7 +11,8 @@
    switchTab / switchSubtab / refreshAll via imports; all three are
    referenced inside a function body so the cycle remains TDZ-safe. */
 
-import { switchTab, switchSubtab, refreshAll } from '../dashboard-main.js';
+import { switchTab, switchSubtab } from '../dashboard-main.js';
+import { refreshAll } from './stale-poll.js';
 
 /* Remove accents + punctuation and produce a YYYY-MM-DD-compatible
    slug. Keeps letters, digits, spaces; collapses spaces into single

@@ -20,7 +20,8 @@
    runnerForceStop are the code paths that actually keep viewers
    reattached today. */
 
-import { _reloadInPlace, reloadNode } from '../dashboard-main.js';
+import { _reloadInPlace } from '../dashboard-main.js';
+import { reloadNode } from './stale-poll.js';
 import { _termClipboardRead, _termClipboardWrite } from './terminal.js';
 import { _flushPendingReloads } from './reload-guards.js';
 
