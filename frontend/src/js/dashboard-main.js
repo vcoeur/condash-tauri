@@ -28,7 +28,7 @@ import {
     openAboutModal, closeAboutModal, initAboutModalSideEffects,
 } from './sections/about-modal.js';
 import {
-    _refreshShadowCache, _consumeShadowCache,
+    _refreshShadowCache, _consumeShadowCache, _clearShadowCache,
 } from './sections/shadow-cache.js';
 import {
     openPath, openInTerminal, workOn, openFolder,
@@ -40,6 +40,22 @@ import {
 import {
     _NOTES_OPEN_KEY, restoreNotesTreeState, initNotesTreeStateSideEffects,
 } from './sections/notes-tree-state.js';
+import {
+    _cm, _mountCm, _destroyCm, _cmRetheme,
+} from './sections/cm6-mount.js';
+import {
+    initCm6ThemeSyncSideEffects,
+} from './sections/cm6-theme-sync.js';
+import {
+    reloadState,
+    _noteModalDirty, _runnerActiveIn,
+    _defaultReloadSkipIf, _flushPendingReloads,
+} from './sections/reload-guards.js';
+import {
+    _supportsFragmentFetch,
+    _captureDetailsOpenState,
+    _restoreDetailsOpenState,
+} from './sections/local-subtree-reload.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -495,7 +511,7 @@ document.addEventListener('click', function(e) {
    up looking at a half-swapped DOM. */
 var _reloadInPlaceInFlight = false;
 var _reloadInPlacePending = false;
-async function _reloadInPlace() {
+export async function _reloadInPlace() {
     // Single-flight with trailing coalesce. Two _reloadInPlace calls
     // racing (e.g. a rapid burst of SSE events) used to swap #dash-main
     // twice — and if the responses completed out-of-order (request 1
@@ -526,7 +542,7 @@ async function _reloadInPlace() {
 
         var result = focusSafeSwap(current, fresh);
         if (result.skipped) {
-            _pendingReloadInPlace = true;
+            reloadState.pendingInPlace = true;
             return;
         }
         // A successful global swap is authoritative. Clear any residual
@@ -1148,7 +1164,7 @@ var _noteNavStack = [];
    are hidden/shown by CSS. `_noteModal` tracks the state shared across
    panes so mode switches preserve user edits and mtime for the save
    contract. */
-var _noteModal = {
+export var _noteModal = {
     path: null,
     editable: false,     // false when kind is pdf/image/binary — edit modes disabled
     kind: null,          // from /note-raw
@@ -1169,7 +1185,7 @@ var _noteModal = {
 /* Flip the dirty flag and refresh the Save button. Safe to call on every
    keystroke — the button toggle is the only DOM work. Also drains any
    reload requests that were parked because the modal was dirty. */
-function _setDirty(value) {
+export function _setDirty(value) {
     var next = !!value;
     if (_noteModal.dirty === next) return;
     _noteModal.dirty = next;
@@ -1609,69 +1625,6 @@ function openDeliverable(path) {
     }).catch(function() {});
 }
 
-/* --- CodeMirror 6 mount / unmount ---
-   CM6 is loaded lazily by the <script type="module"> block at the end
-   of the document. Once ready, it sets window.__cm6 = {EditorView,
-   EditorState, basicSetup, markdown, keymap, Compartment, themeC,
-   buildTheme} and calls window.__cm6OnReady(). Before that, the "Edit"
-   toggle stays disabled. */
-var _cm = { view: null, themeC: null };
-
-function _mountCm() {
-    if (!window.__cm6) return;
-    var host = document.getElementById('note-pane-cm');
-    if (!host) return;
-    if (_cm.view) return;
-    // Clear any placeholder text.
-    host.innerHTML = '';
-    var cm6 = window.__cm6;
-    _cm.themeC = new cm6.Compartment();
-    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    var exts = [
-        cm6.basicSetup,
-        cm6.markdown(),
-        cm6.EditorView.lineWrapping,
-        cm6.keymap.of([
-            {key: 'Mod-s', preventDefault: true, run: function() { saveEdit(); return true; }},
-        ]),
-        _cm.themeC.of(cm6.buildTheme(isDark)),
-        cm6.EditorView.updateListener.of(function(u) {
-            // Reflect edits into the canonical buffer live so a mode
-            // switch doesn't need a separate capture path.
-            if (u.docChanged) {
-                _noteModal.text = u.state.doc.toString();
-                _setDirty(true);
-            }
-        }),
-    ];
-    _cm.view = new cm6.EditorView({
-        doc: _noteModal.text || '',
-        parent: host,
-        extensions: exts,
-    });
-    // Caret at offset 0, scroll to top, focus.
-    _cm.view.dispatch({selection: {anchor: 0}});
-    _cm.view.scrollDOM.scrollTop = 0;
-    _cm.view.focus();
-}
-
-function _destroyCm() {
-    if (_cm.view) { try { _cm.view.destroy(); } catch (e) {} }
-    _cm.view = null;
-    _cm.themeC = null;
-    var host = document.getElementById('note-pane-cm');
-    if (host) host.innerHTML = '';
-}
-
-/* Called by the theme toggle to repaint CM6 without remounting. */
-function _cmRetheme() {
-    if (!_cm.view || !_cm.themeC || !window.__cm6) return;
-    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    _cm.view.dispatch({
-        effects: _cm.themeC.reconfigure(window.__cm6.buildTheme(isDark)),
-    });
-}
-
 /* --- Note modal mode management ---
    Three sibling panes (view, cm, plain) live inside #note-modal-body;
    the modal's data-mode attribute drives CSS visibility. setNoteMode
@@ -1781,7 +1734,7 @@ function setNoteMode(next) {
     }
 }
 
-async function saveEdit() {
+export async function saveEdit() {
     var inner = document.getElementById('note-modal-inner');
     var mode = inner.getAttribute('data-mode');
     if (mode !== 'cm' && mode !== 'plain') return;
@@ -2694,9 +2647,9 @@ async function updateBaseline() {
 export function refreshAll() {
     _nodeBaseline = null;
     _dirtyNodes = new Set();
-    _shadowCache = null;
-    _pendingReloadNodes.clear();
-    _pendingReloadInPlace = false;
+    _clearShadowCache();
+    reloadState.pendingNodes.clear();
+    reloadState.pendingInPlace = false;
     _lastFingerprint = null;
     _lastGitFingerprint = null;
     // Force-invalidate the server-side items/knowledge caches before
@@ -2706,102 +2659,6 @@ export function refreshAll() {
     fetch('/rescan', {method: 'POST'})
         .catch(function() {})
         .finally(function() { location.reload(); });
-}
-
-/* --- Local subtree reload ---
-   Click on a stale marker. For node ids the server knows how to fragment
-   (project card, knowledge card, knowledge directory) we fetch just that
-   fragment and replace the matching element in place, preserving any
-   <details> open-state inside it. For everything else (groups, tabs, code
-   nodes) the fragment endpoint returns 404 and we fall back to the global
-   _reloadInPlace. Either way the dirty-set entries covered by the reload
-   are dropped and the baseline is refreshed for those entries. */
-function _supportsFragmentFetch(nodeId) {
-    // Project cards: projects/<pri>/<slug>
-    if (/^projects\/[a-z]+\/.+/.test(nodeId)) return true;
-    // Knowledge directories and cards (not the root).
-    if (nodeId === 'knowledge') return false;
-    if (/^knowledge\//.test(nodeId)) return true;
-    // Repo blocks: code/<group>/<repo>. Group and tab ids still fall
-    // back to global reload.
-    if (/^code\/[^/]+\/[^/]+$/.test(nodeId)) return true;
-    return false;
-}
-
-function _captureDetailsOpenState(root) {
-    var map = {};
-    root.querySelectorAll('details[data-node-id]').forEach(function(d) {
-        map[d.getAttribute('data-node-id')] = d.open;
-    });
-    return map;
-}
-
-function _restoreDetailsOpenState(root, map) {
-    root.querySelectorAll('details[data-node-id]').forEach(function(d) {
-        var id = d.getAttribute('data-node-id');
-        if (id in map) d.open = map[id];
-    });
-}
-
-/* --- Reload guards (Phase 2) ---
-   The two production landmines before the overhaul: a fragment swap
-   while a runner's WebSocket is live silently kills the build; a
-   _reloadInPlace while the note modal has unsaved edits silently
-   discards them. Both are now caught by focusSafeSwap's default
-   skipIf — the swap is refused, the dirty state is preserved, and a
-   retry is queued for when the guard clears. */
-function _noteModalDirty() {
-    return !!(window._noteModal && _noteModal.dirty);
-}
-
-function _runnerActiveIn(targetEl) {
-    if (!targetEl || typeof _runnerViewers !== 'object') return false;
-    var mounts = targetEl.querySelectorAll &&
-        targetEl.querySelectorAll('.runner-term-mount');
-    if (!mounts || !mounts.length) return false;
-    var activeKeys = {};
-    for (var dk in _runnerViewers) {
-        var v = _runnerViewers[dk];
-        if (v && !v.exited && v.ws && v.ws.readyState === WebSocket.OPEN) {
-            activeKeys[v.key] = true;
-        }
-    }
-    for (var i = 0; i < mounts.length; i++) {
-        var key = mounts[i].getAttribute('data-runner-key');
-        if (key && activeKeys[key]) return true;
-    }
-    return false;
-}
-
-function _defaultReloadSkipIf(targetEl) {
-    if (_noteModalDirty()) return 'note-dirty';
-    if (_runnerActiveIn(targetEl)) return 'runner-active';
-    return null;
-}
-
-/* Pending-reload bookkeeping. When a swap is refused, we stash the
-   request and retry when the responsible guard clears. Deliberately
-   kept small: one boolean for the global rebuild, a set of node ids
-   for per-subtree reloads. */
-var _pendingReloadNodes = new Set();
-var _pendingReloadInPlace = false;
-
-function _flushPendingReloads() {
-    if (_noteModalDirty()) return;  // still blocked; caller will re-flush
-    if (_pendingReloadInPlace) {
-        _pendingReloadInPlace = false;
-        _pendingReloadNodes.clear();  // superseded by the global rebuild
-        _reloadInPlace();
-        return;
-    }
-    var retry = Array.from(_pendingReloadNodes);
-    _pendingReloadNodes.clear();
-    retry.forEach(function(id) {
-        // Runner-active guard for this specific node is re-checked by
-        // focusSafeSwap's skipIf — any still-blocked entries land back
-        // in _pendingReloadNodes via reloadNode's skipped-branch.
-        reloadNode(id);
-    });
 }
 
 /* --- Focus-safe DOM swap primitive ---
@@ -2906,7 +2763,7 @@ function _restoreFromSnapshot(el, snap, opts) {
     });
 }
 
-async function reloadNode(nodeId) {
+export async function reloadNode(nodeId) {
     // Fall back to global reload for tab-level, group-level, and code nodes.
     if (!_supportsFragmentFetch(nodeId)) {
         _reloadInPlace();
@@ -2938,7 +2795,7 @@ async function reloadNode(nodeId) {
             // Guard tripped (runner live, or note modal dirty). Park the
             // request; _flushPendingReloads replays it when the guard
             // clears. Dirty-set + baseline are intentionally preserved.
-            _pendingReloadNodes.add(nodeId);
+            reloadState.pendingNodes.add(nodeId);
             return;
         }
         if (wasExpanded && fresh.classList && fresh.classList.contains('card')) {
@@ -3216,6 +3073,7 @@ initThemeSideEffects();
 initAboutModalSideEffects();
 initNewItemModalSideEffects();
 initNotesTreeStateSideEffects();
+initCm6ThemeSyncSideEffects();
 
 // Phase 6: event-driven staleness. /events streams tab-level hints;
 // checkUpdates() runs on connect + every hint to reconcile the real
@@ -3239,15 +3097,6 @@ _startEventStream();
     } catch (e) {}
 })();
 
-/* --- CodeMirror 6 theme re-sync ---
-   When the user flips dark/light, the theme-loader script in <head>
-   updates documentElement.data-theme synchronously. We watch that
-   attribute and retheme the live EditorView (no remount) so the
-   markdown editor picks up the new palette in the same frame. */
-new MutationObserver(function() {
-    if (typeof _cmRetheme === 'function') _cmRetheme();
-}).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
-
 /* --- Inline dev-server runner viewers ---
    Each `.runner-term-mount` element rendered by the repo strip gets its
    own xterm instance + WebSocket to `/ws/runner/<key>`. Attach and
@@ -3256,7 +3105,7 @@ new MutationObserver(function() {
    and creates fresh ones for any newly-inserted mounts. Pop-out mode
    detaches the inline ws in favour of a modal-hosted viewer, then
    re-attaches inline when the modal closes. */
-var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
+export var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
 var _runnerActiveModal = null;
 function _runnerDomKey(key, checkout) { return key + '|' + checkout; }
 

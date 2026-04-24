@@ -34,4 +34,11 @@ function _consumeShadowCache() {
     return html;
 }
 
-export { _refreshShadowCache, _consumeShadowCache };
+/* Drop the cache entirely. Used by refreshAll, which rebuilds every
+   canonical structure from scratch and wants to throw out any stale
+   pre-fetched HTML still sitting on the side. */
+function _clearShadowCache() {
+    _shadowCache = null;
+}
+
+export { _refreshShadowCache, _consumeShadowCache, _clearShadowCache };
