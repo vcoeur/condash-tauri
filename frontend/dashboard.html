@@ -25,14 +25,6 @@
 <script src="/vendor/xterm/lib/xterm.min.js" defer></script>
 <script src="/vendor/xterm/lib/xterm-addon-fit.min.js" defer></script>
 <script src="/vendor/codemirror/codemirror.min.js" defer></script>
-<!--
-  Frontend-split bundle (F1 scaffolding, 2026-04 condash-frontend-split project).
-  Built from src/condash/assets/src/{js,css}/ by `make frontend` (esbuild).
-  Empty in F1 — as each region of the inline <style> and <script> blocks
-  below is extracted (F2 for CSS, F3/F4 for JS), its content moves into
-  the bundle and the inline copy shrinks. Keep loaded in this order so
-  that during the split inline rules still win on specificity ties.
--->
 <link rel="stylesheet" href="/assets/dist/bundle.css">
 <script src="/assets/dist/bundle.js" defer></script>
 </head>
@@ -44,10 +36,10 @@
 <div id="dash-main" class="app">
 <div class="topbar">
     <div class="tabs tabs-primary">
-        <div class="tab active" data-tab="projects" data-action="switch-tab" data-tab="projects">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
-        <div class="tab" data-tab="code" data-action="switch-tab" data-tab="code">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
-        <div class="tab" data-tab="knowledge" data-action="switch-tab" data-tab="knowledge">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
-        <div class="tab" data-tab="history" data-action="switch-tab" data-tab="history">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
+        <div class="tab active" data-action="switch-tab" data-tab="projects">Projects<span class="tab-count">({{COUNT_PROJECTS}})</span></div>
+        <div class="tab" data-action="switch-tab" data-tab="code">Code<span class="tab-count">({{COUNT_REPOS}})</span></div>
+        <div class="tab" data-action="switch-tab" data-tab="knowledge">Knowledge<span class="tab-count">({{COUNT_KNOWLEDGE}})</span></div>
+        <div class="tab" data-action="switch-tab" data-tab="history">History<span class="tab-count">({{COUNT_HISTORY}})</span></div>
     </div>
     <div class="header-actions">
         <span id="reconnecting-pill" class="reconnecting-pill" hidden title="Lost connection to the dashboard backend — retrying…">Reconnecting…</span>
@@ -94,10 +86,10 @@
     <button type="button" data-action="open-config-modal">Configure</button>
 </div>
 <div id="projects-subtabs" class="tabs tabs-secondary">
-    <div class="tab active" data-subtab="current" data-action="switch-subtab" data-subtab="current">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
-    <div class="tab" data-subtab="next" data-action="switch-subtab" data-subtab="next">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
-    <div class="tab" data-subtab="backlog" data-action="switch-subtab" data-subtab="backlog">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
-    <div class="tab" data-subtab="done" data-action="switch-subtab" data-subtab="done">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
+    <div class="tab active" data-action="switch-subtab" data-subtab="current">Current<span class="tab-count">({{COUNT_CURRENT}})</span></div>
+    <div class="tab" data-action="switch-subtab" data-subtab="next">Next<span class="tab-count">({{COUNT_NEXT}})</span></div>
+    <div class="tab" data-action="switch-subtab" data-subtab="backlog">Backlog<span class="tab-count">({{COUNT_BACKLOG}})</span></div>
+    <div class="tab" data-action="switch-subtab" data-subtab="done">Done<span class="tab-count">({{COUNT_DONE}})</span></div>
 </div>
 <main id="main-scroll">
     <div id="projects-pane" data-node-id="projects">
@@ -149,9 +141,9 @@
             <button class="note-modal-back" id="note-modal-back" data-action="note-nav-back" aria-label="Back" title="Back to previous note" hidden>&#9664;</button>
             <span class="note-modal-title" id="note-modal-title" ondblclick="startRenameNote()" title="Double-click to rename (notes/ files only)">Note</span>
             <div class="note-mode-toggle" id="note-mode-toggle" role="group" aria-label="Note mode">
-                <button class="note-mode-btn" data-mode="view" data-action="set-note-mode" data-mode="view" title="View (rendered)">View</button>
-                <button class="note-mode-btn" data-mode="cm" data-action="set-note-mode" data-mode="cm" title="Edit with syntax highlighting (Ctrl+E)">Edit</button>
-                <button class="note-mode-btn" data-mode="plain" data-action="set-note-mode" data-mode="plain" title="Plain textarea edit">Plain</button>
+                <button class="note-mode-btn" data-action="set-note-mode" data-mode="view" title="View (rendered)">View</button>
+                <button class="note-mode-btn" data-action="set-note-mode" data-mode="cm" title="Edit with syntax highlighting (Ctrl+E)">Edit</button>
+                <button class="note-mode-btn" data-action="set-note-mode" data-mode="plain" title="Plain textarea edit">Plain</button>
             </div>
             <div class="note-modal-actions">
                 <button id="note-save-btn" class="note-action-btn note-action-primary" data-action="save-edit" style="display:none">Save</button>
