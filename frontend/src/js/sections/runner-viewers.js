@@ -3,27 +3,26 @@
    Each `.runner-term-mount` element rendered by the repo strip gets its
    own xterm instance + WebSocket to `/ws/runner/<key>`. Attach and
    detach do not kill the server-side pty; reloadNode / _reloadInPlace
-   swaps the mount DOM, and runnerReattachAll() closes orphaned viewers
+   swap the mount DOM, and runnerReattachAll() closes orphaned viewers
    and creates fresh ones for any newly-inserted mounts. Pop-out mode
    detaches the inline ws in favour of a modal-hosted viewer, then
    re-attaches inline when the modal closes.
 
-   Extracted from dashboard-main.js on 2026-04-24 (P-09 cut 2 of
-   conception/projects/2026-04-23-condash-frontend-extraction). The
-   mid-region reload-hook IIFE is preserved verbatim inside
-   initRunnerViewersSideEffects() — it currently has no effect under
-   ESM (window._reloadInPlace is a separate binding from the module's
-   imported _reloadInPlace), but that's a pre-existing condition
-   inherited from the ESM migration and fixing it belongs in a
-   follow-up, not a pure region extraction. The explicit
-   _runnerRefreshRepoNode calls from runnerStart / runnerStop /
-   runnerForceStop are the code paths that actually keep viewers
-   reattached today. */
+   Reattachment is driven from two sources:
+
+   - The explicit `_runnerRefreshRepoNode` calls inside runnerStart /
+     runnerStop / runnerForceStop — guaranteed to fire for user-driven
+     runner state changes.
+   - The shared reload-hooks registry — runnerReattachAll() is
+     registered via `onPostReload(...)` so every successful global or
+     fragment swap sweeps orphaned viewers, regardless of which code
+     path triggered the reload. */
 
 import { _reloadInPlace } from '../dashboard-main.js';
 import { reloadNode } from './stale-poll.js';
 import { _termClipboardRead, _termClipboardWrite } from './terminal.js';
 import { _flushPendingReloads } from './reload-guards.js';
+import { onPostReload } from './reload-hooks.js';
 
 var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
 var _runnerActiveModal = null;
@@ -439,26 +438,11 @@ function _runnerCloseModal() {
 }
 
 function initRunnerViewersSideEffects() {
-    // Hook runner reattachment into the existing refresh paths. Patch
-    // _reloadInPlace and reloadNode just after their definitions so every
-    // DOM swap leads into a viewer sweep without scattering calls across
-    // call sites.
-    var origReloadInPlace = window._reloadInPlace;
-    if (typeof origReloadInPlace === 'function') {
-        window._reloadInPlace = async function() {
-            var ret = await origReloadInPlace.apply(this, arguments);
-            try { runnerReattachAll(); } catch (e) {}
-            return ret;
-        };
-    }
-    var origReloadNode = window.reloadNode;
-    if (typeof origReloadNode === 'function') {
-        window.reloadNode = async function() {
-            var ret = await origReloadNode.apply(this, arguments);
-            try { runnerReattachAll(); } catch (e) {}
-            return ret;
-        };
-    }
+    // Sweep orphaned viewers + attach fresh ones after every global
+    // or fragment swap. The hook registry is fired by _reloadInPlace
+    // and reloadNode themselves; runner-viewers doesn't care which
+    // code path triggered the reload.
+    onPostReload(runnerReattachAll);
 
     // Initial attach — runs once xterm assets have loaded.
     document.addEventListener('DOMContentLoaded', function() {

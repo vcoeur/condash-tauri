@@ -97,6 +97,7 @@ import {
 import {
     initActionDispatch, registerAction,
 } from './sections/action-dispatch.js';
+import { firePostReloadHooks } from './sections/reload-hooks.js';
 import {
     openConfigModal, closeConfigModal, saveConfig,
 } from './sections/config-modal.js';
@@ -330,6 +331,7 @@ export async function _reloadInPlace() {
         // against a fresh /check-updates. condash#14.
         staleState.dirtyNodes = new Set();
         _rebindDashHandlers();
+        firePostReloadHooks();
     } catch (e) {
         location.reload();
     } finally {

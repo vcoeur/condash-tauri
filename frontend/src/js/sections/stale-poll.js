@@ -30,6 +30,7 @@ import { _refreshShadowCache, _clearShadowCache } from './shadow-cache.js';
 import { _supportsFragmentFetch } from './local-subtree-reload.js';
 import { focusSafeSwap } from './dom-swap.js';
 import { restoreNotesTreeState } from './notes-tree-state.js';
+import { firePostReloadHooks } from './reload-hooks.js';
 
 const staleState = {
     nodeBaseline: null,     // Object id → hash (null until first poll)
@@ -306,6 +307,7 @@ async function reloadNode(nodeId) {
         // becomes visible.
         if (_activeTab === 'projects') _applySubtab(_activeSubtab);
         _renderStale();
+        firePostReloadHooks();
     } catch (e) {
         _reloadInPlace();
     }
