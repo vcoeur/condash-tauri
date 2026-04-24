@@ -14,7 +14,7 @@
    notes/01-p07-tab-drag-split.md §D2. */
 
 import { _termCreateTab, _termSyncOpenFlag } from './tab-drag.js';
-import { termState, _termActiveTab, _termSendResize } from '../dashboard-main.js';
+import { termState, _termActiveTab, _termSendResize } from './terminal.js';
 
 async function openPath(ev, path, tool) {
     ev.stopPropagation();

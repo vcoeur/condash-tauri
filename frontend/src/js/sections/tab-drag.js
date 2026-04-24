@@ -24,7 +24,7 @@ import {
     _termRenderTabChip,
     _termAssetsReady, _termWarnAssets,
     _termClipboardRead, _termClipboardWrite,
-} from '../dashboard-main.js';
+} from './terminal.js';
 
 /* --- Tab drag (pointer-event based) -----------------------------------
    The HTML5 drag-and-drop API crashes pywebview: QtWebEngine tries to

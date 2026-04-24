@@ -20,7 +20,8 @@
    runnerForceStop are the code paths that actually keep viewers
    reattached today. */
 
-import { _termClipboardRead, _termClipboardWrite, _reloadInPlace, reloadNode } from '../dashboard-main.js';
+import { _reloadInPlace, reloadNode } from '../dashboard-main.js';
+import { _termClipboardRead, _termClipboardWrite } from './terminal.js';
 import { _flushPendingReloads } from './reload-guards.js';
 
 var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
