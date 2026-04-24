@@ -85,6 +85,7 @@ import {
 import {
     setNoteMode, saveEdit, createNoteFor, startRenameNote,
     initNoteModeSideEffects,
+    _syncModeControls,
 } from './sections/note-mode.js';
 import {
     _reconcileNoteModal,
