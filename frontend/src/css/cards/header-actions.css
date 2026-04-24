@@ -1,0 +1,23 @@
+/* --- Theme toggle / header actions --- */
+.header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.theme-toggle {
+    display: flex; align-items: center; gap: 0.5rem;
+    cursor: pointer; user-select: none; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 20px;
+    background: var(--toggle-bg); font-size: 0.8rem; color: var(--toggle-icon);
+    transition: background 0.2s, border-color 0.2s;
+}
+.theme-toggle:hover { border-color: var(--accent); }
+.theme-toggle .icon { font-size: 1rem; line-height: 1; }
+.config-toggle { padding: 4px 8px; }
+.config-toggle svg { display: block; }
+.about-toggle { padding: 4px 8px; }
+.about-toggle svg { display: block; }
+/* Phase 6: SSE-dropped indicator. Quiet pill next to the header
+   actions; surfaces only while /events is disconnected. */
+.reconnecting-pill {
+    padding: 3px 10px; font-size: 0.75rem; border-radius: 12px;
+    background: #fdd; color: #000; border: 1px solid #e99;
+    user-select: none; cursor: default;
+}
+.reconnecting-pill[hidden] { display: none !important; }

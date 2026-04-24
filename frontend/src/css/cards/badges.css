@@ -1,0 +1,45 @@
+/* --- Kind badges --- */
+.kind-prefix {
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; margin-right: 0.3rem; border: none;
+}
+.kind-incident { color: var(--kind-incident); }
+.kind-project { color: var(--kind-project); }
+.kind-document { color: var(--kind-document); }
+
+/* --- Priority badges --- */
+.pri-wrap { position: relative; display: inline-block; }
+.pri-current {
+    font-size: 0.65rem; font-weight: 600; padding: 2px 8px;
+    border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em;
+    cursor: pointer; user-select: none;
+}
+.pri-menu {
+    display: none; position: absolute; top: 100%; left: 0; z-index: 10;
+    margin-top: 3px; padding: 3px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--shadow-md);
+}
+/* Stack options one-per-row: predictable width, no clipping off-card
+   regardless of how many statuses the enum grows to carry. */
+.pri-menu.open { display: flex; flex-direction: column; gap: 3px; }
+.pri-menu .pri-option { text-align: center; }
+.pri-option {
+    font-size: 0.65rem; font-weight: 600; padding: 2px 8px;
+    border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em;
+    cursor: pointer; user-select: none;
+}
+.pri-option:hover { filter: brightness(0.9); }
+.pri-now { background: var(--pri-now-bg); color: var(--pri-now); }
+.pri-soon { background: var(--pri-soon-bg); color: var(--pri-soon); }
+.pri-later { background: var(--pri-later-bg); color: var(--pri-later); }
+.pri-backlog { background: var(--pri-backlog-bg); color: var(--pri-backlog); }
+.pri-review { background: var(--pri-review-bg); color: var(--pri-review); }
+.pri-done { background: var(--pri-done-bg); color: var(--pri-done); }
+
+.invalid-status-badge {
+    font-size: 0.65rem; font-weight: 600; padding: 2px 8px;
+    border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em;
+    margin-right: 6px; background: #fdd; color: #900; border: 1px solid #f99;
+    cursor: help; user-select: none;
+}

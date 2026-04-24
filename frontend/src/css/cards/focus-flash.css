@@ -1,0 +1,12 @@
+/* Focus flash: animated ring on a project card after jumpToProject(). The
+   ring fades over ~1.8s so the eye can land on the card without a
+   permanent highlight.  */
+@keyframes focus-flash-pulse {
+    0%   { box-shadow: 0 0 0 3px var(--accent), 0 0 14px 2px var(--accent); }
+    100% { box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent; }
+}
+.card.focus-flash {
+    animation: focus-flash-pulse 1.8s ease-out;
+    position: relative;
+}
+

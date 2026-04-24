@@ -1,0 +1,39 @@
+.note-modal-search {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card-hover);
+}
+.note-modal-search[hidden] { display: none; }
+/* Phase 7: external-change banner. Surfaces inside the note modal
+   when disk mtime drifts from the buffer's load mtime. */
+.note-modal-external-banner {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.4rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    background: #fff3cd; color: #000;
+    font-size: 0.85rem;
+}
+.note-modal-external-banner[hidden] { display: none; }
+.note-modal-external-banner span { flex: 1; }
+.note-modal-search input[type="search"] {
+    flex: 1; padding: 0.3rem 0.6rem;
+    border: 1px solid var(--input-border); border-radius: 6px;
+    background: var(--input-bg); color: var(--text);
+    font-size: 0.88rem;
+}
+.note-modal-search input[type="search"]:focus {
+    outline: none; border-color: var(--input-focus);
+}
+.note-search-count {
+    font-size: 0.78rem; color: var(--text-muted);
+    min-width: 5ch; text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.note-modal-body mark.note-match {
+    background: var(--accent-bg); color: inherit;
+    padding: 0 1px; border-radius: 2px;
+}
+.note-modal-body mark.note-match.active {
+    background: var(--accent); color: #fff;
+}

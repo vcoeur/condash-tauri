@@ -1,0 +1,43 @@
+/* Primary tabs — floating pills.
+   - Resting state: bg-card surface with a hairline border and a faint
+     shadow, so each tab reads as a tactile card, not just tinted text.
+   - Hover: tab drifts up 1px, picks up the accent tint.
+   - Active: fills with accent, gains a soft accent-tinted glow and
+     stays slightly lifted. Letter-spacing keeps it crisp. */
+.tabs-primary { gap: 0.7rem; }
+.tabs-primary .tab {
+    font-size: 0.88rem; font-weight: 600;
+    letter-spacing: 0.015em;
+    padding: 0.58rem 1.4rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    margin-bottom: 0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition:
+        background 0.16s ease,
+        border-color 0.16s ease,
+        color 0.16s ease,
+        box-shadow 0.16s ease,
+        transform 0.16s ease;
+}
+.tabs-primary .tab:hover:not(.active) {
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.tabs-primary .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow:
+        0 8px 20px -6px color-mix(in srgb, var(--accent) 55%, transparent),
+        0 2px 4px -1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.tabs-primary .tab.active .tab-count { color: rgba(255, 255, 255, 0.78); }
+.tabs-primary .tab .tab-count { font-size: 0.8rem; margin-left: 0.45rem; }
+

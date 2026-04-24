@@ -1,0 +1,60 @@
+/* --- Note preview modal --- */
+.note-modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    z-index: 1000; display: none; align-items: center; justify-content: center;
+    padding: 1rem;
+}
+.note-modal-backdrop.open { display: flex; }
+/* When the embedded terminal is open, the note preview modal must not
+   cover it — the user types into the terminal while reading the note.
+   Shrink the backdrop to everything *above* the terminal pane so pointer
+   events pass through to xterm and the terminal stays visually uncovered.
+   Config modal keeps its full-viewport coverage (needs focus). */
+body[data-term-open="1"] #note-modal.note-modal-backdrop {
+    bottom: var(--term-height, 38vh);
+}
+.note-modal {
+    background: var(--bg-card); color: var(--text);
+    border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    width: min(1400px, 96vw); height: min(1100px, 95vh);
+    /* Never exceed the (possibly shrunk) backdrop. When the terminal is
+       open, the backdrop is clipped by `bottom: var(--term-height)`; this
+       cap keeps the modal inside that area so the flex-centered layout
+       doesn't overflow both top and bottom. The inner .note-modal-body
+       already handles overflow with overflow:auto. */
+    max-height: 100%;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.note-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 1.2rem; border-bottom: 1px solid var(--border);
+    background: var(--bg-card-hover);
+}
+.note-modal-title {
+    font-size: 0.95rem; font-weight: 600;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    color: var(--text); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; min-width: 0; flex: 1;
+    cursor: text;
+}
+.note-rename-input {
+    font: inherit; color: var(--text);
+    background: var(--bg-card-hover); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 1px 6px; outline: none;
+    min-width: 8ch;
+}
+.note-rename-ext { color: var(--text-muted); margin-left: 1px; }
+.note-modal-close {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 6px;
+    margin-left: 0.6rem; flex-shrink: 0; border-radius: 4px;
+}
+.note-modal-close:hover { color: var(--text); background: var(--accent-bg); }
+.note-modal-back {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 1rem; line-height: 1; cursor: pointer; padding: 0 6px;
+    margin-right: 0.4rem; flex-shrink: 0; border-radius: 4px;
+}
+.note-modal-back:hover { color: var(--text); background: var(--accent-bg); }
+.note-modal-back[hidden] { display: none; }

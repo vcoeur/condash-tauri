@@ -1,0 +1,20 @@
+.note-mode-toggle {
+    display: inline-flex; border: 1px solid var(--border);
+    border-radius: 6px; overflow: hidden; margin: 0 0.6rem;
+}
+.note-mode-btn {
+    border: none; background: var(--bg-card); color: var(--text-secondary);
+    padding: 3px 10px; font-size: 0.78rem; cursor: pointer;
+    font-family: inherit;
+}
+.note-mode-btn + .note-mode-btn { border-left: 1px solid var(--border); }
+.note-mode-btn:hover:not(:disabled) { background: var(--accent-bg); color: var(--text); }
+.note-modal[data-mode="view"] .note-mode-btn[data-mode="view"],
+.note-modal[data-mode="cm"] .note-mode-btn[data-mode="cm"],
+.note-modal[data-mode="plain"] .note-mode-btn[data-mode="plain"] {
+    background: var(--accent); color: #fff;
+}
+.note-mode-btn:disabled {
+    opacity: 0.35; cursor: default;
+    background: var(--bg-card); color: var(--text-muted);
+}

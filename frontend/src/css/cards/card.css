@@ -1,0 +1,68 @@
+/* --- Cards --- */
+.card {
+    border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.75rem;
+    box-shadow: var(--shadow-sm); background: var(--bg-card);
+    transition: box-shadow 0.15s;
+}
+.card:hover { box-shadow: var(--shadow-md); }
+/* Lift the card above later siblings while its status popover is open — the
+   popover overflows the card's bottom edge and would otherwise paint behind
+   the next card in DOM order. */
+.card:has(.pri-menu.open) { position: relative; z-index: 10; }
+.card[data-kind="incident"] { border-left: 3px solid var(--card-incident-border); background: var(--card-incident); }
+.card[data-kind="project"] { border-left: 3px solid var(--card-project-border); background: var(--card-project); }
+.card[data-kind="document"] { border-left: 3px solid var(--card-document-border); background: var(--card-document); }
+.card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.55rem 1rem; border-bottom: 1px solid var(--border-light);
+}
+.card-header-left {
+    display: flex; align-items: center; gap: 0.4rem; min-width: 0;
+    cursor: pointer; flex: 1;
+}
+.card-header-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.card.collapsed .card-body { display: none; }
+.card.collapsed .card-header { border-bottom: none; }
+/* Next-step row sits between header and body so it stays visible on
+   collapsed cards — answers "what's this project blocked on?" without
+   expanding each one. See #9. */
+.card-next-step {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.3rem 1rem 0.45rem;
+    font-size: 0.8rem; color: var(--text-secondary);
+    cursor: pointer; user-select: none;
+    border-top: 1px dashed var(--border-light);
+}
+.card:not(.collapsed) .card-next-step { display: none; }
+.card-next-step:hover { color: var(--text); }
+.next-step-marker {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 0.85rem; height: 0.85rem; border-radius: 3px;
+    border: 1px solid var(--text-muted); flex-shrink: 0;
+    font-size: 0.65rem; line-height: 1;
+}
+.next-step-marker.next-step-open {
+    background: transparent;
+}
+.next-step-marker.next-step-progress {
+    background: var(--pri-soon-bg); border-color: var(--pri-soon);
+}
+.next-step-marker.next-step-progress::before {
+    content: "~"; color: var(--pri-soon); font-weight: 700;
+}
+.next-step-text {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0;
+}
+.card-body { display: flex; }
+.card-left {
+    width: 40%; padding: 0.75rem 1.2rem; border-right: 1px solid var(--border-light);
+    display: flex; flex-direction: column; gap: 0.4rem; flex-shrink: 0;
+}
+.card-right { flex: 1; padding: 0.75rem 1.2rem; min-width: 0; }
+.card-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+.card-apps { display: flex; flex-wrap: wrap; gap: 4px; }
+.card[data-priority="backlog"] { opacity: 0.7; }
+.card[data-priority="review"] { opacity: 0.85; }
+.card[data-priority="done"] { opacity: 0.6; }
+.card.hidden { display: none; }

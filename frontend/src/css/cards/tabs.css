@@ -1,0 +1,23 @@
+/* --- Tabs --- */
+.tabs {
+    display: flex; gap: 0; margin-bottom: 1.25rem;
+    border-bottom: 2px solid var(--tab-border);
+}
+.tab {
+    font-size: 0.85rem; font-weight: 600; padding: 0.5rem 1.25rem;
+    cursor: pointer; user-select: none; color: var(--text-muted);
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+}
+.tab:hover { color: var(--text-secondary); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-count { font-weight: 400; color: var(--text-muted); margin-left: 0.3rem; }
+.tab.active .tab-count { color: var(--text-secondary); }
+
+/* Secondary tab strip nested under Projects — smaller, lower-contrast
+   border so the visual hierarchy matches "top-level vs filter". */
+.tabs-secondary {
+    margin-top: -0.6rem; margin-bottom: 1rem;
+    border-bottom-style: dashed; border-bottom-color: var(--border);
+}
+.tabs-secondary .tab { font-size: 0.78rem; padding: 0.35rem 1rem; }

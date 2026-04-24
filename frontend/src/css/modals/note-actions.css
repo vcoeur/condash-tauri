@@ -1,0 +1,20 @@
+.note-modal-actions { display: flex; align-items: center; gap: 0.35rem; }
+.note-action-btn {
+    font-size: 0.8rem; padding: 3px 10px; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--bg-card); color: var(--text);
+    cursor: pointer;
+}
+.note-action-btn:hover:not(:disabled) { background: var(--accent-bg); }
+.note-action-btn:disabled { opacity: 0.4; cursor: default; }
+.note-action-btn.note-action-primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.note-action-btn.note-action-primary:hover { filter: brightness(0.9); }
+.note-edit-textarea {
+    flex: 1; min-height: 0; width: 100%; box-sizing: border-box;
+    resize: none;
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.85rem; line-height: 1.5;
+    padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-card); color: var(--text);
+}

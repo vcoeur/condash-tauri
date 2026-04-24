@@ -1,0 +1,72 @@
+/* History pane — reuses .knowledge-* scaffolding (groups, badges, card
+   grid) but each item row carries a small row of status + kind pills. */
+.history-meta {
+    display: flex; flex-wrap: wrap; gap: 0.3rem;
+    margin-top: 0.35rem;
+}
+.history-meta .pill {
+    font-size: 0.7rem; padding: 0.05rem 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+
+/* History search results — flat list rendered when the query is non-empty.
+   Each .history-result groups one project's hits; each .history-hit row is
+   a clickable file preview. */
+#history-results {
+    display: flex; flex-direction: column; gap: 0.75rem;
+}
+.history-result {
+    border: 1px solid var(--border-light); border-radius: 8px;
+    background: var(--bg-card-hover);
+    padding: 0.6rem 0.75rem;
+}
+.history-result-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.history-result-title {
+    font-weight: 600; font-size: 0.95rem; color: var(--text);
+    margin-right: 0.15rem;
+}
+.history-result-header .pill {
+    font-size: 0.7rem; padding: 0.05rem 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+.history-result-month {
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.72rem; color: var(--text-muted);
+    margin-left: auto;
+}
+.history-jump {
+    background: transparent; border: 1px solid var(--border-light);
+    border-radius: 6px; padding: 0.15rem 0.35rem; cursor: pointer;
+    color: var(--text-secondary);
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.history-jump:hover { border-color: var(--accent); color: var(--accent); }
+.history-result-hits {
+    list-style: none; margin: 0.5rem 0 0; padding: 0;
+    display: flex; flex-direction: column; gap: 0.3rem;
+}
+.history-hit {
+    display: grid; grid-template-columns: minmax(120px, 0.3fr) 1fr;
+    gap: 0.5rem; align-items: baseline;
+    padding: 0.25rem 0.4rem; border-radius: 4px;
+    cursor: pointer; font-size: 0.82rem;
+}
+.history-hit:hover { background: var(--accent-bg); }
+.hit-src {
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.74rem; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hit-src-title  { color: var(--accent); }
+.hit-src-readme { color: var(--text-secondary); }
+.hit-snippet {
+    color: var(--text); line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+.hit-snippet mark {
+    background: var(--accent); color: #fff;
+    padding: 0 2px; border-radius: 2px; font-weight: 600;
+}

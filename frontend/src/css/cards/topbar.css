@@ -1,0 +1,17 @@
+/* --- Top bar ---
+   First row of the app. Primary tabs take the stage on the left; a
+   thin vertical divider separates them from the icon cluster on the
+   right. The gap + divider give the tabs room to breathe without
+   leaving the icons visually orphaned. */
+.topbar {
+    display: flex; align-items: center; gap: 1.75rem;
+    padding: 0.35rem 0;
+    margin-bottom: 1.6rem;
+}
+.topbar .tabs { margin-bottom: 0; border-bottom: none; flex: 1 1 auto; min-width: 0; }
+.topbar .header-actions { flex-shrink: 0; gap: 0.3rem; }
+.topbar .header-actions::before {
+    content: ''; width: 1px; height: 22px;
+    background: var(--border); margin-right: 0.6rem;
+    opacity: 0.7;
+}

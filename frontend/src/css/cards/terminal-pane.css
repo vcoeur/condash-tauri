@@ -1,0 +1,158 @@
+/* --- Embedded terminal (bottom pane) ---
+   A flex sibling of .app — opening it shrinks the main scroll region
+   rather than overlaying. Height is drag-resizable via the top handle;
+   value persists in localStorage. Content inside .term-mount scrolls
+   independently (its own xterm scrollback). */
+.term-pane {
+    flex: 0 0 auto;
+    height: var(--term-height, 38vh); min-height: 140px;
+    display: flex; flex-direction: column;
+    background: #0b0b0e; color: #ddd;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.25);
+}
+.term-pane[hidden] { display: none; }
+
+/* Lightweight transient banner for shortcut-triggered actions that have
+   no button to flash (e.g. "no recent screenshot found"). Centred at the
+   bottom of the viewport and faded by JS after a short timeout. */
+.shortcut-toast {
+    position: fixed; left: 50%; bottom: 1.5rem;
+    transform: translateX(-50%);
+    background: #2a2b30; color: #f5f5f5;
+    padding: 0.5rem 0.9rem; border-radius: 6px;
+    font-size: 0.85rem; max-width: 80vw;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    pointer-events: none; z-index: 9999;
+    opacity: 0; transition: opacity 0.18s ease-out;
+}
+.shortcut-toast.is-visible { opacity: 1; }
+.shortcut-toast.is-err { background: #5a2a2a; }
+.term-handle {
+    height: 4px; cursor: ns-resize; background: var(--border);
+    flex-shrink: 0;
+}
+/* Unified top row — left tab group, flex spacer, right tab group.
+   Each `+` button sits immediately after its side's tab chips; the right
+   `+` ends up flush at the pane's right edge because there's nothing
+   after it. Drop the old per-side head + pane header — this single row
+   owns all tab/new-tab affordances. */
+.term-top-row {
+    display: flex; align-items: flex-end; gap: 3px;
+    padding: 4px 8px 0; background: #17181c;
+    border-bottom: 1px solid #2a2b30;
+    min-height: 30px;
+}
+.term-tabs { display: flex; flex-wrap: wrap; gap: 3px; align-items: flex-end; }
+.term-tabs-right { justify-content: flex-end; }
+.term-spacer { flex: 1; min-width: 10px; }
+
+/* Body below the top row: flex row of left side + splitter + right side. */
+.term-body { flex: 1; min-height: 0; display: flex; }
+.term-side {
+    flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+    position: relative;
+}
+.term-side[hidden] { display: none; }
+/* Which split has focus — a thin accent line at the top of the pane,
+   plus a tinted mount background so the difference is obvious even
+   without a visible caret. Only shown when both sides exist (single
+   pane is trivially the active one). */
+body:not([data-single-term]) .term-side.is-active-side::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent);
+    pointer-events: none;
+}
+body:not([data-single-term]) .term-side.is-active-side .term-mount {
+    background: #101116;
+}
+.term-mount { flex: 1; min-height: 0; padding: 4px 6px; }
+.term-mount .xterm { height: 100%; }
+
+/* Splitter: 9px hit-area with a 1px theme-aware hairline centred inside.
+   The inset top/bottom keeps the line from touching the tab strip or the
+   pane bottom. Combined with .term-mount's 6px horizontal padding this
+   gives ~10px total gutter between the two panes' xterm cell grids. */
+.term-splitter {
+    width: 9px; flex: 0 0 auto; cursor: col-resize;
+    position: relative; background: transparent;
+}
+.term-splitter::before {
+    content: "";
+    position: absolute; top: 6px; bottom: 6px; left: 4px;
+    width: 1px; background: var(--border);
+    transition: background 0.1s;
+}
+.term-splitter:hover::before { background: var(--accent); }
+.term-splitter[hidden] { display: none; }
+
+/* Tab strip — one chip per open pty. The active chip matches the pane
+   background so it visually flows into the mount area below. */
+.term-tabs { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; min-height: 22px; min-width: 24px; }
+.term-tab {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 3px 10px; border-radius: 4px 4px 0 0;
+    background: #1f2026; color: #b8b8c0;
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 0.73rem; cursor: pointer; user-select: none;
+    border: 1px solid transparent; border-bottom: 0;
+}
+.term-tab:hover { background: #262731; color: #e6e6ec; }
+.term-tab.active {
+    background: #0b0b0e; color: #f0f0f5; font-weight: 600;
+    border-top: 2px solid var(--accent);
+    padding-top: 1px;
+}
+.term-tab-close {
+    background: transparent; border: none; color: inherit;
+    font-size: 0.9rem; line-height: 1; padding: 0 2px; cursor: pointer;
+    opacity: 0.6;
+}
+.term-tab-close:hover { opacity: 1; color: #ff8080; }
+.term-tab-label { user-select: none; }
+.term-tab-rename {
+    background: #0b0b0e; color: #f0f0f5; border: 1px solid var(--accent);
+    border-radius: 3px; padding: 0 3px; font: inherit; min-width: 60px;
+}
+.term-tab-rename:focus { outline: none; }
+/* Match the tab-chip height so the + sits on the same baseline. */
+.term-new-tab {
+    background: transparent; color: #b8b8c0;
+    border: 1px solid #3a3a44; border-radius: 4px 4px 0 0;
+    font-size: 1.05rem; font-weight: 600; line-height: 1;
+    padding: 4px 12px; cursor: pointer; min-width: 28px;
+    align-self: stretch;
+}
+.term-new-tab:hover {
+    color: #f0f0f5; border-color: var(--accent);
+    background: #1a1b20;
+}
+/* Close-pane button uses the same chip styling as the + buttons, but the
+   glyph reads as "close" and hover turns it red to match the Stop button
+   colour language elsewhere in the dashboard. */
+.term-new-tab.term-close {
+    margin-left: 6px;
+    font-size: 1.15rem;
+}
+.term-new-tab.term-close:hover {
+    color: #f0f0f5; border-color: #d64545;
+    background: #2a1a1a;
+}
+
+/* Drag affordances for tab chips. A chip being dragged goes translucent;
+   the chip under the pointer draws a 2px accent line on the side where
+   the drop would insert, mirroring how VS Code / browsers signal tab
+   reorder drop zones. */
+.term-tab { cursor: grab; }
+.term-tab.is-dragging { opacity: 0.45; cursor: grabbing; }
+.term-tab-ghost { box-shadow: 0 4px 12px rgba(0,0,0,0.35); cursor: grabbing; }
+.term-tab.is-drop-before { box-shadow: inset 2px 0 0 0 var(--accent); }
+.term-tab.is-drop-after { box-shadow: inset -2px 0 0 0 var(--accent); }
+.term-tabs.is-drop-target { background: color-mix(in oklab, var(--accent) 15%, transparent); border-radius: 4px 4px 0 0; }
+
+/* Each session has its own full-sized mount inside .term-mount. Hidden
+   sessions stop layout-contributing so the visible one gets the full
+   height. */
+.term-mount-session { height: 100%; display: none; }
+.term-mount-session.active { display: block; }

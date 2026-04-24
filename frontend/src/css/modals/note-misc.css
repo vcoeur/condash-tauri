@@ -1,0 +1,16 @@
+.note-edit-error {
+    color: var(--git-changes); font-size: 0.82rem;
+    margin: 0.45rem 0 0.2rem; display: none;
+}
+.note-edit-error.visible { display: block; }
+.note-modal-body hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+.note-loading { color: var(--text-muted); font-style: italic; }
+.note-error { color: var(--git-changes); }
+.note-raw { white-space: pre-wrap; }
+.note-modal-body .mermaid {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.8rem; margin: 0.7rem 0;
+    text-align: center; overflow-x: auto;
+}
+.note-modal-body .mermaid svg { max-width: 100%; height: auto; }
+

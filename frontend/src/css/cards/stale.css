@@ -1,0 +1,71 @@
+/* --- Stale / "needs refresh" cue on top-level tabs ---
+   The tab that owns data which changed under us lights up with a small
+   accent dot in its top-right corner. Clicking that same tab (or switching
+   to another tab while stale) refreshes the dashboard in place. */
+.tabs-primary .tab { position: relative; }
+.tabs-primary .tab.stale::after {
+    content: ''; position: absolute; top: 4px; right: 6px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); border: 1.5px solid var(--bg-card);
+    pointer-events: none;
+}
+.tabs-primary .tab.active.stale::after {
+    /* Active tab has an accent background — invert the ring so the dot
+       stays legible. */
+    background: #fff; border-color: var(--accent);
+}
+
+/* --- Localized stale markers ---
+   `.node-stale` is applied to the smallest enclosing element that actually
+   changed (a card, a group heading, a knowledge directory, a repo row).
+   `.node-stale-hint` is applied to its ancestors so you can pick the level
+   at which to trigger a local reload. Both surface a small accent dot in
+   the top-right corner of the element — strong for stale, muted for hint. */
+[data-node-id] { position: relative; }
+[data-node-id].node-stale::after,
+[data-node-id].node-stale-hint::after {
+    content: ''; position: absolute; top: 4px; right: 6px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--bg-card);
+    pointer-events: none; z-index: 2;
+}
+[data-node-id].node-stale-hint::after {
+    /* Muted hint: hollow ring on ancestors whose descendants are dirty. */
+    background: transparent;
+    border-color: var(--accent);
+    opacity: 0.65;
+}
+/* Reload affordance — an invisible clickable overlay on the dot so the
+   user can refresh just this subtree. Sized generously to be easy to hit
+   on touch. Hover scales the dot slightly to telegraph clickability. */
+.node-reload-btn {
+    position: absolute; top: -2px; right: 0;
+    width: 22px; height: 22px; padding: 0; margin: 0;
+    background: transparent; border: 0; cursor: pointer;
+    z-index: 3;
+}
+[data-node-id]:has(.node-reload-btn:hover)::after {
+    transform: scale(1.25);
+    transition: transform 0.12s ease;
+}
+/* Pane wrappers already cover the whole viewport — putting the dot on
+   them would float it in no-man's-land. Suppress. The tab header shows
+   its own stale dot (``.tabs-primary .tab.stale::after``) anyway. */
+#projects-pane[data-node-id].node-stale::after,
+#projects-pane[data-node-id].node-stale-hint::after,
+#code-pane[data-node-id].node-stale::after,
+#code-pane[data-node-id].node-stale-hint::after,
+#knowledge-pane[data-node-id].node-stale::after,
+#knowledge-pane[data-node-id].node-stale-hint::after { display: none; }
+/* Group heading is hidden by default (per-subtab reveal). If a whole
+   group is dirty while its heading isn't shown, we still want the marker
+   visible — the dot attaches to the first visible card of that group
+   via the adjacent-sibling rule below. */
+.card[data-node-id].group-dirty-leader::before {
+    content: ''; position: absolute; top: -10px; left: 12px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--bg-card);
+    pointer-events: none; z-index: 2;
+}

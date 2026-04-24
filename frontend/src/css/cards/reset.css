@@ -1,0 +1,30 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* --- Scrollbars ---
+   Thin, rounded, theme-matched. The `border: 3px solid transparent` +
+   `background-clip: content-box` trick floats the thumb inside the
+   track with breathing room on both sides so it reads as a pill rather
+   than a hard bar glued to the edge. Fades in on hover. */
+html { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+*::-webkit-scrollbar { width: 12px; height: 12px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    background-clip: content-box;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    transition: background-color 0.15s;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: content-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
+html, body { height: 100%; }
+body {
+    display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    overflow: hidden;
+}

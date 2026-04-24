@@ -1,0 +1,34 @@
+/* --- App shell ---
+   A flex-column wrapper that owns the fixed rows (header, banner, meta,
+   tab strips) plus a single scrolling <main>. The terminal pane lives as
+   a sibling of .app directly under <body>, so opening it shrinks .app
+   rather than stacking a second scroll region on top of a taller body.
+
+   The pinned rows and the scroll region are both full width — the
+   --content-max-width column lives on their children, so the scrollbar
+   sits at the viewport's right edge rather than inset inside a centered
+   column. */
+.app {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column;
+    width: 100%; max-width: none; margin: 0; padding: 0;
+    --content-max-width: 1280px;
+}
+.app > .topbar,
+.app > .setup-banner,
+.app > .tabs {
+    width: 100%; max-width: var(--content-max-width);
+    margin-left: auto; margin-right: auto;
+    padding-left: 2rem; padding-right: 2rem;
+    flex: 0 0 auto;
+}
+.app > .topbar { margin-top: 0.5rem; }
+#main-scroll {
+    flex: 1 1 auto; min-height: 0; width: 100%;
+    overflow-y: auto; overflow-x: hidden;
+}
+#main-scroll > * {
+    width: 100%; max-width: var(--content-max-width);
+    margin-left: auto; margin-right: auto;
+    padding: 0 2rem 1.5rem;
+}

@@ -1,0 +1,67 @@
+/* --- README preview link (above the notes block) --- */
+.readme-preview {
+    margin-top: 0.6rem; padding: 4px 6px; border-radius: 4px;
+    font-size: 0.78rem; font-weight: 600; color: var(--accent);
+    cursor: pointer; user-select: none;
+    transition: background 0.1s;
+}
+.readme-preview:hover { background: var(--accent-bg); }
+
+/* --- Notes (collapsible list of notes/*.md per item) --- */
+.notes-block { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px dashed var(--border); }
+.notes-heading {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    user-select: none; padding: 2px 4px; border-radius: 4px;
+}
+.notes-new-btn {
+    margin-left: auto; font-size: 0.9rem; line-height: 1;
+    padding: 0 6px; border-radius: 4px;
+    border: 1px solid transparent; background: transparent; color: var(--text-muted);
+    cursor: pointer;
+}
+.notes-new-btn:hover { color: var(--accent); background: var(--accent-bg); border-color: var(--accent); }
+.notes-count { font-weight: 400; color: var(--text-muted); }
+.notes-list { padding-left: 0.4rem; padding-top: 0.2rem; }
+.note-item {
+    font-size: 0.78rem; color: var(--accent);
+    padding: 3px 6px; border-radius: 4px; cursor: pointer;
+    word-break: break-all; transition: background 0.1s;
+}
+.note-item:hover { background: var(--accent-bg); text-decoration: underline; }
+.notes-mkdir-btn {
+    font-size: 0.68rem; line-height: 1.1;
+    padding: 1px 6px; border-radius: 4px;
+    border: 1px solid transparent; background: transparent; color: var(--text-muted);
+    cursor: pointer; text-transform: none; letter-spacing: 0;
+}
+.notes-mkdir-btn:hover { color: var(--accent); background: var(--accent-bg); border-color: var(--accent); }
+.notes-upload-btn {
+    font-size: 0.85rem; line-height: 1;
+    padding: 0 6px; border-radius: 4px;
+    border: 1px solid transparent; background: transparent; color: var(--text-muted);
+    cursor: pointer;
+}
+.notes-upload-btn:hover { color: var(--accent); background: var(--accent-bg); border-color: var(--accent); }
+/* Per-group upload button: smaller and pinned to the right of the summary. */
+.notes-group .notes-upload-btn { margin-left: auto; font-size: 0.75rem; padding: 0 4px; }
+.notes-group {
+    margin: 0.15rem 0;
+}
+.notes-group > summary.notes-group-heading {
+    list-style: none;
+    display: flex; align-items: center; gap: 0.3rem;
+    font-size: 0.74rem; color: var(--text-secondary);
+    padding: 2px 4px; border-radius: 4px; cursor: pointer;
+    user-select: none;
+}
+.notes-group > summary.notes-group-heading::-webkit-details-marker { display: none; }
+.notes-group > summary.notes-group-heading:hover { background: var(--accent-bg); color: var(--text); }
+.notes-chevron {
+    display: inline-block; transition: transform 0.1s;
+    font-size: 0.65rem; color: var(--text-muted);
+}
+.notes-group[open] > summary > .notes-chevron { transform: rotate(90deg); }
+.notes-group-name { font-weight: 500; }
+.notes-group .notes-list { padding-left: 0.9rem; padding-top: 0.1rem; }

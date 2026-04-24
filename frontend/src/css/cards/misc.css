@@ -1,0 +1,16 @@
+/* --- Misc --- */
+.date {
+    color: var(--text-muted); font-size: 0.75rem;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+}
+.pill {
+    font-size: 0.65rem; background: var(--pill-bg); color: var(--pill-text);
+    padding: 1px 6px; border-radius: 8px;
+}
+.progress-text { font-size: 0.75rem; color: var(--text-secondary); }
+.progress-bar {
+    display: inline-block; width: 50px; height: 5px;
+    border-radius: 3px; vertical-align: middle; margin-left: 3px;
+}
+.progress-fill { display: block; height: 100%; border-radius: 3px; }
+.summary { color: var(--text-secondary); font-size: 0.82rem; }
