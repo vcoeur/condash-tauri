@@ -97,11 +97,13 @@ frontend: ## Bundle the dashboard source (frontend/src/) into dist/bundle.{js,cs
 	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
 	    "$$SRC_JS" \
 	    --bundle --format=iife --global-name=Condash --target=es2019 \
+	    --minify --sourcemap \
 	    --outfile="$$DEST/bundle.js" --log-level=warning; \
 	echo "Bundling $$SRC_CSS → $$DEST/bundle.css"; \
 	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
 	    "$$SRC_CSS" \
 	    --bundle --target=es2019 \
+	    --minify --sourcemap \
 	    --outfile="$$DEST/bundle.css" --log-level=warning; \
 	echo "Frontend bundle:"; \
 	du -sh "$$DEST"

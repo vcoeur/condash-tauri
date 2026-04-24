@@ -22,13 +22,35 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::SystemTime;
 
-use condash_parser::PyValue;
-use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
 use crate::RenderCtx;
+
+/// Cache key for a single repo's ScannedRepo snapshot. Covers enough of
+/// the repo's state that any change it detects triggers a re-scan; any
+/// event it misses is corrected by the next legitimate user action
+/// (which touches HEAD or index). Falls back to epoch on stat failures
+/// so an unreadable `.git/` always rescans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RepoStamp {
+    head: Option<SystemTime>,
+    index: Option<SystemTime>,
+    worktrees: Option<SystemTime>,
+}
+
+fn stamp_for(repo_dir: &Path) -> RepoStamp {
+    let git = repo_dir.join(".git");
+    let stat = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    RepoStamp {
+        head: stat(&git.join("HEAD")),
+        index: stat(&git.join("index")),
+        worktrees: stat(&git.join("worktrees")),
+    }
+}
+
+static REPO_CACHE: Mutex<Option<HashMap<PathBuf, (RepoStamp, ScannedRepo)>>> = Mutex::new(None);
 
 /// One checkout (main repo or worktree) — shared shape used by both
 /// worktree entries and the top-level repo dict. Python's dict always
@@ -268,20 +290,37 @@ struct ScannedRepo {
     worktrees: Vec<Checkout>,
 }
 
-fn scan_repo(found: &mut BTreeMap<String, ScannedRepo>, repo_dir: &Path, display_name: &str) {
+fn scan_one(repo_dir: &Path, display_name: &str) -> ScannedRepo {
+    let key = repo_dir.to_path_buf();
+    let stamp = stamp_for(repo_dir);
+    {
+        let guard = REPO_CACHE.lock().unwrap();
+        if let Some(map) = guard.as_ref() {
+            if let Some((cached_stamp, cached)) = map.get(&key) {
+                if *cached_stamp == stamp {
+                    let mut reused = cached.clone();
+                    reused.name = display_name.to_string();
+                    return reused;
+                }
+            }
+        }
+    }
     let (branch, dirty, changed, changed_files) = git_status(repo_dir);
-    found.insert(
-        display_name.to_string(),
-        ScannedRepo {
-            name: display_name.to_string(),
-            path: resolve_str(repo_dir),
-            branch,
-            dirty,
-            changed,
-            changed_files,
-            worktrees: git_worktrees(repo_dir),
-        },
-    );
+    let scanned = ScannedRepo {
+        name: display_name.to_string(),
+        path: resolve_str(repo_dir),
+        branch,
+        dirty,
+        changed,
+        changed_files,
+        worktrees: git_worktrees(repo_dir),
+    };
+    {
+        let mut guard = REPO_CACHE.lock().unwrap();
+        let map = guard.get_or_insert_with(HashMap::new);
+        map.insert(key, (stamp, scanned.clone()));
+    }
+    scanned
 }
 
 fn parent_member(repo: &ScannedRepo) -> Member {
@@ -375,8 +414,9 @@ pub fn collect_git_repos(ctx: &RenderCtx) -> Vec<Group> {
     let Some(workspace) = ctx.workspace.as_deref() else {
         return Vec::new();
     };
-    let mut found: BTreeMap<String, ScannedRepo> = BTreeMap::new();
-
+    // First pass: enumerate all repos (no scanning yet). Depth 1 is a
+    // repo with `.git/`; depth 2 allows an org-style grouping directory.
+    let mut targets: Vec<(PathBuf, String)> = Vec::new();
     if workspace.is_dir() {
         let mut children: Vec<PathBuf> = match std::fs::read_dir(workspace) {
             Ok(it) => it.flatten().map(|e| e.path()).collect(),
@@ -392,10 +432,9 @@ pub fn collect_git_repos(ctx: &RenderCtx) -> Vec<Group> {
                 continue;
             }
             if child.join(".git").exists() {
-                scan_repo(&mut found, child, name);
+                targets.push((child.clone(), name.to_string()));
                 continue;
             }
-            // Depth 2 — child is an org-style grouping directory.
             let mut grandchildren: Vec<PathBuf> = match std::fs::read_dir(child) {
                 Ok(it) => it.flatten().map(|e| e.path()).collect(),
                 Err(_) => continue,
@@ -403,7 +442,7 @@ pub fn collect_git_repos(ctx: &RenderCtx) -> Vec<Group> {
             grandchildren.sort();
             for grand in grandchildren {
                 let gname = match grand.file_name().and_then(|n| n.to_str()) {
-                    Some(n) => n,
+                    Some(n) => n.to_string(),
                     None => continue,
                 };
                 if !grand.is_dir() || gname.starts_with('.') {
@@ -412,10 +451,23 @@ pub fn collect_git_repos(ctx: &RenderCtx) -> Vec<Group> {
                 if !grand.join(".git").exists() {
                     continue;
                 }
-                scan_repo(&mut found, &grand, &format!("{name}/{gname}"));
+                targets.push((grand, format!("{name}/{gname}")));
             }
         }
     }
+
+    // Second pass: scan repos in parallel. Each worker shells out to
+    // `git` independently; results are gathered and inserted sorted
+    // afterward so the downstream ordering is identical to the serial
+    // version.
+    let scanned: Vec<(String, ScannedRepo)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = targets
+            .iter()
+            .map(|(dir, display)| scope.spawn(move || (display.clone(), scan_one(dir, display))))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let found: BTreeMap<String, ScannedRepo> = scanned.into_iter().collect();
 
     // Build submodule map from the configured repo structure.
     let mut submodule_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -478,255 +530,3 @@ pub fn collect_git_repos(ctx: &RenderCtx) -> Vec<Group> {
     groups
 }
 
-/// `/check-updates` hint fingerprint. 30-second process-wide cache
-/// keyed by nothing (assumes one active ctx per process — condash's
-/// invariant). Port of `_git_fingerprint`.
-pub fn git_fingerprint(ctx: &RenderCtx) -> String {
-    static CACHE: Mutex<Option<(String, Instant)>> = Mutex::new(None);
-
-    if let Ok(mut guard) = CACHE.lock() {
-        if let Some((ref fp, ts)) = *guard {
-            if ts.elapsed().as_secs() < 30 {
-                return fp.clone();
-            }
-        }
-        let fp = compute_git_fingerprint(ctx);
-        *guard = Some((fp.clone(), Instant::now()));
-        return fp;
-    }
-    compute_git_fingerprint(ctx)
-}
-
-fn compute_git_fingerprint(ctx: &RenderCtx) -> String {
-    let Some(workspace) = ctx.workspace.as_deref() else {
-        return "no-workspace".into();
-    };
-    if !workspace.is_dir() {
-        return md5_16(b"");
-    }
-
-    let mut children: Vec<PathBuf> = match std::fs::read_dir(workspace) {
-        Ok(it) => it.flatten().map(|e| e.path()).collect(),
-        Err(_) => Vec::new(),
-    };
-    children.sort();
-
-    let mut parts = String::new();
-    for child in &children {
-        let name = match child.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n,
-            None => continue,
-        };
-        if !child.is_dir() || name.starts_with('.') {
-            continue;
-        }
-        if !child.join(".git").exists() {
-            continue;
-        }
-        let head = Command::new("git")
-            .arg("-C")
-            .arg(child)
-            .args(["rev-parse", "HEAD"])
-            .output();
-        let status = Command::new("git")
-            .arg("-C")
-            .arg(child)
-            .args(["status", "--porcelain"])
-            .output();
-        match (head, status) {
-            (Ok(h), Ok(s)) => {
-                let head_text = String::from_utf8_lossy(&h.stdout).trim().to_string();
-                let status_text = String::from_utf8_lossy(&s.stdout).into_owned();
-                parts.push_str(&format!("{name}:{head_text}:{status_text}"));
-            }
-            _ => parts.push_str(&format!("{name}:error")),
-        }
-    }
-
-    md5_16(parts.as_bytes())
-}
-
-/// MD5-truncated-to-16 of the bytes passed in. Shared helper used
-/// throughout the node-fingerprint walk since Python's `_hash` lives
-/// on `repr()` strings.
-fn md5_16(bytes: &[u8]) -> String {
-    let digest = Md5::digest(bytes);
-    format!("{digest:x}")[..16].to_string()
-}
-
-/// Per-leaf hash — matches Python's `leaf_hash` closure. Written
-/// inline (rather than via `PyValue::Tuple`) so we can emit the
-/// bare-word `True` / `False` that Python's `repr(bool)` produces
-/// without teaching `PyValue` a new variant.
-fn leaf_hash(branch: &str, changed: usize, dirty: bool, missing: bool, files: &[String]) -> String {
-    // Build the tuple's repr() manually since PyValue only models
-    // strings/ints/tuples/lists. Python's tuple repr for
-    // ("leaf", branch, changed, dirty, missing, files_tuple) is:
-    //   ('leaf', 'branch', 3, True, False, ('a', 'b'))
-    let mut sorted: Vec<String> = files.to_vec();
-    sorted.sort();
-    let files_tuple_repr = {
-        let mut s = String::from("(");
-        for (i, f) in sorted.iter().enumerate() {
-            if i > 0 {
-                s.push_str(", ");
-            }
-            s.push_str(&PyValue::Str(f.clone()).repr());
-        }
-        if sorted.len() == 1 {
-            s.push(',');
-        }
-        s.push(')');
-        s
-    };
-    let repr = format!(
-        "('leaf', {}, {}, {}, {}, {})",
-        PyValue::Str(branch.to_string()).repr(),
-        changed,
-        if dirty { "True" } else { "False" },
-        if missing { "True" } else { "False" },
-        files_tuple_repr,
-    );
-    md5_16(repr.as_bytes())
-}
-
-/// Per-node fingerprints for the Code tab hierarchy. Port of
-/// `compute_git_node_fingerprints`.
-pub fn compute_git_node_fingerprints(ctx: &RenderCtx) -> HashMap<String, String> {
-    let mut out: HashMap<String, String> = HashMap::new();
-    let groups = collect_git_repos(ctx);
-
-    let mut top_child_ids: Vec<String> = Vec::new();
-    for group in &groups {
-        let group_id = format!("code/{}", group.label);
-        let mut family_ids: Vec<String> = Vec::new();
-        for family in &group.families {
-            let family_id = format!("{group_id}/{}", family.name);
-            let mut member_ids: Vec<String> = Vec::new();
-            for member in &family.members {
-                let member_id = format!("{family_id}/m:{}", member.name);
-                let mut wt_ids: Vec<String> = Vec::new();
-                for wt in &member.worktrees {
-                    let wt_id = format!("{member_id}/wt:{}", wt.key);
-                    out.insert(
-                        wt_id.clone(),
-                        leaf_hash(
-                            &wt.branch,
-                            wt.changed,
-                            wt.dirty,
-                            wt.missing,
-                            &wt.changed_files,
-                        ),
-                    );
-                    wt_ids.push(wt_id);
-                }
-                wt_ids.sort();
-                // Runner session state is Phase 4 territory (nothing starts
-                // runners yet), but the fingerprint still has to agree
-                // with Python. Python's `_runner_tokens_for` returns
-                // `""` when the key isn't configured, and `|run:off`
-                // when it is but no session is live — which is every
-                // row in Phase 2. Mirror that exactly.
-                let runner_key = if member.is_subrepo {
-                    format!("{}--{}", family.name, member.name)
-                } else {
-                    family.name.clone()
-                };
-                let runner_token = if ctx.repo_run_keys.contains(&runner_key) {
-                    "|run:off".to_string()
-                } else {
-                    String::new()
-                };
-                let member_leaf = leaf_hash(
-                    &member.branch,
-                    member.changed,
-                    member.dirty,
-                    member.missing,
-                    &member.changed_files,
-                );
-                let member_data = {
-                    // Python: ("member", leaf_hash(member), tuple(sorted(wt_ids)), runner_token)
-                    let wt_tuple_repr = {
-                        let mut s = String::from("(");
-                        for (i, wid) in wt_ids.iter().enumerate() {
-                            if i > 0 {
-                                s.push_str(", ");
-                            }
-                            s.push_str(&PyValue::Str(wid.clone()).repr());
-                        }
-                        if wt_ids.len() == 1 {
-                            s.push(',');
-                        }
-                        s.push(')');
-                        s
-                    };
-                    format!(
-                        "('member', {}, {}, {})",
-                        PyValue::Str(member_leaf).repr(),
-                        wt_tuple_repr,
-                        PyValue::Str(runner_token.clone()).repr(),
-                    )
-                };
-                out.insert(member_id.clone(), md5_16(member_data.as_bytes()));
-                member_ids.push(member_id);
-            }
-            // Family hash mixes each member's hash.
-            let family_data = {
-                let mut s = String::from("('family', (");
-                for (i, mid) in member_ids.iter().enumerate() {
-                    if i > 0 {
-                        s.push_str(", ");
-                    }
-                    s.push_str(&format!(
-                        "({}, {})",
-                        PyValue::Str(mid.clone()).repr(),
-                        PyValue::Str(out[mid].clone()).repr(),
-                    ));
-                }
-                if member_ids.len() == 1 {
-                    s.push(',');
-                }
-                s.push_str("))");
-                s
-            };
-            out.insert(family_id.clone(), md5_16(family_data.as_bytes()));
-            family_ids.push(family_id);
-        }
-        family_ids.sort();
-        let group_data = {
-            let mut s = format!("('group', {}, (", PyValue::Str(group.label.clone()).repr());
-            for (i, fid) in family_ids.iter().enumerate() {
-                if i > 0 {
-                    s.push_str(", ");
-                }
-                s.push_str(&PyValue::Str(fid.clone()).repr());
-            }
-            if family_ids.len() == 1 {
-                s.push(',');
-            }
-            s.push_str("))");
-            s
-        };
-        out.insert(group_id.clone(), md5_16(group_data.as_bytes()));
-        top_child_ids.push(group_id);
-    }
-
-    top_child_ids.sort();
-    let tab_data = {
-        let mut s = String::from("('tab', 'code', (");
-        for (i, gid) in top_child_ids.iter().enumerate() {
-            if i > 0 {
-                s.push_str(", ");
-            }
-            s.push_str(&PyValue::Str(gid.clone()).repr());
-        }
-        if top_child_ids.len() == 1 {
-            s.push(',');
-        }
-        s.push_str("))");
-        s
-    };
-    out.insert("code".to_string(), md5_16(tab_data.as_bytes()));
-
-    out
-}

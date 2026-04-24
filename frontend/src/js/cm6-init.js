@@ -1,4 +1,7 @@
-/* CM6 mount wiring — migrated from the trailing inline <script> in dashboard.html on 2026-04-22 (F3/F4 of condash-frontend-split). _syncModeControls is re-exported onto window by dashboard-main.js, so this file references it through window.*. */
+/* CM6 init bridge: run at bundle load to populate window.__cm6 from the
+   vendored CondashCM global. The ESM mount/unmount helpers live next to
+   the note-mode code in sections/cm6-mount.js; this file only bridges
+   the classic vendored script to the shape the rest of the code reads. */
 
 /* Mount the markdown-pane surface (window.__cm6) on top of the vendored
    CodeMirror 6 bundle (window.CondashCM) loaded via /vendor/codemirror/.

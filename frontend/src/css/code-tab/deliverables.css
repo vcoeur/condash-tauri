@@ -1,0 +1,20 @@
+/* --- Deliverables --- */
+.deliverables { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px dashed var(--border); }
+.dlv-heading {
+    font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem;
+}
+.dlv-item { padding: 2px 0; }
+.dlv-link {
+    font-size: 0.8rem; color: var(--accent); text-decoration: none;
+    font-weight: 500;
+}
+.dlv-link:hover { text-decoration: underline; }
+.dlv-desc { font-size: 0.75rem; color: var(--text-muted); }
+.dlv-icon {
+    font-size: 0.6rem; font-weight: 700;
+    color: var(--dlv-icon-text); background: var(--dlv-icon-bg);
+    padding: 1px 5px; border-radius: 4px; margin-left: 0.4rem;
+    letter-spacing: 0.03em; vertical-align: middle;
+}
+

@@ -15,10 +15,10 @@ pub mod assets;
 pub mod config;
 pub mod env_hygiene;
 pub mod events;
-pub mod openers;
+pub mod launcher;
 pub mod paths;
 pub mod pty;
-pub mod runners;
+pub mod runner_registry;
 pub mod server;
 pub mod user_config;
 
@@ -79,7 +79,7 @@ pub fn run() {
 
             let event_bus = events::EventBus::default();
             let pty_registry = pty::PtyRegistry::new();
-            let runner_registry = runners::RunnerRegistry::new();
+            let runner_registry = runner_registry::RunnerRegistry::new();
             let state = server::AppState {
                 ctx: ctx.clone(),
                 cache,

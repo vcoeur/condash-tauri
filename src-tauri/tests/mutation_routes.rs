@@ -39,7 +39,7 @@ fn harness_with(initial: &str) -> Harness {
         version: Arc::new("test".into()),
         event_bus: condash_lib::events::EventBus::default(),
         pty_registry: condash_lib::pty::PtyRegistry::new(),
-        runner_registry: condash_lib::runners::RunnerRegistry::new(),
+        runner_registry: condash_lib::runner_registry::RunnerRegistry::new(),
     };
 
     Harness {

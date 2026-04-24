@@ -1,24 +1,8 @@
-/* SSE event stream (Phase 6).
+/* SSE event stream. Every event from /events triggers a reconcile call
+   to /check-updates; the real dirty-set computation lives in
+   stale-poll.js. On drop, _setReconnecting(true) surfaces the pill and
+   an exponential-backoff retry loop tries to reopen. */
 
-   Replaces the 5s polling loop. Every event from /events triggers a
-   reconcile call to /check-updates; the real dirty-set computation
-   lives in stale-poll.js, unchanged. On drop, _setReconnecting(true)
-   surfaces the pill and an exponential-backoff retry loop tries to
-   reopen.
-
-   Extracted from dashboard-main.js on 2026-04-24 (P-09 cut 3 of
-   conception/projects/2026-04-23-condash-frontend-extraction).
-
-   Module-level bindings (_eventSource, reconnect timer/delay,
-   configReloadTimer) are grouped under `sseState` — same pattern as
-   termState / reloadState / staleState — so any future importer that
-   needs to inspect the stream state doesn't hit the ESM live-binding
-   limit on reassigning `var` exports. No current caller does, but the
-   grouping keeps the shape consistent with the other extracted
-   regions. */
-
-import { _populateYamlEditor, _getDirtyYamlFile, openConfigModal, _reloadInPlace } from '../dashboard-main.js';
-import { _loadTermShortcuts } from './tab-drag.js';
 import { checkUpdates, _scheduleCheckUpdates } from './stale-poll.js';
 import { _reconcileNoteModal } from './note-reconcile.js';
 
@@ -26,56 +10,7 @@ const sseState = {
     eventSource: null,
     reconnectTimer: null,
     reconnectDelay: 1000,
-    configReloadTimer: null,
 };
-
-/* Live YAML reload: dispatched from the SSE onmessage handler when the
-   filesystem watcher notices an external edit to repositories.yml or
-   preferences.yml. The server has already rebuilt its RenderCtx by
-   the time this fires, so the client's job is just to:
-     (a) refresh the open config modal's form in place, if any, and
-     (b) rebuild the dashboard body so server-rendered bits (repo strip,
-         open-with buttons, terminal shortcut specs) pick up the change.
-   Self-writes from POST /config are suppressed server-side, so this
-   only fires on external edits — no infinite loop.
-
-   Currently unreachable: config/*.yml watching was removed server-side
-   so no SSE message carries a config-change payload anymore, and the
-   onmessage handler below no longer dispatches to this function. Kept
-   here for topical completeness; a future simplification PR can remove
-   it outright along with its only caller (long since gone). */
-function _onConfigChanged(payload) {
-    if (sseState.configReloadTimer) clearTimeout(sseState.configReloadTimer);
-    sseState.configReloadTimer = setTimeout(async function() {
-        sseState.configReloadTimer = null;
-        var modal = document.getElementById('config-modal');
-        var modalOpen = modal && modal.style.display !== 'none' && modal.style.display !== '';
-        if (modalOpen) {
-            // Reload the /config payload and push it through the
-            // populators, but keep the user's dirty YAML edits if
-            // any — clobbering an unsaved edit on every external
-            // write would be a foot-gun.
-            try {
-                var res = await fetch('/config', {cache: 'no-store'});
-                if (res.ok) {
-                    var cfg = await res.json();
-                    _populateYamlEditor('repositories', cfg.repositories_yaml_body || '', true);
-                    _populateYamlEditor('preferences', cfg.preferences_yaml_body || '', true);
-                    // Only refresh form fields when the YAML pane isn't dirty —
-                    // otherwise the form stays as-is and the dirty YAML drives
-                    // the upcoming save.
-                    if (!_getDirtyYamlFile()) openConfigModal();
-                }
-            } catch (e) { /* leave modal as-is on transient fetch error */ }
-        }
-        // Always refresh shortcut specs — they live outside the modal
-        // and bind global key handlers.
-        if (typeof _loadTermShortcuts === 'function') _loadTermShortcuts();
-        // Rebuild the server-rendered dashboard so the repo strip and
-        // open-with buttons reflect the new config.
-        _reloadInPlace();
-    }, 150);
-}
 
 function _startEventStream() {
     if (typeof EventSource !== 'function') return;  // no push, stick with boot checkUpdates
@@ -145,6 +80,6 @@ function initSseSideEffects() {
 
 export {
     sseState,
-    _onConfigChanged, _startEventStream, _scheduleEventReconnect, _setReconnecting,
+    _startEventStream, _scheduleEventReconnect, _setReconnecting,
     initSseSideEffects,
 };

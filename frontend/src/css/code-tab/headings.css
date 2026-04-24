@@ -1,0 +1,22 @@
+/* --- Git panel (always visible, stacked under the cards list) --- */
+.git-panel { display: block; margin-top: 2rem; }
+.git-section-heading {
+    font-size: 0.75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    padding: 0.5rem 0 0.6rem;
+    border-bottom: 2px solid var(--tab-border);
+    margin-bottom: 1rem;
+}
+
+/* --- In-tab priority group heading ("Now" / "Review" inside Current, etc.) --- */
+.group-heading {
+    font-size: 0.72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    padding: 0.25rem 0 0.35rem;
+    margin: 0.75rem 0 0.5rem;
+    border-bottom: 1px dashed var(--border);
+}
+.group-heading:first-child { margin-top: 0; }
+.group-heading.hidden { display: none; }

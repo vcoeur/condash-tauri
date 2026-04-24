@@ -19,12 +19,14 @@
 //! caller's job (see `src-tauri/src/paths.rs`) and these functions
 //! take already-resolved absolute paths.
 
+pub mod create_item;
 pub mod files;
 pub mod steps;
 
+pub use create_item::{create_item, CreateItemResult, ItemKind, NewItemSpec};
 pub use files::{
-    create_item, create_note, create_notes_subdir, rename_note, store_uploads, write_note,
-    CreateItemResult, CreateNoteResult, CreateSubdirResult, ItemKind, NewItemSpec, RenameResult,
-    StoreUploadsResult, UploadRejection, WriteNoteResult,
+    create_note, create_notes_subdir, rename_note, store_uploads, write_note,
+    CreateNoteResult, CreateSubdirResult, RenameResult, StoreUploadsResult, UploadRejection,
+    WriteNoteResult,
 };
 pub use steps::{add_step, edit_step, remove_step, reorder_all, set_priority, toggle_checkbox};

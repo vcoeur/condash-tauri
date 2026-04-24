@@ -18,7 +18,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request, StatusCode};
 use condash_lib::events::EventBus;
 use condash_lib::pty::PtyRegistry;
-use condash_lib::runners::RunnerRegistry;
+use condash_lib::runner_registry::RunnerRegistry;
 use condash_lib::server::{self, build_router, AppState};
 use condash_state::{RenderCtx, WorkspaceCache};
 use futures_util::StreamExt;
