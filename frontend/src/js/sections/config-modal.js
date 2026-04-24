@@ -96,19 +96,6 @@ function switchConfigTab(name) {
     }
 }
 
-function _setYamlSourceHint(elId, source, expected, label) {
-    var el = document.getElementById(elId);
-    if (!el) return;
-    if (source) {
-        el.innerHTML = 'These fields are stored in <code>' + source + '</code>.';
-    } else if (expected) {
-        el.innerHTML = 'These fields migrate to <code>' + expected + '</code> on the next Save.';
-    } else {
-        el.innerHTML = 'Set a <code>conception_path</code> on the General tab to move these fields into <code>' + label + '</code>.';
-    }
-    el.style.display = '';
-}
-
 export async function openConfigModal() {
     var modal = document.getElementById('config-modal');
     var ta = document.getElementById('config-yaml');

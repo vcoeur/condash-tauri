@@ -100,8 +100,10 @@
         try {
             pdf = await pdfjsLib.getDocument(Object.assign({ url: src }, COMMON)).promise;
         } catch (e) {
-            pagesEl.innerHTML = '<div class="pdf-error">Failed to load PDF: '
-                + (e && e.message ? e.message : String(e)) + '</div>';
+            const err = document.createElement('div');
+            err.className = 'pdf-error';
+            err.textContent = 'Failed to load PDF: ' + (e && e.message ? e.message : String(e));
+            pagesEl.replaceChildren(err);
             return;
         }
 
