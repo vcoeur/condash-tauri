@@ -8,12 +8,13 @@
 
    Extracted from dashboard-main.js on 2026-04-24 (P-09 of
    conception/projects/2026-04-23-condash-frontend-extraction). Reaches
-   into three symbols that still live in dashboard-main.js: _noteModal
-   (mutated — object-field writes, not rebinding — so a live ESM
-   binding works here), _setDirty, saveEdit. All references are inside
-   function bodies; no top-level side effects. */
+   into three symbols from the note-modal sections (as of P-09 cut 4):
+   _noteModal + _setDirty from note-preview.js (object-field writes),
+   saveEdit from note-mode.js. All references are inside function
+   bodies; no top-level side effects. */
 
-import { _noteModal, _setDirty, saveEdit } from '../dashboard-main.js';
+import { _noteModal, _setDirty } from './note-preview.js';
+import { saveEdit } from './note-mode.js';
 
 var _cm = { view: null, themeC: null };
 
