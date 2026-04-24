@@ -267,8 +267,10 @@ async function reloadNode(nodeId) {
         return;
     }
     try {
+        // `no-cache` still returns the cached 304 body when the server
+        // confirms it, so unchanged fragments reuse the local bytes.
         var res = await fetch('/fragment?id=' + encodeURIComponent(nodeId),
-                              {cache: 'no-store'});
+                              {cache: 'no-cache'});
         if (!res.ok) { _reloadInPlace(); return; }
         var html = await res.text();
         var esc = (window.CSS && CSS.escape) ? CSS.escape(nodeId) : nodeId;

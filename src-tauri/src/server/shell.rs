@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use condash_parser::{
     compute_fingerprint, compute_knowledge_node_fingerprints, compute_project_node_fingerprints,
@@ -26,6 +26,48 @@ use condash_state::{
 use serde::Deserialize;
 
 use super::{error_json, html_response, json_response, live_runners_snapshot, AppState};
+
+/// Build an ETag from the id + the workspace fingerprint + the git
+/// fingerprint. Identical workspace state produces identical ETags, so a
+/// client `If-None-Match` lets us short-circuit the render pass.
+fn fragment_etag(id: &str, items_fp: &str, git_fp: &str) -> HeaderValue {
+    use md5::{Digest, Md5};
+    let mut h = Md5::new();
+    h.update(id.as_bytes());
+    h.update(b"\0");
+    h.update(items_fp.as_bytes());
+    h.update(b"\0");
+    h.update(git_fp.as_bytes());
+    let digest = h.finalize();
+    let mut hex = String::with_capacity(34);
+    hex.push('"');
+    for b in digest {
+        hex.push_str(&format!("{:02x}", b));
+    }
+    hex.push('"');
+    HeaderValue::from_str(&hex).unwrap()
+}
+
+fn if_none_match_matches(headers: &HeaderMap, tag: &HeaderValue) -> bool {
+    headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .any(|v| v == tag)
+}
+
+fn not_modified(tag: HeaderValue) -> Response {
+    let mut resp = Response::builder()
+        .status(StatusCode::NOT_MODIFIED)
+        .body(Body::empty())
+        .unwrap();
+    resp.headers_mut().insert(header::ETAG, tag);
+    resp
+}
+
+fn with_etag(mut resp: Response, tag: HeaderValue) -> Response {
+    resp.headers_mut().insert(header::ETAG, tag);
+    resp
+}
 
 pub(super) async fn index(State(state): State<AppState>) -> impl IntoResponse {
     let items = state.cache.get_items(&state.ctx);
@@ -49,6 +91,7 @@ pub(super) struct FragmentQuery {
 
 pub(super) async fn fragment(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<FragmentQuery>,
 ) -> impl IntoResponse {
     let id = q.id;
@@ -56,36 +99,44 @@ pub(super) async fn fragment(
         return error_json(StatusCode::BAD_REQUEST, "missing id");
     }
 
+    // Compute the ETag once up front. It hashes the id together with the
+    // workspace + git fingerprints, so unchanged state produces an
+    // unchanged tag and the browser's `If-None-Match` short-circuits the
+    // render pass.
+    let items = state.cache.get_items(&state.ctx);
+    let items_fp = compute_fingerprint(&items);
+    let git_fp = git_fingerprint(&state.ctx);
+    let etag = fragment_etag(&id, &items_fp, &git_fp);
+    if if_none_match_matches(&headers, &etag) {
+        return not_modified(etag);
+    }
+
     if let Some(rest) = id.strip_prefix("projects/") {
-        // projects/<priority>/<slug> — look up the card by slug.
         let parts: Vec<&str> = rest.splitn(2, '/').collect();
         if parts.len() != 2 {
             return error_json(StatusCode::NOT_FOUND, "not a card id");
         }
         let slug = parts[1];
-        let items = state.cache.get_items(&state.ctx);
         for item in items.iter() {
             if item.readme.slug == slug {
-                return html_response(render_card_fragment(item));
+                return with_etag(html_response(render_card_fragment(item)), etag);
             }
         }
         return error_json(StatusCode::NOT_FOUND, "card not found");
     }
 
     if id == "knowledge" {
-        // Root tab — fall back to global reload.
         return error_json(StatusCode::NOT_FOUND, "use global reload");
     }
 
     if let Some(rest) = id.strip_prefix("code/") {
         if !rest.contains('/') {
-            // A bare code group — only whole-repo nodes are fragmentable.
             return error_json(StatusCode::NOT_FOUND, "use global reload");
         }
         let groups = collect_git_repos(&state.ctx);
         let live_runners = live_runners_snapshot(&state);
         if let Some(html) = render_git_repo_fragment(&state.ctx, &groups, &id, &live_runners) {
-            return html_response(html);
+            return with_etag(html_response(html), etag);
         }
         return error_json(StatusCode::NOT_FOUND, "repo not found");
     }
@@ -95,12 +146,12 @@ pub(super) async fn fragment(
         let root = tree.as_ref().as_ref();
         if id.ends_with(".md") {
             if let Some(card) = find_card(root, &id) {
-                return html_response(render_knowledge_card_fragment(card));
+                return with_etag(html_response(render_knowledge_card_fragment(card)), etag);
             }
             return error_json(StatusCode::NOT_FOUND, "card not found");
         }
         if let Some(node) = find_node(root, &id) {
-            return html_response(render_knowledge_group_fragment(node));
+            return with_etag(html_response(render_knowledge_group_fragment(node)), etag);
         }
         return error_json(StatusCode::NOT_FOUND, "dir not found");
     }
