@@ -1,6 +1,6 @@
 [package]
 name = "condash"
-version = "1.2.0"
+version = "1.3.0"
 description = "A dashboard for the Markdown you already write."
 authors = ["Alice Voland <alice@vcoeur.com>"]
 license = "MIT"
@@ -22,6 +22,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
@@ -37,7 +38,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 anyhow = "1"
 regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-rfd = "0.15"
 shlex = "1"
 md-5 = "0.10"
 

@@ -53,12 +53,15 @@ pub fn load_template_for_bin(source: &assets::AssetSource) -> anyhow::Result<Str
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let conception_path = match resolve_conception_path() {
                 Ok(p) => p,
-                Err(unset) => prompt_for_conception_path(unset).ok_or_else(|| {
-                    "condash cancelled at the conception folder picker".to_string()
-                })?,
+                Err(unset) => {
+                    prompt_for_conception_path(app.handle(), unset).ok_or_else(|| {
+                        "condash cancelled at the conception folder picker".to_string()
+                    })?
+                }
             };
             let asset_source = assets::pick_from_env();
             let template =
@@ -223,8 +226,12 @@ pub fn resolve_from(
 /// On success, persists the choice to the on-disk settings file so the
 /// next launch skips the picker. Returns `None` when the user cancels
 /// (the caller should exit cleanly).
-fn prompt_for_conception_path(initial: ConceptionPathUnset) -> Option<PathBuf> {
-    // Title picks a friendlier form than the raw error.
+fn prompt_for_conception_path(
+    app: &tauri::AppHandle,
+    initial: ConceptionPathUnset,
+) -> Option<PathBuf> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
     let title = "Select your conception tree";
     let message = format!(
         "{}\n\nPick the root of your conception tree (the directory that \
@@ -234,9 +241,15 @@ fn prompt_for_conception_path(initial: ConceptionPathUnset) -> Option<PathBuf> {
     eprintln!("condash: {message}");
 
     loop {
-        let Some(picked) = rfd::FileDialog::new().set_title(title).pick_folder() else {
-            // User hit Cancel — bail to the caller.
+        let Some(picked) = app.dialog().file().set_title(title).blocking_pick_folder() else {
             return None;
+        };
+        let picked: PathBuf = match picked.into_path() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("condash: dialog returned non-path result ({e}) — giving up");
+                return None;
+            }
         };
 
         match validate_conception_candidate(&picked) {
@@ -246,9 +259,6 @@ fn prompt_for_conception_path(initial: ConceptionPathUnset) -> Option<PathBuf> {
                     ..Default::default()
                 };
                 if let Err(e) = user_config::save(&cfg) {
-                    // Don't fail the launch on a save failure — the
-                    // user still gets a working session with this path,
-                    // and they'll see the same picker on the next run.
                     eprintln!("condash: warning — could not persist settings.yaml: {e}");
                 } else if let Some(path) = user_config::settings_file_path() {
                     eprintln!("condash: saved conception path to {}", path.display());
@@ -256,12 +266,11 @@ fn prompt_for_conception_path(initial: ConceptionPathUnset) -> Option<PathBuf> {
                 return Some(picked);
             }
             Err(reason) => {
-                // Show a non-blocking error and loop back to the picker.
-                rfd::MessageDialog::new()
-                    .set_title("Not a conception tree")
-                    .set_description(&format!("{}\n\n{}", picked.display(), reason))
-                    .set_level(rfd::MessageLevel::Warning)
-                    .show();
+                app.dialog()
+                    .message(format!("{}\n\n{}", picked.display(), reason))
+                    .title("Not a conception tree")
+                    .kind(MessageDialogKind::Warning)
+                    .blocking_show();
             }
         }
     }

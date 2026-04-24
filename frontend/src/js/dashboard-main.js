@@ -94,6 +94,9 @@ import {
 import {
     _setDirty,
 } from './sections/note-preview.js';
+import {
+    initActionDispatch, registerAction,
+} from './sections/action-dispatch.js';
 
 /* --- In-app config editor --- */
 function _setField(form, name, value) {
@@ -1475,6 +1478,94 @@ function startEditText(el) {
 // DOM-level side effects now that both modules have finished
 // evaluating — see the notes for P-07
 // (projects/2026-04-23-condash-frontend-extraction/notes/01-p07-tab-drag-split.md).
+/* Register all click actions rendered by the server as `data-action`
+   attrs. Keep this block in one place so the inventory is obvious — one
+   registerAction call per distinct action name, grouped by subsystem. */
+function registerDashboardActions() {
+    // Top-level navigation
+    registerAction('switch-tab',          (_e, _el, d) => switchTab(d.tab));
+    registerAction('switch-subtab',       (_e, _el, d) => switchSubtab(d.subtab));
+    registerAction('refresh-all',         () => refreshAll());
+    registerAction('toggle-theme',        () => toggleTheme());
+    registerAction('toggle-terminal',     () => toggleTerminal());
+
+    // Modals — open
+    registerAction('open-new-item-modal', () => openNewItemModal());
+    registerAction('open-about-modal',    () => openAboutModal());
+    registerAction('open-config-modal',   () => openConfigModal());
+
+    // Modals — close (explicit button, and backdrop-click variant)
+    registerAction('close-new-item-modal', () => closeNewItemModal());
+    registerAction('close-about-modal',    () => closeAboutModal());
+    registerAction('close-config-modal',   () => closeConfigModal());
+    registerAction('close-note-preview',   () => closeNotePreview());
+    registerAction('close-on-backdrop', (event, el) => {
+        if (event.target !== el) return;
+        const target = el.dataset.target;
+        if (target === 'note-preview') closeNotePreview();
+        else if (target === 'about-modal') closeAboutModal();
+        else if (target === 'config-modal') closeConfigModal();
+        else if (target === 'new-item-modal') closeNewItemModal();
+    });
+
+    // Terminal
+    registerAction('term-new-tab',          (_e, _el, d) => termNewTab(d.side));
+    registerAction('term-new-launcher-tab', (_e, _el, d) => termNewLauncherTab(d.side));
+
+    // Note preview / edit
+    registerAction('note-nav-back', () => noteNavBack());
+    registerAction('set-note-mode', (_e, _el, d) => setNoteMode(d.mode));
+    registerAction('save-edit',     () => saveEdit());
+
+    // Note reconcile modal
+    registerAction('note-reconcile-dismiss', () => _noteReconcileDismiss());
+    registerAction('note-reconcile-reload',  () => _noteReconcileReload());
+
+    // In-note search
+    registerAction('note-search-step', (_e, _el, d) => noteSearchStep(parseInt(d.delta, 10) || 0));
+    registerAction('note-search-close', () => noteSearchClose());
+
+    // Card header / priority menu
+    registerAction('toggle-card',    (_e, el) => toggleCard(el.closest('.card')));
+    registerAction('toggle-pri-menu', (_e, el) => togglePriMenu(el));
+    registerAction('pick-priority',  (_e, el, d) =>
+        pickPriority(d.path, d.priority, el.closest('.pri-wrap')));
+
+    // Steps + section folding
+    registerAction('cycle-step',     (_e, el, d) => {
+        const step = el.closest('.step');
+        cycle(d.filePath, +step.dataset.line, step);
+    });
+    registerAction('start-edit-text', (_e, el) => startEditText(el));
+    registerAction('remove-step',     (_e, el, d) => {
+        const step = el.closest('.step');
+        removeStep(d.filePath, +step.dataset.line, el);
+    });
+    registerAction('toggle-section',  (_e, el) => toggleSection(el));
+    registerAction('add-step',        (_e, el, d) =>
+        addStep(d.filePath, d.heading, el.previousElementSibling));
+
+    // Note preview (cards, history, knowledge, readme link, index badges)
+    registerAction('open-note-preview', (_e, _el, d) => openNotePreview(d.path, d.title));
+
+    // Notes/files tree actions
+    registerAction('create-note-for', (_e, _el, d) =>
+        createNoteFor(d.readmeRel, d.relDir));
+    registerAction('upload-to-notes', (_e, _el, d) =>
+        uploadToNotes(d.readmeRel, d.relDir));
+    registerAction('create-notes-subdir', (_e, _el, d) =>
+        createNotesSubdir(d.readmeRel, d.relDir));
+
+    // Deliverables
+    registerAction('open-deliverable', (_e, _el, d) => openDeliverable(d.fullPath));
+
+    // Card actions (work-on, open-folder)
+    registerAction('work-on',     (event, _el, d) => workOn(event, d.slug));
+    registerAction('open-folder', (event, _el, d) => openFolder(event, d.relDir));
+}
+registerDashboardActions();
+initActionDispatch();
+
 initTabDragSideEffects();
 initThemeSideEffects();
 initAboutModalSideEffects();
@@ -1508,40 +1599,20 @@ initSseSideEffects();
     } catch (e) {}
 })();
 
-// Re-export the externally-called surface so Jinja-rendered onclick
-// handlers, Python-rendered HTML, and the CM6 mount trailer (cm6-mount.js)
-// can find these functions on window — identical to the global visibility
-// the inline <script> block used to provide. Functions listed in the
-// original spec are all declared above. Additional entries
-// (openNotePreview, addStep, removeStep, cycle, pickPriority,
-// createNoteFor, createNotesSubdir, openFolder, openConfigModal,
-// openAboutModal, closeAboutModal, closeConfigModal, closeNewItemModal,
-// closeNotePreview, toggleTheme, toggleTerminal, termNewTab,
-// termNewLauncherTab, switchTab, switchSubtab, switchConfigTab,
-// refreshAll, setNoteMode, noteSearchStep, noteSearchClose, saveEdit,
-// noteNavBack, jumpToProject, _openHistoryHit, _noteReconcileDismiss,
-// _noteReconcileReload) were added after grepping src/condash/render.py,
-// src/condash/templates/*.j2, and the residual markup in dashboard.html
-// for onclick="<name>(" occurrences.
+// The post-data-action residual: a few inline handlers still reach the
+// global scope because they fire on non-click events (oninput, onkeydown,
+// ondblclick, onsubmit, onmousedown, onpointerdown). Every click-driven
+// attribute moved to `data-action` + `registerAction(…)` above. The CM6
+// init bridge (`cm6-init.js`) also reads `window._syncModeControls` when
+// the CodeMirror bundle finishes loading, since that file is a classic
+// (non-ESM) script.
 Object.assign(window, {
-    toggleCard, togglePriMenu, uploadToNotes, workOn, toggleSection,
-    openInTerminal, startEditText, stepPointerDown, openDeliverable,
-    startRenameNote, runnerStart, runnerStop, runnerSwitch,
-    runnerForceStop,
-    runnerToggleCollapse, runnerJump, runnerPopout,
-    runnerStopInline, gitToggleOpenPopover, gitClosePopovers,
-    updateProgress, _syncModeControls,
-    openNotePreview, addStep, removeStep, cycle, pickPriority,
-    createNoteFor, createNotesSubdir, openFolder,
-    openConfigModal, openNewItemModal, openAboutModal,
-    closeConfigModal, closeNewItemModal, closeAboutModal, closeNotePreview,
-    toggleTheme, toggleTerminal, termNewTab, termNewLauncherTab,
-    termDragStart, termSplitStart,
-    switchTab, switchSubtab, switchConfigTab, refreshAll, setNoteMode,
-    noteSearchStep, noteSearchClose, noteSearchRun, saveEdit, noteNavBack,
-    openPath,
-    filterHistory, filterKnowledge,
-    saveConfig, submitNewItem, _setDirty,
-    jumpToProject, _openHistoryHit,
-    _noteReconcileDismiss, _noteReconcileReload,
+    addStep,                                  // onkeydown in _macros.html.j2 (Add-step input)
+    startRenameNote,                          // ondblclick on the note-modal title
+    stepPointerDown,                          // onpointerdown on the step drag handle
+    termDragStart, termSplitStart,            // onmousedown on the terminal handles
+    filterHistory, filterKnowledge,           // oninput on the search inputs
+    noteSearchRun, _setDirty,                 // oninput on the note search bar + textarea
+    saveConfig,                               // onsubmit on the config form
+    _syncModeControls,                        // cm6-init.js reaches for this on load
 });

@@ -6,13 +6,13 @@
   <span class="drag-handle" onpointerdown="stepPointerDown(event)">⠿</span>
   <span class="status-dot status-{{ step.status }}"
     onmousedown="event.stopPropagation();event.preventDefault()"
-    onclick="var s=this.closest('.step');cycle({{ file_path | embed }},+s.dataset.line,s)">{{ dot }}</span>
+    data-action="cycle-step" data-file-path="{{ file_path }}">{{ dot }}</span>
   <span class="text"
     onmousedown="event.stopPropagation()"
-    onclick="event.stopPropagation();startEditText(this)">{{ step.text }}</span>
+    data-action="start-edit-text" data-stop="1">{{ step.text }}</span>
   <button class="remove-btn"
     onmousedown="event.stopPropagation();event.preventDefault()"
-    onclick="var s=this.closest('.step');removeStep({{ file_path | embed }},+s.dataset.line,this)">×</button>
+    data-action="remove-step" data-file-path="{{ file_path }}">×</button>
 </div>
 {% endmacro %}
 
@@ -22,7 +22,7 @@
 {% set total = items | length %}
 {% set all_done = total > 0 and done == total %}
 <div class="sec-group">
-  <div class="sec-heading{% if not all_done %} open{% endif %}" onclick="toggleSection(this)">
+  <div class="sec-heading{% if not all_done %} open{% endif %}" data-action="toggle-section">
     {{ heading }} <span class="sec-count">({{ done }}/{{ total }})</span>
   </div>
   <div class="sec-items" style="display:{% if all_done %}none{% else %}block{% endif %}">
@@ -30,7 +30,8 @@
     <div class="add-row">
       <input type="text" placeholder="Add task…"
         onkeydown="if(event.key==='Enter')addStep({{ file_path | embed }},{{ heading | embed }},this)">
-      <button onclick="addStep({{ file_path | embed }},{{ heading | embed }},this.previousElementSibling)">+</button>
+      <button data-action="add-step"
+        data-file-path="{{ file_path }}" data-heading="{{ heading }}">+</button>
     </div>
   </div>
 </div>
@@ -40,7 +41,8 @@
 {% macro file_entry(n) %}
 {% set label = n.name[:-3] if n.name[-3:] == '.md' else n.name %}
 <div class="note-item" data-kind="{{ n.kind | default('md') }}"
-  onclick="openNotePreview({{ n.path | embed }},'{{ n.name }}')">{{ label }}</div>
+  data-action="open-note-preview"
+  data-path="{{ n.path }}" data-title="{{ n.name }}">{{ label }}</div>
 {% endmacro %}
 
 
@@ -53,11 +55,14 @@
     <span class="notes-count">({{ group_ | subtree_count }})</span>
     {% if readme_rel %}
     <button class="notes-new-btn" title="New note in this folder"
-      onclick="event.stopPropagation();event.preventDefault();createNoteFor({{ readme_rel | embed }},{{ group_.rel_dir | embed }})">+</button>
+      data-action="create-note-for" data-stop="1" data-prevent="1"
+      data-readme-rel="{{ readme_rel }}" data-rel-dir="{{ group_.rel_dir }}">+</button>
     <button class="notes-upload-btn" title="Upload files into this folder"
-      onclick="event.stopPropagation();event.preventDefault();uploadToNotes({{ readme_rel | embed }},{{ group_.rel_dir | embed }})">↑</button>
+      data-action="upload-to-notes" data-stop="1" data-prevent="1"
+      data-readme-rel="{{ readme_rel }}" data-rel-dir="{{ group_.rel_dir }}">↑</button>
     <button class="notes-mkdir-btn" title="New subdirectory inside this folder"
-      onclick="event.stopPropagation();event.preventDefault();createNotesSubdir({{ readme_rel | embed }},{{ group_.rel_dir | embed }})">+ folder</button>
+      data-action="create-notes-subdir" data-stop="1" data-prevent="1"
+      data-readme-rel="{{ readme_rel }}" data-rel-dir="{{ group_.rel_dir }}">+ folder</button>
     {% endif %}
   </summary>
   <div class="notes-list">
@@ -75,7 +80,8 @@
     {% if readme_rel %}
     <button class="notes-mkdir-btn"
       title="New folder at the item root (sibling of notes/)"
-      onclick="event.stopPropagation();event.preventDefault();createNotesSubdir({{ readme_rel | embed }},'')">+ folder</button>
+      data-action="create-notes-subdir" data-stop="1" data-prevent="1"
+      data-readme-rel="{{ readme_rel }}" data-rel-dir="">+ folder</button>
     {% endif %}
   </div>
   <div class="notes-list">
@@ -88,7 +94,8 @@
 
 {% macro readme_link(item) %}
 <div class="readme-preview"
-  onclick="openNotePreview({{ item.path | embed }},{{ item.title | embed }})">≡ README</div>
+  data-action="open-note-preview"
+  data-path="{{ item.path }}" data-title="{{ item.title }}">≡ README</div>
 {% endmacro %}
 
 
@@ -99,7 +106,8 @@
   {% for d in deliverables %}
   <div class="dlv-item">
     <a class="dlv-link" href="#"
-      onclick="event.preventDefault();event.stopPropagation();openDeliverable({{ d.full_path | embed }});return false;"
+      data-action="open-deliverable" data-stop="1" data-prevent="1"
+      data-full-path="{{ d.full_path }}"
       {% if d.desc %}title="{{ d.desc }}"{% endif %}>⤓ {{ d.label }}</a>{% if d.desc %} <span class="dlv-desc">— {{ d.desc }}</span>{% endif %}
   </div>
   {% endfor %}
@@ -114,24 +122,26 @@
 <div class="card-actions">
   <button class="git-action-btn card-action-work-on"
     title="{{ work_title }}" aria-label="{{ work_title }}"
-    onclick="workOn(event,{{ item.slug | embed }})">{{ icons.work_on | safe }}</button>
+    data-action="work-on" data-slug="{{ item.slug }}">{{ icons.work_on | safe }}</button>
   <button class="git-action-btn card-action-folder"
     title="Open folder in file manager" aria-label="Open folder in file manager"
-    onclick="openFolder(event,{{ rel_dir | embed }})">{{ icons.folder | safe }}</button>
+    data-action="open-folder" data-rel-dir="{{ rel_dir }}">{{ icons.folder | safe }}</button>
 </div>
 {% endmacro %}
 
 
 {% macro index_badge(idx, top_level=false) %}
 <a class="knowledge-index-badge{% if top_level %} knowledge-index-top{% endif %}"
-  onclick="event.stopPropagation();openNotePreview({{ idx.path | embed }},{{ idx.title | embed }})"
+  data-action="open-note-preview" data-stop="1"
+  data-path="{{ idx.path }}" data-title="{{ idx.title }}"
   title="{{ idx.path }}">index</a>
 {% endmacro %}
 
 
 {% macro knowledge_card(e) %}
 <div class="knowledge-card" data-node-id="{{ e.path }}"
-  onclick="openNotePreview({{ e.path | embed }},{{ e.title | embed }})">
+  data-action="open-note-preview"
+  data-path="{{ e.path }}" data-title="{{ e.title }}">
   <div class="knowledge-title">{{ e.title }}</div>
   {% if e.desc %}<div class="knowledge-desc">{{ e.desc }}</div>{% endif %}
   <div class="knowledge-path">{{ e.path }}</div>

@@ -19,7 +19,8 @@
         {% for item in month['items'] %}
         <div class="knowledge-card history-card"
           data-priority="{{ item.priority }}" data-kind="{{ item.kind }}"
-          onclick="openNotePreview({{ item.path | embed }},{{ item.title | embed }})">
+          data-action="open-note-preview"
+          data-path="{{ item.path }}" data-title="{{ item.title }}">
           <div class="knowledge-title">{{ item.title }}</div>
           <div class="history-meta">
             <span class="pill pri-{{ item.priority }}">{{ item.priority }}</span>

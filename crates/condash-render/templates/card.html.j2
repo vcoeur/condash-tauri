@@ -5,7 +5,7 @@
 <div class="card collapsed" id="{{ item.slug }}"
   data-kind="{{ kind }}" data-priority="{{ pri }}" data-node-id="{{ node_id }}">
   <div class="card-header">
-    <div class="card-header-left" onclick="toggleCard(this.closest('.card'))">
+    <div class="card-header-left" data-action="toggle-card">
       <span class="kind-prefix kind-{{ kind }}">{{ kind }}</span>
       <span class="card-title">{{ item.title }}</span>
       {% if item.deliverables %}<span class="dlv-icon" title="Has deliverables">PDF</span>{% endif %}
@@ -24,12 +24,13 @@
         <span class="invalid-status-badge"
           title='Unknown Status "{{ item.invalid_status }}" in README — treated as backlog. Valid: now, soon, later, backlog, review, done.'>!? {{ item.invalid_status }}</span>
       {% endif %}
-      <span class="pri-wrap" onclick="event.stopPropagation();togglePriMenu(this)">
+      <span class="pri-wrap" data-action="toggle-pri-menu" data-stop="1">
         <span class="pri-current pri-{{ pri }}">{{ pri }}</span>
         <span class="pri-menu">
           {% for p in priorities %}
           <span class="pri-option pri-{{ p }}"
-            onclick="event.stopPropagation();pickPriority({{ item.path | embed }},'{{ p }}',this.closest('.pri-wrap'))">{{ p }}</span>
+            data-action="pick-priority" data-stop="1"
+            data-path="{{ item.path }}" data-priority="{{ p }}">{{ p }}</span>
           {% endfor %}
         </span>
       </span>
@@ -39,7 +40,7 @@
   </div>
   {% if next_step %}
   <div class="card-next-step"
-    onclick="toggleCard(this.closest('.card'))"
+    data-action="toggle-card"
     title="Next pending step">
     <span class="next-step-marker next-step-{{ next_step.status }}" aria-hidden="true"></span>
     <span class="next-step-text">{{ next_step.text }}</span>
