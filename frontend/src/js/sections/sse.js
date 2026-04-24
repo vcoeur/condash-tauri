@@ -17,9 +17,10 @@
    grouping keeps the shape consistent with the other extracted
    regions. */
 
-import { _populateYamlEditor, _getDirtyYamlFile, openConfigModal, _reloadInPlace, _reconcileNoteModal } from '../dashboard-main.js';
+import { _populateYamlEditor, _getDirtyYamlFile, openConfigModal, _reloadInPlace } from '../dashboard-main.js';
 import { _loadTermShortcuts } from './tab-drag.js';
 import { checkUpdates, _scheduleCheckUpdates } from './stale-poll.js';
+import { _reconcileNoteModal } from './note-reconcile.js';
 
 const sseState = {
     eventSource: null,
