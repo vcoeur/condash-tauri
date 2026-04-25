@@ -95,7 +95,6 @@ async fn events_stream_forwards_bus_publish_to_subscriber() {
         bus2.publish(EventPayload {
             tab: "projects".into(),
             ts: 1234,
-            file: None,
         });
     });
 
