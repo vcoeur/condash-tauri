@@ -287,6 +287,7 @@ function initNoteModeSideEffects() {
         e.returnValue = '';
         return '';
     });
+    document.addEventListener('condash:cm6-ready', _syncModeControls);
 }
 
 export {

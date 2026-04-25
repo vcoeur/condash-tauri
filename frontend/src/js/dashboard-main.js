@@ -506,21 +506,48 @@ initHtmxStatePreserve();
     } catch (e) {}
 })();
 
-// The post-data-action residual: a few inline handlers still reach the
-// global scope because they fire on non-click events (oninput, onkeydown,
-// ondblclick, onsubmit, onmousedown, onpointerdown). Every click-driven
-// attribute moved to `data-action` + `registerAction(…)` above. The CM6
-// init bridge (`cm6-init.js`) also reads `window._syncModeControls` when
-// the CodeMirror bundle finishes loading, since that file is a classic
-// (non-ESM) script.
-Object.assign(window, {
-    addStep,                                  // onkeydown in _macros.html.j2 (Add-step input)
-    startRenameNote,                          // ondblclick on the note-modal title
-    stepPointerDown,                          // onpointerdown on the step drag handle
-    termDragStart, termSplitStart,            // onmousedown on the terminal handles
-    filterKnowledge,                          // oninput on the knowledge search input
-    noteSearchRun, _setDirty,                 // oninput on the note search bar + textarea
-    saveConfig,                               // onsubmit on the config form
-    submitNewItem,                            // onsubmit on the new-item form
-    _syncModeControls,                        // cm6-init.js reaches for this on load
-});
+/* Bridge non-click inline-handler equivalents to delegated listeners.
+   Every former `on*=` attribute is now a `data-*` tag in dashboard.html
+   or _macros.html.j2; the CI guard in `tools/check-inline-handlers.sh`
+   keeps it that way. Listeners are document-level so htmx-morphed
+   markup is automatically covered without a re-bind step. */
+function initInlineHandlerBridges() {
+    document.addEventListener('input', function(ev) {
+        var t = ev.target;
+        if (!t || t.nodeType !== 1) return;
+        if (t.matches('[data-knowledge-search]')) filterKnowledge(t.value);
+        else if (t.matches('[data-note-search]')) noteSearchRun();
+        else if (t.matches('[data-note-textarea]')) _setDirty(true);
+    });
+    document.addEventListener('submit', function(ev) {
+        var t = ev.target;
+        if (!t || t.nodeType !== 1) return;
+        var form = t.matches && t.matches('[data-form]') ? t : null;
+        if (!form) return;
+        var name = form.getAttribute('data-form');
+        if (name === 'config') saveConfig(ev);
+        else if (name === 'new-item') submitNewItem(ev);
+    });
+    document.addEventListener('mousedown', function(ev) {
+        var t = ev.target.closest('[data-terminal-drag],[data-terminal-split]');
+        if (!t) return;
+        if (t.matches('[data-terminal-drag]')) termDragStart(ev);
+        else termSplitStart(ev);
+    });
+    document.addEventListener('pointerdown', function(ev) {
+        var t = ev.target.closest('[data-step-handle]');
+        if (t) stepPointerDown(ev);
+    });
+    document.addEventListener('dblclick', function(ev) {
+        if (ev.target.closest('[data-note-title]')) startRenameNote();
+    });
+    document.addEventListener('keydown', function(ev) {
+        if (ev.key !== 'Enter') return;
+        var t = ev.target;
+        if (!t || !t.matches || !t.matches('[data-add-step-input]')) return;
+        var file = t.getAttribute('data-file-path');
+        var heading = t.getAttribute('data-heading');
+        addStep(file, heading, t);
+    });
+}
+initInlineHandlerBridges();

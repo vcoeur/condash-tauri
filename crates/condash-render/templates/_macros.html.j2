@@ -3,7 +3,7 @@
 {% macro step(step, file_path) %}
 {% set dot = "✓" if step.status == "done" else ("~" if step.status == "progress" else ("—" if step.status == "abandoned" else "")) %}
 <div class="step {{ step.status }}" data-file="{{ file_path }}" data-line="{{ step.line }}">
-  <span class="drag-handle" onpointerdown="stepPointerDown(event)">⠿</span>
+  <span class="drag-handle" data-step-handle>⠿</span>
   <span class="status-dot status-{{ step.status }}"
     onmousedown="event.stopPropagation();event.preventDefault()"
     data-action="cycle-step" data-file-path="{{ file_path }}">{{ dot }}</span>
@@ -29,7 +29,8 @@
     {% for it in items %}{{ step(it, file_path) }}{% endfor %}
     <div class="add-row">
       <input type="text" placeholder="Add task…"
-        onkeydown="if(event.key==='Enter')addStep({{ file_path | embed }},{{ heading | embed }},this)">
+        data-add-step-input
+        data-file-path="{{ file_path }}" data-heading="{{ heading }}">
       <button data-action="add-step"
         data-file-path="{{ file_path }}" data-heading="{{ heading }}">+</button>
     </div>

@@ -65,6 +65,8 @@
         markdown: CM.markdownLang,
         buildTheme: buildTheme,
     };
-    // Re-enable the Edit (CM6) toggle if the modal is already open.
-    if (typeof window._syncModeControls === 'function') window._syncModeControls();
+    // Re-enable the Edit (CM6) toggle if the modal is already open. The
+    // cm6 mount module subscribes to the `condash:cm6-ready` event so we
+    // don't need to reach into a window-global function.
+    document.dispatchEvent(new CustomEvent('condash:cm6-ready'));
 })();

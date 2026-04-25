@@ -136,7 +136,7 @@
     </div>
     <div id="knowledge-pane" style="display:none" data-node-id="knowledge">
         <div class="search-toolbar knowledge-toolbar">
-            <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off" data-preserve="condash.search.knowledge">
+            <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" data-knowledge-search autocomplete="off" data-preserve="condash.search.knowledge">
         </div>
         <!-- Knowledge tree. Refreshes on `sse:knowledge`. The
              folder-open state lives in localStorage (notes-tree-state.js)
@@ -170,7 +170,7 @@
 </main>
 </div>
 <div id="term-pane" class="term-pane" hidden>
-    <div class="term-handle" onmousedown="termDragStart(event)" title="Drag to resize"></div>
+    <div class="term-handle" data-terminal-drag title="Drag to resize"></div>
     <div class="term-top-row">
         <div class="term-tabs term-tabs-left" id="term-tabs-left"></div>
         <button class="term-new-tab" data-action="term-new-tab" data-side="left" title="New tab (left)" aria-label="New tab (left)">+</button>
@@ -185,7 +185,7 @@
         <div class="term-side" data-side="left">
             <div class="term-mount" id="term-mount-left"></div>
         </div>
-        <div class="term-splitter" id="term-splitter" hidden onmousedown="termSplitStart(event)" title="Drag to resize split"></div>
+        <div class="term-splitter" id="term-splitter" hidden data-terminal-split title="Drag to resize split"></div>
         <div class="term-side" data-side="right" hidden>
             <div class="term-mount" id="term-mount-right"></div>
         </div>
@@ -195,7 +195,7 @@
     <div class="note-modal" id="note-modal-inner" data-mode="view">
         <div class="note-modal-header">
             <button class="note-modal-back" id="note-modal-back" data-action="note-nav-back" aria-label="Back" title="Back to previous note" hidden>&#9664;</button>
-            <span class="note-modal-title" id="note-modal-title" ondblclick="startRenameNote()" title="Double-click to rename (notes/ files only)">Note</span>
+            <span class="note-modal-title" id="note-modal-title" data-note-title title="Double-click to rename (notes/ files only)">Note</span>
             <div class="note-mode-toggle" id="note-mode-toggle" role="group" aria-label="Note mode">
                 <button class="note-mode-btn" data-action="set-note-mode" data-mode="view" title="View (rendered)">View</button>
                 <button class="note-mode-btn" data-action="set-note-mode" data-mode="cm" title="Edit with syntax highlighting (Ctrl+E)">Edit</button>
@@ -212,7 +212,7 @@
             <button type="button" class="note-action-btn note-action-primary" data-action="note-reconcile-reload">Reload from disk</button>
         </div>
         <div class="note-modal-search" id="note-search-bar" hidden>
-            <input type="search" id="note-search-input" placeholder="Find in note…" autocomplete="off" oninput="noteSearchRun()">
+            <input type="search" id="note-search-input" placeholder="Find in note…" autocomplete="off" data-note-search>
             <span class="note-search-count" id="note-search-count"></span>
             <button class="note-action-btn" data-action="note-search-step" data-delta="-1" title="Previous (Shift+Enter)" aria-label="Previous match">&uarr;</button>
             <button class="note-action-btn" data-action="note-search-step" data-delta="1" title="Next (Enter)" aria-label="Next match">&darr;</button>
@@ -222,7 +222,7 @@
             <div class="note-pane note-pane-view" id="note-pane-view"></div>
             <div class="note-pane note-pane-cm" id="note-pane-cm"></div>
             <div class="note-pane note-pane-plain" id="note-pane-plain">
-                <textarea class="note-edit-textarea" id="note-edit-textarea" spellcheck="false" oninput="_setDirty(true)"></textarea>
+                <textarea class="note-edit-textarea" id="note-edit-textarea" spellcheck="false" data-note-textarea></textarea>
                 <div class="note-edit-error" id="note-edit-error"></div>
             </div>
         </div>
@@ -262,7 +262,7 @@
             <button class="note-modal-close" data-action="close-config-modal" aria-label="Close">&times;</button>
         </div>
         <div class="note-modal-body">
-            <form id="config-form" onsubmit="saveConfig(event)">
+            <form id="config-form" data-form="config">
                 <p class="config-help">
                     Plain-text editor of <code id="config-file-path">&lt;conception&gt;/configuration.yml</code>.
                     Save validates the YAML; changes take effect the next time condash launches.
@@ -291,7 +291,7 @@
             <button class="note-modal-close" data-action="close-new-item-modal" aria-label="Close">&times;</button>
         </div>
         <div class="note-modal-body">
-            <form id="new-item-form" onsubmit="submitNewItem(event)">
+            <form id="new-item-form" data-form="new-item">
                 <fieldset class="config-fieldset">
                     <legend>Kind</legend>
                     <div class="new-item-segmented" data-field="kind">
