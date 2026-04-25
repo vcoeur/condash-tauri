@@ -100,7 +100,7 @@ test: ## Run cargo tests across the workspace
 SMOKE_FIXTURE ?= $(CURDIR)/examples/conception-demo
 SMOKE_PORT    ?= 3911
 
-smoke: ## End-to-end Playwright smoke against condash-serve (boots cargo run, opens dashboard, asserts SSE + dispatch)
+smoke: frontend ## End-to-end Playwright smoke against condash-serve (boots cargo run, opens dashboard, asserts SSE + dispatch)
 	@set -e; \
 	cd tests/smoke; \
 	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npm install --no-audit --no-fund --loglevel=error; \
