@@ -73,11 +73,10 @@ function _setEmpty(panel, cls, text) {
     el.textContent = text;
 }
 
-/* Last Knowledge query — re-applied after _reloadInPlace swaps the
-   DOM so an active filter survives a background refresh. The History
-   pane no longer needs a JS-side cache: htmx re-fires its `hx-get`
-   automatically using the current `#history-search` value (preserved
-   across swaps via `data-preserve`). */
+/* Last Knowledge query — re-applied after htmx morph-swaps `#knowledge`
+   so an active filter survives a background refresh (see
+   `htmx-state-preserve.js`). The History pane uses `data-preserve` on
+   its input so htmx re-fires `hx-get` against the saved value. */
 var _knowledgeSearchQ = '';
 
 /* Build an HTML snippet showing ~`radius` chars of context around the

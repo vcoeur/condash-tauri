@@ -10,9 +10,9 @@
 //!
 //! - [`render_page`] — the full dashboard shell (cards, knowledge tree,
 //!   history, git strip).
-//! - [`render_card_fragment`] / [`render_knowledge_card_fragment`] /
-//!   [`render_knowledge_group_fragment`] — per-node fragments used by
-//!   the long-poll `/fragment` endpoint.
+//! - [`render_cards_pane`] / [`render_knowledge_pane`] /
+//!   [`render_code_pane`] / [`render_history_pane`] — per-tab fragments
+//!   served by the four `/fragment/<tab>` endpoints (htmx targets).
 //! - [`git_render`] — the git-strip (peer cards, runner buttons).
 //! - [`note_render`] — the `/note` read path (markdown → HTML via
 //!   pulldown-cmark, wikilink resolution, raw-payload accessor).
@@ -24,7 +24,7 @@ pub mod templating;
 
 pub use note_render::{raw_payload as note_raw_payload, render_note};
 
-use condash_parser::{knowledge_title_and_desc, Item, KnowledgeCard, KnowledgeNode};
+use condash_parser::{knowledge_title_and_desc, Item, KnowledgeNode};
 use condash_state::{collect_git_repos, search_items, RenderCtx, SearchResult};
 use minijinja::context;
 use minijinja::value::Value;
@@ -99,24 +99,6 @@ pub fn render_card(item: &Item) -> String {
         icons => icons::icons_value(),
     };
     templating::render("card.html.j2", ctx)
-}
-
-/// Public fragment entry point — HTML for one project card. Used by
-/// `/fragment` in the route layer.
-pub fn render_card_fragment(item: &Item) -> String {
-    render_card(item)
-}
-
-/// HTML for one knowledge card (file).
-pub fn render_knowledge_card_fragment(entry: &KnowledgeCard) -> String {
-    let ctx = context! { entry => Value::from_serialize(entry) };
-    templating::render("knowledge_card.html.j2", ctx)
-}
-
-/// HTML for one knowledge directory (recursive — includes children).
-pub fn render_knowledge_group_fragment(node: &KnowledgeNode) -> String {
-    let ctx = context! { node => Value::from_serialize(node) };
-    templating::render("knowledge_group.html.j2", ctx)
 }
 
 /// Render the full knowledge tree under the `{{KNOWLEDGE}}` placeholder.
@@ -426,30 +408,9 @@ mod tests {
     }
 
     #[test]
-    fn render_card_fragment_matches_render_card() {
-        let item = simple_item("slug", Priority::Soon);
-        assert_eq!(render_card_fragment(&item), render_card(&item));
-    }
-
-    #[test]
     fn render_knowledge_empty_tree() {
         let html = render_knowledge(None);
         assert!(html.contains("No <code>knowledge/</code>"));
-    }
-
-    #[test]
-    fn render_knowledge_group_fragment_round_trips() {
-        let node = KnowledgeNode {
-            name: "topics".into(),
-            label: "Topics".into(),
-            rel_dir: "knowledge/topics".into(),
-            index: None,
-            body: vec![],
-            children: vec![],
-            count: 0,
-        };
-        let html = render_knowledge_group_fragment(&node);
-        assert!(html.contains("data-node-id=\"knowledge/topics\""));
     }
 
     #[test]

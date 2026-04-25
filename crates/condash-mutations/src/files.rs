@@ -767,5 +767,4 @@ mod tests {
         assert!(res.stored.is_empty());
         assert_eq!(res.rejected.len(), 2);
     }
-
 }

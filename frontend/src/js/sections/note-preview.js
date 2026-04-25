@@ -12,7 +12,6 @@
    conception/projects/2026-04-23-condash-frontend-extraction). */
 
 import { _destroyCm } from './cm6-mount.js';
-import { _flushPendingReloads } from './reload-guards.js';
 import { _syncSaveButton, _captureActiveBuffer, _syncModeControls, _setNoteModeAttr, _hideSaveError } from './note-mode.js';
 import { noteSearchClose } from './in-note-search.js';
 import { reconcileState, _noteShowExternalBanner } from './note-reconcile.js';
@@ -115,16 +114,12 @@ const _noteModal = {
 };
 
 /* Flip the dirty flag and refresh the Save button. Safe to call on every
-   keystroke — the button toggle is the only DOM work. Also drains any
-   reload requests that were parked because the modal was dirty. */
+   keystroke — the button toggle is the only DOM work. */
 function _setDirty(value) {
     var next = !!value;
     if (_noteModal.dirty === next) return;
     _noteModal.dirty = next;
     _syncSaveButton();
-    if (!next && typeof _flushPendingReloads === 'function') {
-        _flushPendingReloads();
-    }
 }
 
 async function openNotePreview(path, name) {
@@ -331,7 +326,6 @@ function closeNotePreview() {
     noteSearchClose();
     _noteShowExternalBanner(false);
     reconcileState.suppressedUntilMtime = null;
-    if (typeof _flushPendingReloads === 'function') _flushPendingReloads();
 }
 
 /* Refresh the view pane from /note. Owned here because it touches the

@@ -12,8 +12,8 @@
 //! ([`live_runners_snapshot`], [`validate_open_path`]). Every handler
 //! lives in one of the sibling sub-modules, grouped by surface:
 //!
-//! - [`shell`]         — `/`, `/fragment`, `/fragment/history`,
-//!                       `/check-updates`, favicons, static assets
+//! - [`shell`]         — `/`, `/fragment/{history,knowledge,code,projects}`,
+//!                       favicons, static assets
 //! - [`steps`]         — `/toggle`, `/add-step`, `/remove-step`,
 //!                       `/edit-step`, `/set-priority`, `/reorder-all`
 //! - [`notes`]         — `/note`, `/note-raw`, `/note/rename`,
@@ -122,8 +122,6 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         // Dashboard shell + asset surface.
         .route("/", get(shell::index))
-        .route("/fragment", get(shell::fragment))
-        .route("/check-updates", get(shell::check_updates))
         .route("/fragment/history", get(shell::fragment_history))
         .route("/fragment/knowledge", get(shell::fragment_knowledge))
         .route("/fragment/code", get(shell::fragment_code))
@@ -227,7 +225,7 @@ pub(super) fn error_json(code: StatusCode, msg: &str) -> Response {
 }
 
 /// Response whose body is an HTML fragment — used by the dashboard
-/// shell and the `/fragment` endpoint.
+/// shell and the per-tab `/fragment/<tab>` endpoints.
 pub(super) fn html_response(body: String) -> Response {
     let mut r = Response::new(Body::from(body));
     r.headers_mut().insert(
@@ -242,7 +240,7 @@ pub(super) fn html_response(body: String) -> Response {
 /// decides whether to paint the mount as running or "exited: N".
 ///
 /// Shared between [`shell::index`] (top-level render) and
-/// [`shell::fragment`] (per-card refresh).
+/// [`shell::fragment_code`] (per-pane refresh).
 pub(super) fn live_runners_snapshot(state: &AppState) -> condash_render::git_render::LiveRunners {
     state
         .runner_registry

@@ -7,12 +7,11 @@
    conception/projects/2026-04-23-condash-frontend-extraction). The
    form-wiring IIFE becomes initNewItemModalSideEffects() per the
    circular-import discipline (see notes/01-p07-tab-drag-split.md §D2
-   + §D3). submitNewItem's post-create tab-switch still calls
-   switchTab / switchSubtab / refreshAll via imports; all three are
-   referenced inside a function body so the cycle remains TDZ-safe. */
+   + §D3). submitNewItem's post-create tab-switch calls switchTab /
+   switchSubtab via imports; both are referenced inside a function
+   body so the cycle remains TDZ-safe. */
 
 import { switchTab, switchSubtab } from '../dashboard-main.js';
-import { refreshAll } from './stale-poll.js';
 
 /* Remove accents + punctuation and produce a YYYY-MM-DD-compatible
    slug. Keeps letters, digits, spaces; collapses spaces into single
@@ -127,11 +126,11 @@ async function submitNewItem(ev) {
             return;
         }
         closeNewItemModal();
-        // Switch to Projects → matching sub-tab, force a full refresh so
-        // the new card appears, then expand it.
+        // Switch to Projects → matching sub-tab; the README write fires
+        // the file watcher → SSE `projects` event → htmx repaints
+        // `#cards` with the new card. Expand it once it lands.
         try { switchTab('projects'); } catch (e) {}
         try { switchSubtab(_newItemSubtab(status)); } catch (e) {}
-        if (typeof refreshAll === 'function') refreshAll();
         var target = data.folder_name || data.slug;
         setTimeout(function() { _expandCardBySlug(target); }, 500);
     } finally {

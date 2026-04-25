@@ -589,34 +589,6 @@ fn render_flat_group(
     parts.join("\n")
 }
 
-/// Fragment for a single family — `/fragment?id=code/<label>/<family>`.
-/// Returns `None` when the node-id doesn't resolve.
-pub fn render_git_repo_fragment(
-    ctx: &RenderCtx,
-    groups: &[Group],
-    node_id: &str,
-    live: &LiveRunners,
-) -> Option<String> {
-    let rest = node_id.strip_prefix("code/")?;
-    let (group_label, family_name) = rest.split_once('/')?;
-    for group in groups {
-        if group.label != group_label {
-            continue;
-        }
-        for family in &group.families {
-            if family.name == family_name {
-                return Some(render_flat_group(
-                    ctx,
-                    family,
-                    &format!("code/{group_label}"),
-                    live,
-                ));
-            }
-        }
-    }
-    None
-}
-
 /// Render the full Code tab given the list of discovered groups.
 /// Port of `_render_git_repos`.
 pub fn render_git_repos(ctx: &RenderCtx, groups: &[Group], live: &LiveRunners) -> String {

@@ -40,19 +40,13 @@ import {
     initCm6ThemeSyncSideEffects,
 } from './sections/cm6-theme-sync.js';
 import {
-    reloadState,
-} from './sections/reload-guards.js';
-import {
-    focusSafeSwap,
-} from './sections/dom-swap.js';
-import {
     runnerStart, runnerSwitch, runnerStop, runnerStopInline,
     runnerToggleCollapse, runnerForceStop, runnerJump, runnerPopout,
     initRunnerViewersSideEffects,
 } from './sections/runner-viewers.js';
 import {
-    reloadNode, refreshAll,
-} from './sections/stale-poll.js';
+    refreshAll,
+} from './sections/refresh-all.js';
 import {
     initSseSideEffects,
 } from './sections/sse.js';
@@ -81,13 +75,12 @@ import {
 import {
     initActionDispatch, registerAction,
 } from './sections/action-dispatch.js';
-import { firePostReloadHooks } from './sections/reload-hooks.js';
 import {
     openConfigModal, closeConfigModal, saveConfig,
 } from './sections/config-modal.js';
 import {
-    updateTabCounts, filterKnowledge,
-    jumpToProject, _openHistoryHit, _reapplySearches,
+    filterKnowledge,
+    jumpToProject, _openHistoryHit,
 } from './sections/search-filter.js';
 import {
     toggleSection, openDeliverable, cycle, removeStep, updateProgress,
@@ -108,34 +101,6 @@ function closePriMenus() {
 
 function toggleCard(card) {
     card.classList.toggle('collapsed');
-}
-
-var PRI_ORDER = {now:0, soon:1, later:2, backlog:3, review:4, done:5};
-
-function sortCards() {
-    // Re-append cards and group headings in priority order. Headings carry
-    // data-group="<priority>" and are sorted just before their cards.
-    var ct = document.getElementById('cards');
-    var items = [].slice.call(ct.querySelectorAll(':scope > .card, :scope > .group-heading'));
-    items.sort(function(a, b) {
-        var pa, pb, ha, hb;
-        if (a.classList.contains('group-heading')) {
-            pa = PRI_ORDER[a.getAttribute('data-group')]; ha = 0;
-        } else {
-            pa = a.getAttribute('data-priority') in PRI_ORDER ? PRI_ORDER[a.getAttribute('data-priority')] : 9;
-            ha = 1;
-        }
-        if (b.classList.contains('group-heading')) {
-            pb = PRI_ORDER[b.getAttribute('data-group')]; hb = 0;
-        } else {
-            pb = b.getAttribute('data-priority') in PRI_ORDER ? PRI_ORDER[b.getAttribute('data-priority')] : 9;
-            hb = 1;
-        }
-        if (pa !== pb) return pa - pb;
-        if (ha !== hb) return ha - hb;
-        return b.id.slice(0,10).localeCompare(a.id.slice(0,10));
-    });
-    items.forEach(function(c) { ct.appendChild(c); });
 }
 
 export var TAB_MAP = {
@@ -171,12 +136,8 @@ function _persistTabState() {
 
 export function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
-    // Pre-htmx, an inactive tab with a "stale dot" forced
-    // `_reloadInPlace()` on click so the user landed on fresh content.
-    // htmx now refreshes every pane on the matching `sse:<tab>`
-    // event, so every tab is always live and the staleness check is
-    // gone — switchTab is a pure visibility toggle plus subtab/state
-    // bookkeeping.
+    // htmx refreshes every pane on its `sse:<tab>` event, so switchTab
+    // is a pure visibility toggle plus subtab/state bookkeeping.
     _activeTab = tab;
     document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-tab') === tab);
@@ -218,104 +179,22 @@ export function _applySubtab(sub) {
     });
 }
 
-async function pickPriority(file, val, wrap) {
+async function pickPriority(file, val) {
     closePriMenus();
-    var card = wrap.closest('.card');
-    var cur = wrap.querySelector('.pri-current');
-    var res = await fetch('/set-priority', {
+    await fetch('/set-priority', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({file: file, priority: val})
+        body: JSON.stringify({file: file, priority: val}),
     });
-    if (!res.ok) return;
-    var result = await res.json();
-    if (result.moved) { _reloadInPlace(); return; }
-    cur.className = 'pri-current pri-' + val;
-    cur.textContent = val;
-    card.setAttribute('data-priority', val);
-    sortCards();
-    switchTab(_activeTab);
-    if (_activeTab === 'projects') switchSubtab(_activeSubtab);
-    updateTabCounts();
+    // The README write fires the file watcher → SSE `projects` event →
+    // htmx refetches `/fragment/projects` and morph-swaps `#cards`. Card
+    // identity is preserved by id, the `htmx:beforeSwap` hook in
+    // `htmx-state-preserve.js` re-applies the active subtab filter.
 }
 
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.pri-wrap')) closePriMenus();
 });
-
-/* In-place refresh: refetch /, parse the fresh HTML, swap #dash-main
-   into place, and re-apply tab/subtab state + counters. Used instead of
-   location.reload() by mutations that only change dashboard content
-   (toggling a step, reordering, …). Keeps:
-   - the terminal pane (sibling of #dash-main, with its own pty session
-     state preserved server-side by Fix B anyway),
-   - open modals (also siblings of #dash-main),
-   - window and document-level event listeners,
-   - scroll position and focus/selection inside dash-main, restored
-     after swap.
-   Falls back to location.reload() on any error so the user never ends
-   up looking at a half-swapped DOM. */
-var _reloadInPlaceInFlight = false;
-var _reloadInPlacePending = false;
-export async function _reloadInPlace() {
-    // Single-flight with trailing coalesce. Two _reloadInPlace calls
-    // racing (e.g. a rapid burst of SSE events) used to swap #dash-main
-    // twice — and if the responses completed out-of-order (request 1
-    // from an older server snapshot resolving after request 2 from a
-    // newer one), the older snapshot would land last and briefly render
-    // a card in no column / with a stale priority until the next poll
-    // fixed it. Queue a trailing run so the last caller's intent still
-    // executes, then coalesces. condash#14 (project vanishes after
-    // reload / file change).
-    if (_reloadInPlaceInFlight) { _reloadInPlacePending = true; return; }
-    _reloadInPlaceInFlight = true;
-    try {
-        var res = await fetch('/', {cache: 'no-store'});
-        if (!res.ok) { location.reload(); return; }
-        var html = await res.text();
-        var fresh = new DOMParser()
-            .parseFromString(html, 'text/html')
-            .getElementById('dash-main');
-        var current = document.getElementById('dash-main');
-        if (!fresh || !current) { location.reload(); return; }
-
-        var result = focusSafeSwap(current, fresh);
-        if (result.skipped) {
-            reloadState.pendingInPlace = true;
-            return;
-        }
-        // htmx attaches its triggers + SSE wiring on element
-        // processing. focusSafeSwap inserts the fresh #dash-main via
-        // replaceWith, which htmx's MutationObserver doesn't see —
-        // process() the swapped subtree so each pane's
-        // `hx-trigger="sse:<tab>"` (and `sse-connect` on body) re-bind
-        // and the `hx-trigger="load"` on `#history-content` fires
-        // against the (data-preserve-restored) input value.
-        if (window.htmx) window.htmx.process(fresh);
-        _rebindDashHandlers();
-        firePostReloadHooks();
-    } catch (e) {
-        location.reload();
-    } finally {
-        _reloadInPlaceInFlight = false;
-        if (_reloadInPlacePending) {
-            _reloadInPlacePending = false;
-            _reloadInPlace();
-        }
-    }
-}
-
-/* Re-apply state to the freshly-swapped #dash-main. Inline onclick
-   attributes inside the new HTML are already wired by the browser;
-   document/window-level listeners never went away. What's left is to
-   restore the active primary/sub tab selection and refresh counters. */
-function _rebindDashHandlers() {
-    switchTab(_activeTab);
-    if (_activeTab === 'projects') switchSubtab(_activeSubtab);
-    updateTabCounts();
-    _reapplySearches();
-    restoreNotesTreeState();
-}
 
 document.addEventListener('DOMContentLoaded', function() {
     var params = new URLSearchParams(location.search);
@@ -334,10 +213,9 @@ document.addEventListener('DOMContentLoaded', function() {
     _restorePreservedSearches();
 });
 
-/* Phase 5: pull saved search terms out of sessionStorage and replay
-   them through the filter functions. Runs once on initial page load;
-   subsequent swaps go through focusSafeSwap which handles restoration
-   via data-preserve. */
+/* Pull saved search terms out of sessionStorage and replay them through
+   the filter functions on initial page load. Subsequent swaps go through
+   htmx and `data-preserve` handles restoration. */
 function _restorePreservedSearches() {
     // History's saved query is restored by data-preserve into the
     // input; htmx's `hx-trigger="load"` on #history-content fires
@@ -361,18 +239,6 @@ function _restorePreservedSearches() {
             window[mapping[key].fn](payload.value);
         }
     });
-}
-
-/* Find the node id (`projects/<pri>/<slug>`) of the card that owns
-   ``readmePath``. Used so localized actions like upload / mkdir can
-   refresh just the affected card via reloadNode() instead of swapping
-   the whole dashboard (which would re-collapse every other card). */
-function _cardNodeIdFor(readmePath) {
-    var parts = (readmePath || '').split('/');
-    if (parts.length < 4) return null;
-    var slug = parts[2];
-    var card = document.getElementById(slug);
-    return card ? card.getAttribute('data-node-id') : null;
 }
 
 /* Open a hidden file picker, then POST the chosen files to /note/upload
@@ -411,7 +277,8 @@ function uploadToNotes(readmePath, subdirRelToItem) {
                     return '  ' + (r.filename || '?') + ': ' + r.reason;
                 }).join('\n'));
             }
-            // Pre-open the target group so the user sees the new files.
+            // Pre-open the target group so the user sees the new files
+            // once SSE → htmx repaints `#cards`.
             if (subdirRelToItem) {
                 var parts = readmePath.split('/');
                 if (parts.length >= 4) {
@@ -421,10 +288,6 @@ function uploadToNotes(readmePath, subdirRelToItem) {
                     } catch (e) {}
                 }
             }
-            // Localized refresh: only the affected card swaps in place
-            // so other cards keep their expanded/collapsed state.
-            var nodeId = _cardNodeIdFor(readmePath);
-            if (nodeId) reloadNode(nodeId); else _reloadInPlace();
         } catch (e) {
             alert('Network error: ' + e);
         } finally {
@@ -465,27 +328,28 @@ async function createNotesSubdir(readmePath, parentRelToItem) {
             alert('Could not create folder: ' + msg);
             return;
         }
-        // Pre-open the new group so it's visible right after the refresh.
+        // Pre-open the new group so it's visible once SSE → htmx repaints
+        // `#cards` (the mkdir wrote a directory the watcher catches).
         if (data.subdir_key) {
             try { localStorage.setItem(_NOTES_OPEN_KEY + data.subdir_key, 'open'); }
             catch (e) {}
         }
-        var nodeId = _cardNodeIdFor(readmePath);
-        if (nodeId) reloadNode(nodeId); else _reloadInPlace();
     } catch (e) {
         alert('Network error: ' + e);
     }
 }
 
 
-// What used to be the polling-based stale-detection region
-// (checkUpdates, _renderStale, staleState, …) is gone after the htmx
-// migration; only `reloadNode` + `refreshAll` survive in
-// `sections/stale-poll.js` (each pane refreshes itself via
-// `hx-trigger="sse:<tab>"`). The legacy EventSource lifecycle in
-// `sections/sse.js` is also gone — htmx-ext-sse owns the connection;
-// the module is now a 50-line bridge for the reconnecting pill +
-// note-modal reconcile.
+// Per-pane refreshes are driven entirely by htmx — each pane carries
+// `hx-trigger="sse:<tab>"` and refetches its `/fragment/<tab>` on the
+// matching server-sent event. The hard-refresh button still fires a
+// real reload via `refreshAll` from `sections/refresh-all.js`. The
+// legacy `_reloadInPlace` / `reloadNode` pathway and its supporting
+// `dom-swap` / `local-subtree-reload` / `reload-guards` /
+// `reload-hooks` / `stale-poll` modules are gone. The classic
+// EventSource lifecycle in `sections/sse.js` is also gone — htmx-ext-sse
+// owns the connection; that module is now a thin bridge for the
+// reconnecting pill + note-modal reconcile.
 
 // The "Tab drag" region that used to live here (pointer-event drag,
 // tab create/close/rename, splitter drag, pane-resize drag, shortcuts,
@@ -543,8 +407,7 @@ function registerDashboardActions() {
     // Card header / priority menu
     registerAction('toggle-card',    (_e, el) => toggleCard(el.closest('.card')));
     registerAction('toggle-pri-menu', (_e, el) => togglePriMenu(el));
-    registerAction('pick-priority',  (_e, el, d) =>
-        pickPriority(d.path, d.priority, el.closest('.pri-wrap')));
+    registerAction('pick-priority',  (_e, _el, d) => pickPriority(d.path, d.priority));
 
     // Steps + section folding
     registerAction('cycle-step',     (_e, el, d) => {
@@ -658,5 +521,6 @@ Object.assign(window, {
     filterKnowledge,                          // oninput on the knowledge search input
     noteSearchRun, _setDirty,                 // oninput on the note search bar + textarea
     saveConfig,                               // onsubmit on the config form
+    submitNewItem,                            // onsubmit on the new-item form
     _syncModeControls,                        // cm6-init.js reaches for this on load
 });

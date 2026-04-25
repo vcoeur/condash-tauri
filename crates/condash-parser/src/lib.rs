@@ -9,13 +9,9 @@
 //!   - Filesystem-walking: [`tree`] (`list_item_tree`), [`knowledge`]
 //!     (`collect_knowledge` + tree walker), [`collect`]
 //!     (`parse_readme` + `collect_items`).
-//!   - [`fingerprint`] — cross-build-stable hashing for
-//!     `/check-updates`; see the module docs for the `repr()`-style
-//!     normalisation it performs.
 
 pub mod collect;
 pub mod deliverables;
-pub mod fingerprint;
 pub mod knowledge;
 pub mod note_kind;
 pub mod readme;
@@ -25,13 +21,8 @@ pub mod tree;
 
 pub use collect::{collect_items, parse_readme, Item};
 pub use deliverables::{parse_deliverables, Deliverable};
-pub use fingerprint::{
-    compute_fingerprint, compute_knowledge_node_fingerprints, compute_project_node_fingerprints,
-    hash, PyValue,
-};
 pub use knowledge::{
-    collect_knowledge, collect_tree, find_card, find_node, knowledge_title_and_desc, KnowledgeCard,
-    KnowledgeNode,
+    collect_knowledge, collect_tree, knowledge_title_and_desc, KnowledgeCard, KnowledgeNode,
 };
 pub use note_kind::note_kind;
 pub use readme::{parse_readme_content, ItemReadme};

@@ -1,28 +1,20 @@
 /* Inline dev-server runner viewers.
 
    Each `.runner-term-mount` element rendered by the repo strip gets its
-   own xterm instance + WebSocket to `/ws/runner/<key>`. Attach and
-   detach do not kill the server-side pty; reloadNode / _reloadInPlace
-   swap the mount DOM, and runnerReattachAll() closes orphaned viewers
-   and creates fresh ones for any newly-inserted mounts. Pop-out mode
+   own xterm instance + WebSocket to `/ws/runner/<key>`. The mount
+   carries `hx-preserve="true"` so a parent `#git-panel` morph swap on
+   `sse:code` leaves the WebSocket-attached DOM untouched. Pop-out mode
    detaches the inline ws in favour of a modal-hosted viewer, then
    re-attaches inline when the modal closes.
 
-   Reattachment is driven from two sources:
+   `runnerReattachAll()` runs on every `htmx:afterSwap` for `#git-panel`
+   to attach viewers to freshly-inserted mounts (a runner that just
+   started) and close orphans (one whose mount left the DOM). User
+   actions that don't write a file the watcher sees (runner
+   start / stop / force-stop) explicitly fire `htmx.trigger(panel,
+   'sse:code')` so the same path covers them. */
 
-   - The explicit `_runnerRefreshRepoNode` calls inside runnerStart /
-     runnerStop / runnerForceStop — guaranteed to fire for user-driven
-     runner state changes.
-   - The shared reload-hooks registry — runnerReattachAll() is
-     registered via `onPostReload(...)` so every successful global or
-     fragment swap sweeps orphaned viewers, regardless of which code
-     path triggered the reload. */
-
-import { _reloadInPlace } from '../dashboard-main.js';
-import { reloadNode } from './stale-poll.js';
 import { _termClipboardRead, _termClipboardWrite } from './terminal.js';
-import { _flushPendingReloads } from './reload-guards.js';
-import { onPostReload } from './reload-hooks.js';
 
 var _runnerViewers = {};  // "key|checkout" -> {ws, term, fit, mount, exited, isModal}
 var _runnerActiveModal = null;
@@ -118,10 +110,7 @@ function _runnerCreateViewer(mount, key, checkout, opts) {
                     mount.classList.add('runner-exited');
                     _runnerSetStatus(viewer, 'exited: ' + (obj.exit_code == null ? '?' : obj.exit_code));
                     if (!wasExited) {
-                        _runnerScheduleRefresh(key, checkout);
-                        if (typeof _flushPendingReloads === 'function') {
-                            _flushPendingReloads();
-                        }
+                        _runnerScheduleRefresh();
                     }
                 } else if (obj.type === 'session-missing') {
                     _runnerSetStatus(viewer, 'no session');
@@ -132,11 +121,6 @@ function _runnerCreateViewer(mount, key, checkout, opts) {
             return;
         }
         term.write(new Uint8Array(ev.data));
-    };
-    ws.onclose = function() {
-        // Runner teardown clears the runner-active guard for this node —
-        // drain any reload that was parked while the runner was live.
-        if (typeof _flushPendingReloads === 'function') _flushPendingReloads();
     };
     term.onData(function(data) {
         if (viewer.exited) return;
@@ -204,30 +188,24 @@ function _runnerFindMount(key, checkout) {
     );
 }
 
-function _runnerRepoNodeIdFor(key, checkout) {
-    var mount = _runnerFindMount(key, checkout);
-    if (!mount) return null;
-    var group = mount.closest('.flat-group');
-    return group ? group.getAttribute('data-node-id') : null;
-}
-
-async function _runnerRefreshRepoNode(repoNodeId) {
-    if (!repoNodeId) { await _reloadInPlace(); runnerReattachAll(); return; }
-    await reloadNode(repoNodeId);
-    runnerReattachAll();
+/* Trigger a server-side refresh of the Code pane so a runner mount that
+   just appeared (or vanished) lands in the DOM. Runner state changes
+   don't write a file the watcher catches, so we fire the htmx event
+   explicitly. The follow-up `runnerReattachAll()` runs from
+   `htmx:afterSwap` on `#git-panel`. */
+function _runnerTriggerCodeRefresh() {
+    var panel = document.getElementById('git-panel');
+    if (panel && window.htmx) window.htmx.trigger(panel, 'sse:code');
 }
 
 var _runnerRefreshPending = null;
-function _runnerScheduleRefresh(key, checkout) {
+function _runnerScheduleRefresh() {
     // Debounce rapid state changes — a burst of starts/exits during a
     // confirm-switch flow shouldn't trigger three fragment fetches.
     if (_runnerRefreshPending) clearTimeout(_runnerRefreshPending);
-    var repoId = _runnerRepoNodeIdFor(key, checkout)
-        || document.querySelector('.flat-group[data-node-id*="/' + key.split('--')[0] + '"]');
-    if (repoId && repoId.getAttribute) repoId = repoId.getAttribute('data-node-id');
     _runnerRefreshPending = setTimeout(function() {
         _runnerRefreshPending = null;
-        _runnerRefreshRepoNode(repoId);
+        _runnerTriggerCodeRefresh();
     }, 120);
 }
 
@@ -257,7 +235,7 @@ async function runnerStart(ev, key, checkout, path) {
             });
         } catch (e) {}
     }
-    await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+    _runnerTriggerCodeRefresh();
 }
 
 async function runnerSwitch(ev, key, checkout, path) {
@@ -270,7 +248,7 @@ async function runnerSwitch(ev, key, checkout, path) {
 async function runnerStop(ev, key) {
     if (ev) ev.stopPropagation();
     await _runnerStopFetch(key);
-    await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+    _runnerTriggerCodeRefresh();
 }
 
 function runnerStopInline(btn) {
@@ -339,20 +317,8 @@ async function runnerForceStop(btn, key) {
         console.warn('force-stop request errored:', e);
     } finally {
         if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
-        await _runnerRefreshRepoNode(_findRepoNodeIdByKey(key));
+        _runnerTriggerCodeRefresh();
     }
-}
-
-function _findRepoNodeIdByKey(key) {
-    var repoName = key.indexOf('--') >= 0 ? key.split('--')[0] : key;
-    var esc = (window.CSS && CSS.escape) ? CSS.escape : function(s) { return s; };
-    // The repo node id is "code/<group>/<repo>". We match by suffix.
-    var nodes = document.querySelectorAll('.flat-group[data-node-id]');
-    for (var i = 0; i < nodes.length; i++) {
-        var id = nodes[i].getAttribute('data-node-id');
-        if (id && id.endsWith('/' + repoName)) return id;
-    }
-    return null;
 }
 
 function runnerJump(ev, btn) {
@@ -438,11 +404,17 @@ function _runnerCloseModal() {
 }
 
 function initRunnerViewersSideEffects() {
-    // Sweep orphaned viewers + attach fresh ones after every global
-    // or fragment swap. The hook registry is fired by _reloadInPlace
-    // and reloadNode themselves; runner-viewers doesn't care which
-    // code path triggered the reload.
-    onPostReload(runnerReattachAll);
+    // Sweep orphaned viewers + attach fresh ones after every htmx
+    // morph swap of `#git-panel`. The mount itself is `hx-preserve`,
+    // so existing live viewers survive the swap untouched; this hook
+    // only matters for newly-inserted mounts (a runner that just
+    // started) and for orphans (one whose mount left the DOM).
+    document.body.addEventListener('htmx:afterSwap', function(ev) {
+        var target = ev.target;
+        if (target && target.id === 'git-panel') {
+            try { runnerReattachAll(); } catch (e) {}
+        }
+    });
 
     // Initial attach — runs once xterm assets have loaded.
     document.addEventListener('DOMContentLoaded', function() {

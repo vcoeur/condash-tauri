@@ -49,10 +49,10 @@
      by `src-tauri/src/server/events.rs`. The legacy reconnect/reconcile
      plumbing in sections/sse.js now hangs off htmx:sseOpen/sseError/
      sseMessage instead of owning the EventSource. -->
-<!-- #dash-main wraps all server-rendered content so _reloadInPlace() can
-     swap it without touching the terminal pane (a sibling below) or any
-     modal. Inline onclick handlers inside this block survive the swap;
-     document/window-level listeners are never invalidated. -->
+<!-- #dash-main wraps all server-rendered content. Each tab pane inside
+     carries its own `hx-trigger="sse:<tab>"`; htmx morph-swaps just the
+     pane on the matching named event, leaving the terminal pane (a
+     sibling below) and any open modal untouched. -->
 <div id="dash-main" class="app">
 <div class="topbar">
     <div class="tabs tabs-primary">
@@ -158,8 +158,8 @@
         <!-- Server-rendered initial content lands here. htmx re-fetches
              /fragment/history on input changes, on `sse:projects` (file
              watcher → backend → SSE), and on `htmx:load` so a saved
-             query restored via data-preserve after _reloadInPlace
-             takes effect without requiring a new keystroke. -->
+             query restored via data-preserve takes effect on initial
+             page load without requiring a new keystroke. -->
         <div id="history-content"
              hx-get="/fragment/history"
              hx-trigger="load, input changed delay:150ms from:#history-search, sse:projects"

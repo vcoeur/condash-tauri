@@ -81,11 +81,9 @@ pub fn run() {
         .setup(|app| {
             let conception_path = match resolve_conception_path() {
                 Ok(p) => p,
-                Err(unset) => {
-                    prompt_for_conception_path(app.handle(), unset).ok_or_else(|| {
-                        "condash cancelled at the conception folder picker".to_string()
-                    })?
-                }
+                Err(unset) => prompt_for_conception_path(app.handle(), unset).ok_or_else(|| {
+                    "condash cancelled at the conception folder picker".to_string()
+                })?,
             };
             let asset_source = assets::pick_from_env();
             let template =

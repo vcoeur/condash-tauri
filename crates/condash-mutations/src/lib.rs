@@ -25,8 +25,7 @@ pub mod steps;
 
 pub use create_item::{create_item, CreateItemResult, ItemKind, NewItemSpec};
 pub use files::{
-    create_note, create_notes_subdir, rename_note, store_uploads, write_note,
-    CreateNoteResult, CreateSubdirResult, RenameResult, StoreUploadsResult, UploadRejection,
-    WriteNoteResult,
+    create_note, create_notes_subdir, rename_note, store_uploads, write_note, CreateNoteResult,
+    CreateSubdirResult, RenameResult, StoreUploadsResult, UploadRejection, WriteNoteResult,
 };
 pub use steps::{add_step, edit_step, remove_step, reorder_all, set_priority, toggle_checkbox};

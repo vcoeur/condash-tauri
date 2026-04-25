@@ -210,42 +210,6 @@ fn rel_to(base: &Path, path: &Path) -> String {
         .unwrap_or_else(|_| path.to_string_lossy().into_owned())
 }
 
-/// Return the tree node at `rel_dir` (e.g. `knowledge/topics`) or
-/// `None`. Recursive; mirrors `find_knowledge_node`.
-pub fn find_node<'a>(tree: Option<&'a KnowledgeNode>, rel_dir: &str) -> Option<&'a KnowledgeNode> {
-    let tree = tree?;
-    if tree.rel_dir == rel_dir {
-        return Some(tree);
-    }
-    for child in &tree.children {
-        if let Some(found) = find_node(Some(child), rel_dir) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-/// Return the card entry (index or body) at file `path` or `None`.
-pub fn find_card<'a>(tree: Option<&'a KnowledgeNode>, path: &str) -> Option<&'a KnowledgeCard> {
-    let tree = tree?;
-    if let Some(idx) = tree.index.as_ref() {
-        if idx.path == path {
-            return Some(idx);
-        }
-    }
-    for entry in &tree.body {
-        if entry.path == path {
-            return Some(entry);
-        }
-    }
-    for child in &tree.children {
-        if let Some(found) = find_card(Some(child), path) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,22 +345,6 @@ mod tests {
         assert_eq!(testing.count, 1);
         assert_eq!(topics.count, 2);
         assert_eq!(tree.count, 3);
-    }
-
-    #[test]
-    fn find_node_and_find_card_walk_recursively() {
-        let td = tempfile::tempdir().unwrap();
-        let base = td.path();
-        write(&base.join("knowledge/index.md"), "# K\n");
-        write(&base.join("knowledge/topics/index.md"), "# T\n");
-        write(&base.join("knowledge/topics/leaf.md"), "# Leaf\n\nHello.\n");
-        let tree = collect_knowledge(base).unwrap();
-
-        let topics = find_node(Some(&tree), "knowledge/topics").unwrap();
-        assert_eq!(topics.label, "Topics");
-
-        let leaf = find_card(Some(&tree), "knowledge/topics/leaf.md").unwrap();
-        assert_eq!(leaf.title, "Leaf");
     }
 
     #[test]

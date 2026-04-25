@@ -12,11 +12,6 @@
 //!
 //! - [`collect_git_repos`] — the `groups = [(label, [family, ...])]`
 //!   shape consumed by the render layer.
-//! - [`git_fingerprint`] — cheap per-workspace hash driving the
-//!   `/check-updates` long-poll. 30-second process-wide cache matches
-//!   Python.
-//! - [`compute_git_node_fingerprints`] — per-node hashes used by the
-//!   dashboard's scoped-reload pipeline.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -530,4 +525,3 @@ pub fn collect_git_repos(ctx: &RenderCtx) -> Vec<Group> {
     }
     groups
 }
-
