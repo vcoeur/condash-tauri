@@ -94,6 +94,23 @@ check-inline-handlers: ## Guard against inline named on*= handlers (data-* + add
 test: ## Run cargo tests across the workspace
 	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) test --workspace
 
+# Default fixture for `make smoke` — a self-contained conception tree
+# under examples/ with one project per priority bucket. Override with
+# CONDASH_SMOKE_FIXTURE=... if you need to point at a different tree.
+SMOKE_FIXTURE ?= $(CURDIR)/examples/conception-demo
+SMOKE_PORT    ?= 3911
+
+smoke: ## End-to-end Playwright smoke against condash-serve (boots cargo run, opens dashboard, asserts SSE + dispatch)
+	@set -e; \
+	cd tests/smoke; \
+	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npm install --no-audit --no-fund --loglevel=error; \
+	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes playwright install --with-deps chromium >/tmp/condash-smoke-pw-install.log 2>&1 || \
+	    (echo "playwright install failed — see /tmp/condash-smoke-pw-install.log" >&2; exit 1); \
+	CONDASH_SMOKE_PORT=$(SMOKE_PORT) \
+	    CONDASH_SMOKE_FIXTURE=$(SMOKE_FIXTURE) \
+	    CARGO=$(CARGO) \
+	    npx --yes playwright test
+
 format: ## cargo fmt across the workspace
 	PATH="$(RUSTUP_BIN):$$PATH" $(CARGO) fmt --all
 
@@ -270,4 +287,4 @@ docs-serve: ## Live-reload preview of the mkdocs site on http://127.0.0.1:8000/
 docs-clean: ## Remove the generated ./site/ directory
 	rm -rf site
 
-.PHONY: help setup run serve build check test format frontend docs docs-serve docs-clean update-pdfjs update-codemirror update-mermaid update-xterm update-htmx
+.PHONY: help setup run serve build check test smoke format frontend docs docs-serve docs-clean update-pdfjs update-codemirror update-mermaid update-xterm update-htmx

@@ -32,3 +32,11 @@ site/
 # Rust / Tauri build output (src-tauri/.gitignore handles its own tree,
 # this catches target/ anywhere else a Rust crate lands in the repo).
 /target/
+
+# Playwright smoke (tests/smoke/) — node_modules is already covered
+# above; these are the per-run artefacts and the lockfile we don't want
+# to track because the version pin lives in tests/smoke/package.json.
+tests/smoke/test-results/
+tests/smoke/playwright-report/
+tests/smoke/.playwright/
+tests/smoke/package-lock.json
