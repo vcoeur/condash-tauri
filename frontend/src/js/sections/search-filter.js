@@ -14,8 +14,6 @@
      `oninput=` attribute in server-rendered HTML).
    - `jumpToProject` / `_openHistoryHit` — history-tab navigation
      helpers wired up via `data-action` dispatch in `dashboard-main.js`.
-   - `_reapplySearches` — re-runs the Knowledge filter after an
-     in-place reload.
    - Private helpers (`_searchTokens`, `_cardMatches`, `_buildSnippet`, …)
      that are implementation details of the filter logic. */
 
@@ -237,18 +235,5 @@ export function jumpToProject(btn) {
     void card.offsetWidth;
     card.classList.add('focus-flash');
     setTimeout(function(){ card.classList.remove('focus-flash'); }, 1800);
-}
-
-/* Re-apply any active Knowledge search after the DOM is swapped or
-   the subtab changes. Safe to call when the search input isn't present
-   (other primary tab active). The History pane's equivalent is
-   handled by htmx's `hx-trigger="load"` on `#history-content` which
-   re-fires the fetch using the (data-preserve-restored) input value. */
-export function _reapplySearches() {
-    if (_knowledgeSearchQ) {
-        var k = document.getElementById('knowledge-search');
-        if (k) k.value = _knowledgeSearchQ;
-        filterKnowledge(_knowledgeSearchQ);
-    }
 }
 

@@ -104,7 +104,10 @@ pub fn write_note(
     // `full_path.with_suffix(suffix + ".tmp")` — append, don't replace.
     let tmp = append_suffix(full_path, ".tmp");
     fs::write(&tmp, content)?;
-    fs::rename(&tmp, full_path)?;
+    if let Err(e) = fs::rename(&tmp, full_path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
 
     Ok(WriteNoteResult::Ok {
         ok: true,

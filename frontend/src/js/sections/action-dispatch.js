@@ -40,7 +40,10 @@ export function initActionDispatch() {
         if (!el) return;
         const name = el.dataset.action;
         const handler = _actions.get(name);
-        if (!handler) return;
+        if (!handler) {
+            console.warn('[condash] data-action with no handler: ' + name);
+            return;
+        }
         if (el.dataset.stop === '1') event.stopPropagation();
         if (el.dataset.prevent === '1') event.preventDefault();
         handler(event, el, el.dataset);

@@ -216,7 +216,10 @@ pub(super) fn json_with_status<T: serde::Serialize>(body: &T, code: StatusCode) 
 /// so the frontend parses one shape.
 pub(super) fn error_json(code: StatusCode, msg: &str) -> Response {
     let body = serde_json::json!({"error": msg});
-    let bytes = serde_json::to_vec(&body).unwrap_or_default();
+    let bytes = serde_json::to_vec(&body).unwrap_or_else(|e| {
+        tracing::error!("encode error_json body: {e}");
+        Vec::new()
+    });
     Response::builder()
         .status(code)
         .header(header::CONTENT_TYPE, "application/json")

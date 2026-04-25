@@ -251,9 +251,8 @@ pub(super) async fn post_note_upload(
                     }
                 }
             }
-            _ => {
-                // Silently drop unknown fields — the route contract
-                // is `item_readme`, `subdir`, `file`; extras are ignored.
+            other => {
+                tracing::warn!(name = %other, "multipart upload: dropping unknown field");
                 let _ = field.bytes().await;
             }
         }
