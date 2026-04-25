@@ -18,7 +18,6 @@
      and `addStep` through the residual inline-handler export list. */
 
 import { updateTabCounts } from './search-filter.js';
-import { updateBaseline } from './stale-poll.js';
 import { closeNotePreview } from './note-preview.js';
 import { closeNewItemModal } from './new-item-modal.js';
 import { closeAboutModal } from './about-modal.js';
@@ -84,7 +83,6 @@ export async function cycle(file, line, el) {
     dot.className = 'status-dot status-' + data.status;
     dot.textContent = {done: '\u2713', progress: '~', abandoned: '\u2014', open: ''}[data.status] || '';
     updateProgress(el.closest('.card'));
-    updateBaseline();
 }
 
 export async function removeStep(file, line, btn) {
@@ -103,7 +101,6 @@ export async function removeStep(file, line, btn) {
         if (ln > removedLine) s.setAttribute('data-line', ln - 1);
     });
     updateProgress(card);
-    updateBaseline();
 }
 
 export function updateProgress(card) {
@@ -174,7 +171,6 @@ export async function addStep(file, section, inputEl) {
     inputEl.value = '';
     inputEl.focus();
     updateProgress(inputEl.closest('.card'));
-    updateBaseline();
 }
 
 /* Step reorder — pointer-event based for the same reason the terminal tabs
@@ -297,7 +293,6 @@ function stepPointerUp(ev) {
     }).then(function(res) {
         if (!res.ok) return;
         [].forEach.call(steps, function(s, i) { s.setAttribute('data-line', sorted[i]); });
-        updateBaseline();
     });
 }
 
@@ -364,7 +359,6 @@ export function startEditText(el) {
             body: JSON.stringify({file: file, line: line, text: newText})
         });
         if (!res.ok) el.textContent = original;
-        else updateBaseline();
     }
 
     el.onblur = commit;

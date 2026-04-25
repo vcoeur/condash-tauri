@@ -194,8 +194,14 @@ fn render_runner_mount(key: &str, checkout_key: &str, live: Option<&RunnerLive>)
         None => String::new(),
     };
     let label = format!("{key} @ {checkout_key}");
+    // `hx-preserve="true"` tells idiomorph (and any future htmx swap)
+    // to leave this subtree untouched. The runner-viewer attaches xterm
+    // + a `/ws/runner/<key>` WebSocket to `.runner-term-host` inside;
+    // a parent `#git-panel` morph swap on `sse:code` would otherwise
+    // tear the WebSocket-attached DOM down.
     format!(
         "<div class=\"runner-term-mount runner-collapsed\" \
+         hx-preserve=\"true\" \
          data-runner-key=\"{k}\" data-runner-checkout=\"{c}\"{ex}>\
          <div class=\"runner-term-header\" \
          title=\"Click to collapse / expand (keeps process running)\" \

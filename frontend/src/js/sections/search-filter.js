@@ -1,17 +1,21 @@
-/* Search + filter for the Projects / Knowledge / History tabs.
+/* Search + filter for the Knowledge tab + History-tab navigation helpers.
 
-   Extracted from `dashboard-main.js` as part of C-08 of the
-   `2026-04-24-condash-dashboard-main-split` project. Pure behaviour-
-   preserving move.
+   The History pane's input-driven filtering moved off this module on
+   the htmx-history-spike branch: `/fragment/history` now returns the
+   tree or search-results HTML directly and htmx swaps it into
+   `#history-content`. The two helpers History still needs from this
+   module — `_openHistoryHit` and `jumpToProject` — stay because their
+   wiring (server-rendered `data-action` attributes) is unchanged.
 
    The module owns:
    - `updateTabCounts` — recomputes the counts shown in the primary tabs.
-   - `filterKnowledge` / `filterHistory` — debounced input-driven filtering
-     for their respective trees (still reached via `window.*` from the
-     corresponding `oninput=` attributes in server-rendered HTML).
+   - `filterKnowledge` — debounced input-driven filtering of the
+     Knowledge tree (still reached via `window.filterKnowledge` from the
+     `oninput=` attribute in server-rendered HTML).
    - `jumpToProject` / `_openHistoryHit` — history-tab navigation
      helpers wired up via `data-action` dispatch in `dashboard-main.js`.
-   - `_reapplySearches` — re-runs both filters after an in-place reload.
+   - `_reapplySearches` — re-runs the Knowledge filter after an
+     in-place reload.
    - Private helpers (`_searchTokens`, `_cardMatches`, `_buildSnippet`, …)
      that are implementation details of the filter logic. */
 
@@ -69,9 +73,11 @@ function _setEmpty(panel, cls, text) {
     el.textContent = text;
 }
 
-/* Last query per pane — re-applied after _reloadInPlace swaps the DOM so
-   an active filter survives a background refresh. */
-var _historySearchQ = '';
+/* Last Knowledge query — re-applied after _reloadInPlace swaps the
+   DOM so an active filter survives a background refresh. The History
+   pane no longer needs a JS-side cache: htmx re-fires its `hx-get`
+   automatically using the current `#history-search` value (preserved
+   across swaps via `data-preserve`). */
 var _knowledgeSearchQ = '';
 
 /* Build an HTML snippet showing ~`radius` chars of context around the
@@ -202,119 +208,13 @@ function _persistSearch(key, value) {
     } catch (e) {}
 }
 
-/* --- History search ---
-   Empty query → tree view (on-disk layout grouped by month).
-   Non-empty query → debounced fetch of /search-history that indexes README
-   bodies, note/text-file contents and filenames on the server, rendered as
-   a flat results list below the toolbar. */
-var _historySearchTimer = null;
-var _historySearchAbort = null;
-export function filterHistory(q) {
-    _historySearchQ = q || '';
-    _persistSearch('condash.search.history', _historySearchQ);
-    var pane = document.getElementById('history-pane');
-    var tree = document.getElementById('history');
-    var results = document.getElementById('history-results');
-    if (!pane || !tree || !results) return;
-    var qTrim = _historySearchQ.trim();
-    if (!qTrim) {
-        if (_historySearchTimer) { clearTimeout(_historySearchTimer); _historySearchTimer = null; }
-        if (_historySearchAbort) { _historySearchAbort.abort(); _historySearchAbort = null; }
-        pane.classList.remove('history-pane--query');
-        results.hidden = true;
-        results.innerHTML = '';
-        tree.hidden = false;
-        return;
-    }
-    pane.classList.add('history-pane--query');
-    tree.hidden = true;
-    results.hidden = false;
-    if (_historySearchTimer) clearTimeout(_historySearchTimer);
-    _historySearchTimer = setTimeout(function(){ _runHistorySearch(qTrim); }, 150);
-}
-
-async function _runHistorySearch(q) {
-    if (_historySearchAbort) _historySearchAbort.abort();
-    _historySearchAbort = new AbortController();
-    var results = document.getElementById('history-results');
-    if (!results) return;
-    try {
-        var res = await fetch('/search-history?q=' + encodeURIComponent(q),
-                              {signal: _historySearchAbort.signal});
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var hits = await res.json();
-        // Discard the response if the query has changed since this fetch
-        // started — another keystroke already ran a newer fetch.
-        if (_historySearchQ.trim() !== q) return;
-        _renderHistoryResults(hits, q);
-    } catch (err) {
-        if (err && err.name === 'AbortError') return;
-        results.innerHTML = '<p class="history-empty">Search failed: ' +
-            _escapeHtml(String(err && err.message || err)) + '</p>';
-    }
-}
-
-function _renderHistoryResults(hits, q) {
-    var results = document.getElementById('history-results');
-    if (!results) return;
-    if (!hits || !hits.length) {
-        results.innerHTML = '<p class="history-empty">No projects match "' +
-            _escapeHtml(q) + '".</p>';
-        return;
-    }
-    var out = [];
-    for (var i = 0; i < hits.length; i++) {
-        out.push(_historyResultBlock(hits[i]));
-    }
-    results.innerHTML = out.join('');
-}
-
-function _historyResultBlock(row) {
-    var hitsHtml = '';
-    for (var i = 0; i < row.hits.length; i++) {
-        var h = row.hits[i];
-        var pathAttr = _escapeHtml(h.path || '');
-        var labelAttr = _escapeHtml(h.label || '');
-        // Snippet already comes HTML-escaped with <mark> wrappers from the
-        // server — inject as HTML, not text.
-        var snippetHtml = h.snippet || '';
-        hitsHtml += (
-            '<li class="history-hit" ' +
-            'data-path="' + pathAttr + '" ' +
-            'data-label="' + labelAttr + '" ' +
-            'data-action="open-history-hit">' +
-            '<span class="hit-src hit-src-' + _escapeHtml(h.source) + '">' +
-                _escapeHtml(h.label || h.source) + '</span>' +
-            '<span class="hit-snippet">' + snippetHtml + '</span>' +
-            '</li>'
-        );
-    }
-    return (
-        '<div class="history-result" ' +
-        'data-slug="' + _escapeHtml(row.slug) + '" ' +
-        'data-status="' + _escapeHtml(row.status || '') + '" ' +
-        'data-subtab="' + _escapeHtml(row.subtab || 'current') + '">' +
-        '<div class="history-result-header">' +
-            '<span class="history-result-title">' + _escapeHtml(row.title) + '</span>' +
-            '<span class="pill">' + _escapeHtml(row.kind) + '</span>' +
-            '<span class="pill pri-' + _escapeHtml(row.status) + '">' +
-                _escapeHtml(row.status) + '</span>' +
-            '<span class="history-result-month">' + _escapeHtml(row.month) + '</span>' +
-            '<button class="history-jump" data-action="jump-to-project" ' +
-                'title="Open in Projects tab" aria-label="Jump to project">' +
-                '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" ' +
-                'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
-                'stroke-linejoin="round" aria-hidden="true">' +
-                '<circle cx="12" cy="12" r="9"/>' +
-                '<circle cx="12" cy="12" r="5"/>' +
-                '<circle cx="12" cy="12" r="1.2" fill="currentColor"/>' +
-                '</svg>' +
-            '</button>' +
-        '</div>' +
-        '<ul class="history-result-hits">' + hitsHtml + '</ul>' +
-        '</div>'
-    );
-}
+/* History pane behavior moved server-side. The input drives htmx
+   `hx-get="/fragment/history"` directly (see #history-content in
+   dashboard.html); the empty-q tree view and the non-empty results
+   list are both rendered by `render_history_pane` in
+   condash-render. The two helpers below stay because the
+   server-rendered fragment still emits `data-action="open-history-hit"`
+   and `data-action="jump-to-project"` on the result rows. */
 
 export function _openHistoryHit(el) {
     var path = el.getAttribute('data-path');
@@ -340,17 +240,12 @@ export function jumpToProject(btn) {
     setTimeout(function(){ card.classList.remove('focus-flash'); }, 1800);
 }
 
-/* Re-apply any active search after the DOM is swapped or the subtab
-   changes. Safe to call when the search input isn't present (other
-   primary tab active). */
+/* Re-apply any active Knowledge search after the DOM is swapped or
+   the subtab changes. Safe to call when the search input isn't present
+   (other primary tab active). The History pane's equivalent is
+   handled by htmx's `hx-trigger="load"` on `#history-content` which
+   re-fires the fetch using the (data-preserve-restored) input value. */
 export function _reapplySearches() {
-    if (_historySearchQ) {
-        var h = document.getElementById('history-search');
-        if (h) h.value = _historySearchQ;
-        // Re-run the query against the fresh DOM. In query mode this also
-        // re-fetches /search-history so newly-added files surface.
-        filterHistory(_historySearchQ);
-    }
     if (_knowledgeSearchQ) {
         var k = document.getElementById('knowledge-search');
         if (k) k.value = _knowledgeSearchQ;

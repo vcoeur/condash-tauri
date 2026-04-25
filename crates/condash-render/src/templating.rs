@@ -16,6 +16,8 @@ use minijinja::{AutoEscape, Environment, Error, ErrorKind, Output, State};
 
 pub const CARD_TEMPLATE: &str = include_str!("../templates/card.html.j2");
 pub const HISTORY_TEMPLATE: &str = include_str!("../templates/history.html.j2");
+pub const HISTORY_SEARCH_RESULTS_TEMPLATE: &str =
+    include_str!("../templates/history_search_results.html.j2");
 pub const KNOWLEDGE_CARD_TEMPLATE: &str = include_str!("../templates/knowledge_card.html.j2");
 pub const KNOWLEDGE_GROUP_TEMPLATE: &str = include_str!("../templates/knowledge_group.html.j2");
 pub const KNOWLEDGE_TREE_TEMPLATE: &str = include_str!("../templates/knowledge_tree.html.j2");
@@ -178,6 +180,11 @@ fn build_env() -> Environment<'static> {
     env.add_template("card.html.j2", CARD_TEMPLATE).unwrap();
     env.add_template("history.html.j2", HISTORY_TEMPLATE)
         .unwrap();
+    env.add_template(
+        "history_search_results.html.j2",
+        HISTORY_SEARCH_RESULTS_TEMPLATE,
+    )
+    .unwrap();
     env.add_template("knowledge_card.html.j2", KNOWLEDGE_CARD_TEMPLATE)
         .unwrap();
     env.add_template("knowledge_group.html.j2", KNOWLEDGE_GROUP_TEMPLATE)

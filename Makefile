@@ -31,6 +31,13 @@ MERMAID_VERSION               := 11.14.0
 # stay on 5.x until we have a reason to cross that break.
 XTERM_VERSION                 := 5.3.0
 XTERM_FIT_VERSION             := 0.8.0
+
+# Vendored htmx version — bumped by `make update-htmx`. Drives the
+# History pane's server-fragment refresh + SSE-driven re-render. Loaded
+# unconditionally by dashboard.html alongside the SSE extension.
+HTMX_VERSION                  := 2.0.4
+HTMX_SSE_EXT_VERSION          := 2.2.3
+IDIOMORPH_VERSION             := 0.7.4
 # NOTE: state/view versions must match what @codemirror/lint and
 # @codemirror/search (transitive deps of basicSetup) require at top
 # level — otherwise npm nests a second copy and the bundle loads two
@@ -215,6 +222,38 @@ update-xterm: ## Re-vendor xterm.js at $(XTERM_VERSION) + xterm-addon-fit at $(X
 	echo "Vendored xterm $(XTERM_VERSION) + addon-fit $(XTERM_FIT_VERSION):"; \
 	du -sh "$$DEST"
 
+update-htmx: ## Re-vendor htmx + sse + idiomorph extensions into frontend/vendor/htmx/
+	@set -e; \
+	DEST=frontend/vendor/htmx; \
+	rm -rf "$$DEST"; \
+	mkdir -p "$$DEST"; \
+	echo "Downloading htmx $(HTMX_VERSION) + sse ext $(HTMX_SSE_EXT_VERSION) + idiomorph $(IDIOMORPH_VERSION)"; \
+	curl -sSL -o "$$DEST/htmx.min.js" \
+	    "https://unpkg.com/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js"; \
+	curl -sSL -o "$$DEST/htmx-ext-sse.src.js" \
+	    "https://unpkg.com/htmx-ext-sse@$(HTMX_SSE_EXT_VERSION)/sse.js"; \
+	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
+	    "$$DEST/htmx-ext-sse.src.js" --minify --target=es2019 --legal-comments=none \
+	    --outfile="$$DEST/htmx-ext-sse.js" --log-level=warning; \
+	rm "$$DEST/htmx-ext-sse.src.js"; \
+	curl -sSL -o "$$DEST/idiomorph-ext.min.js" \
+	    "https://unpkg.com/idiomorph@$(IDIOMORPH_VERSION)/dist/idiomorph-ext.min.js"; \
+	{ \
+	    echo "htmx $(HTMX_VERSION) + htmx-ext-sse $(HTMX_SSE_EXT_VERSION) — both BSD 2-Clause License"; \
+	    echo "Idiomorph $(IDIOMORPH_VERSION) + htmx-ext-idiomorph (bundled in idiomorph-ext.min.js) — BSD 2-Clause License"; \
+	    echo ""; \
+	    echo "https://github.com/bigskysoftware/htmx"; \
+	    echo "https://github.com/bigskysoftware/htmx-extensions/tree/main/src/sse"; \
+	    echo "https://github.com/bigskysoftware/idiomorph"; \
+	    echo ""; \
+	    echo "Vendored from:"; \
+	    echo "  https://unpkg.com/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js"; \
+	    echo "  https://unpkg.com/htmx-ext-sse@$(HTMX_SSE_EXT_VERSION)/sse.js"; \
+	    echo "  https://unpkg.com/idiomorph@$(IDIOMORPH_VERSION)/dist/idiomorph-ext.min.js"; \
+	} > "$$DEST/LICENSE"; \
+	echo "Vendored htmx $(HTMX_VERSION):"; \
+	du -sh "$$DEST"
+
 # MkDocs site build — the GitHub Action at .github/workflows/docs.yml
 # pins mkdocs-material to this same version, so local builds match CI.
 MKDOCS_MATERIAL_VERSION := 9.5.49
@@ -228,4 +267,4 @@ docs-serve: ## Live-reload preview of the mkdocs site on http://127.0.0.1:8000/
 docs-clean: ## Remove the generated ./site/ directory
 	rm -rf site
 
-.PHONY: help setup run serve build check test format frontend docs docs-serve docs-clean update-pdfjs update-codemirror update-mermaid update-xterm
+.PHONY: help setup run serve build check test format frontend docs docs-serve docs-clean update-pdfjs update-codemirror update-mermaid update-xterm update-htmx

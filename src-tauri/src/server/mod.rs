@@ -12,8 +12,8 @@
 //! ([`live_runners_snapshot`], [`validate_open_path`]). Every handler
 //! lives in one of the sibling sub-modules, grouped by surface:
 //!
-//! - [`shell`]         — `/`, `/fragment`, `/check-updates`,
-//!                       `/search-history`, favicons, static assets
+//! - [`shell`]         — `/`, `/fragment`, `/fragment/history`,
+//!                       `/check-updates`, favicons, static assets
 //! - [`steps`]         — `/toggle`, `/add-step`, `/remove-step`,
 //!                       `/edit-step`, `/set-priority`, `/reorder-all`
 //! - [`notes`]         — `/note`, `/note-raw`, `/note/rename`,
@@ -124,7 +124,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/", get(shell::index))
         .route("/fragment", get(shell::fragment))
         .route("/check-updates", get(shell::check_updates))
-        .route("/search-history", get(shell::search_history))
+        .route("/fragment/history", get(shell::fragment_history))
+        .route("/fragment/knowledge", get(shell::fragment_knowledge))
+        .route("/fragment/code", get(shell::fragment_code))
+        .route("/fragment/projects", get(shell::fragment_projects))
         .route("/favicon.svg", get(shell::favicon_svg))
         .route("/favicon.ico", get(shell::favicon_ico))
         .route("/vendor/{*path}", get(shell::vendor_asset))

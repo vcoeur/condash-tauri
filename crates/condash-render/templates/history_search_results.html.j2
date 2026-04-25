@@ -1,0 +1,44 @@
+{# History search results fragment — emitted by /fragment/history when q is non-empty.
+   Matches the structure that `_renderHistoryResults` / `_historyResultBlock`
+   used to build client-side, so existing CSS + data-action wiring (see
+   `open-history-hit`, `jump-to-project`) keeps working. #}
+{% if not results %}
+<p class="history-empty">No projects match "{{ q }}".</p>
+{% else %}
+{% for row in results %}
+<div class="history-result"
+     data-slug="{{ row.slug }}"
+     data-status="{{ row.status }}"
+     data-subtab="{{ row.subtab }}">
+  <div class="history-result-header">
+    <span class="history-result-title">{{ row.title }}</span>
+    <span class="pill">{{ row.kind }}</span>
+    <span class="pill pri-{{ row.status }}">{{ row.status }}</span>
+    <span class="history-result-month">{{ row.month }}</span>
+    <button class="history-jump" data-action="jump-to-project"
+            title="Open in Projects tab" aria-label="Jump to project">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/>
+        <circle cx="12" cy="12" r="5"/>
+        <circle cx="12" cy="12" r="1.2" fill="currentColor"/>
+      </svg>
+    </button>
+  </div>
+  <ul class="history-result-hits">
+    {% for h in row.hits %}
+    <li class="history-hit"
+        data-path="{{ h.path }}"
+        data-label="{{ h.label }}"
+        data-action="open-history-hit">
+      <span class="hit-src hit-src-{{ h.source }}">{{ h.label or h.source }}</span>
+      {# Snippet is HTML pre-rendered server-side with <mark> wrappers — must
+         not be re-escaped by autoescape. #}
+      <span class="hit-snippet">{{ h.snippet | safe }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endfor %}
+{% endif %}

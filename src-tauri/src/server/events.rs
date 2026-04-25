@@ -25,8 +25,14 @@ pub(super) async fn events_stream(
         match res {
             Ok(payload) => {
                 let data = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
+                // Emit a named SSE event matching the payload's `tab`
+                // field (`projects` / `knowledge` / `code`) so htmx
+                // listeners can target a specific tab via
+                // `hx-trigger="sse:projects"`. The legacy `onmessage`
+                // path in `sse.js` doesn't gate on event name and
+                // continues to receive every frame as before.
                 Some(Ok::<_, std::convert::Infallible>(
-                    SseEvent::default().data(data),
+                    SseEvent::default().event(payload.tab.clone()).data(data),
                 ))
             }
             // Subscriber lagged — the reconciler picks it up, just skip.
