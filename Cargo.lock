@@ -456,6 +456,7 @@ name = "condash-mutations"
 version = "0.1.0"
 dependencies = [
  "condash-parser",
+ "condash-state",
  "regex",
  "serde",
  "tempfile",

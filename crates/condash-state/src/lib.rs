@@ -16,7 +16,7 @@ pub mod ctx;
 pub mod git;
 pub mod search;
 
-pub use cache::{Tab, WorkspaceCache};
+pub use cache::{MutationOutput, Tab, WorkspaceCache};
 pub use ctx::{OpenWithSlot, RenderCtx, RepoEntry, RepoSection, TerminalPrefs};
 pub use git::{collect_git_repos, Checkout, Family, Group, Member};
 pub use search::{search_items, Hit, SearchResult};

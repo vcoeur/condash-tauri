@@ -9,6 +9,7 @@ rust-version = "1.80"
 
 [dependencies]
 condash-parser = { path = "../condash-parser" }
+condash-state = { path = "../condash-state" }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 

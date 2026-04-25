@@ -27,6 +27,66 @@ use condash_parser::{collect_knowledge, parse_readme, Item, KnowledgeNode};
 
 use crate::RenderCtx;
 
+/// Cache-invalidation token returned by every mutation helper.
+///
+/// `#[must_use]` flips a forgotten consumption from a silent stale-cache
+/// regression into a compiler warning. Construct via the factory
+/// methods; consume via [`WorkspaceCache::consume`].
+#[must_use = "consume via WorkspaceCache::consume() to invalidate the cache"]
+#[derive(Debug, Default)]
+pub struct MutationOutput {
+    pub item_paths: Vec<PathBuf>,
+    pub knowledge: bool,
+    pub flush_items: bool,
+}
+
+impl MutationOutput {
+    /// Token for a mutation that touched a single item. Pass the
+    /// absolute path to any file under the item (README, note, etc.).
+    pub fn for_path(path: impl Into<PathBuf>) -> Self {
+        Self {
+            item_paths: vec![path.into()],
+            knowledge: false,
+            flush_items: false,
+        }
+    }
+
+    /// Token for a mutation that touched multiple items.
+    pub fn for_paths(paths: Vec<PathBuf>) -> Self {
+        Self {
+            item_paths: paths,
+            knowledge: false,
+            flush_items: false,
+        }
+    }
+
+    /// Token for a mutation that touched a knowledge file.
+    pub fn knowledge() -> Self {
+        Self {
+            item_paths: Vec::new(),
+            knowledge: true,
+            flush_items: false,
+        }
+    }
+
+    /// Token for a mutation whose effect can't be narrowed — flush both
+    /// items and knowledge slices.
+    pub fn full_flush() -> Self {
+        Self {
+            item_paths: Vec::new(),
+            knowledge: true,
+            flush_items: true,
+        }
+    }
+
+    /// Flag the items slice for a coarse flush in addition to whatever
+    /// else this token requests.
+    pub fn with_items_flush(mut self) -> Self {
+        self.flush_items = true;
+        self
+    }
+}
+
 /// Coarse tab identifier the filesystem watcher publishes. Only
 /// `Projects` and `Knowledge` matter for the cache — other tabs (code,
 /// config, etc.) are watched but don't invalidate parsed-item state.
@@ -118,11 +178,30 @@ impl WorkspaceCache {
 
     /// Flush every cached item — next `get_items` re-parses every
     /// README. Used by full-rescan endpoints and by the watcher when
-    /// the event carries no specific path.
-    pub fn invalidate_items(&self) {
+    /// the event carries no specific path. External callers should go
+    /// through [`WorkspaceCache::consume`] with a [`MutationOutput`].
+    pub(crate) fn invalidate_items(&self) {
         let mut w = self.inner.write().unwrap();
         w.items = None;
         w.items_snapshot = None;
+    }
+
+    /// Consume a [`MutationOutput`] token. This is the canonical sink
+    /// for the `#[must_use]` token; route handlers call it after a
+    /// successful mutation. Honors all three flags on the token —
+    /// per-path item invalidation, knowledge flush, and a coarse items
+    /// flush — independently.
+    pub fn consume(&self, output: MutationOutput) {
+        if output.flush_items {
+            self.invalidate_items();
+        } else {
+            for path in &output.item_paths {
+                self.invalidate_item_at(path);
+            }
+        }
+        if output.knowledge {
+            self.invalidate_knowledge();
+        }
     }
 
     /// Drop the single item whose folder contains `path` and clear the
@@ -130,7 +209,9 @@ impl WorkspaceCache {
     /// the README itself (`.../README.md`), a note
     /// (`.../notes/x.md`), etc. Falls back to a full invalidation when
     /// no item-dir is found above `path`, which is the safe default.
-    pub fn invalidate_item_at(&self, path: &Path) {
+    /// External callers should go through [`WorkspaceCache::consume`]
+    /// with a [`MutationOutput::for_path`] token.
+    pub(crate) fn invalidate_item_at(&self, path: &Path) {
         let Some(readme) = readme_for(path) else {
             self.invalidate_items();
             return;
@@ -142,8 +223,9 @@ impl WorkspaceCache {
         w.items_snapshot = None;
     }
 
-    /// Flush the knowledge tree slice.
-    pub fn invalidate_knowledge(&self) {
+    /// Flush the knowledge tree slice. External callers should go
+    /// through [`WorkspaceCache::consume`] with [`MutationOutput::knowledge`].
+    pub(crate) fn invalidate_knowledge(&self) {
         self.inner.write().unwrap().knowledge = None;
     }
 

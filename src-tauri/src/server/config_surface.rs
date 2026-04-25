@@ -51,8 +51,7 @@ pub(super) async fn post_configuration(State(state): State<AppState>, body: Stri
             // The RenderCtx itself still only rebuilds on restart or
             // /rescan — the modal's success message tells the user as
             // much.
-            state.cache.invalidate_items();
-            state.cache.invalidate_knowledge();
+            state.cache.consume(condash_state::MutationOutput::full_flush());
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
