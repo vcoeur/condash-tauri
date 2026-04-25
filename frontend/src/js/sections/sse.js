@@ -1,62 +1,31 @@
-/* SSE event stream. Every event from /events triggers a reconcile call
-   to /check-updates; the real dirty-set computation lives in
-   stale-poll.js. On drop, _setReconnecting(true) surfaces the pill and
-   an exponential-backoff retry loop tries to reopen. */
+/* SSE side-effect bridge.
 
-import { checkUpdates, _scheduleCheckUpdates } from './stale-poll.js';
+   The dashboard SSE stream (`/events`) is now opened by htmx — the
+   `sse-connect="/events"` attribute on `<body>` and the SSE extension
+   loaded in `dashboard.html`. Per-pane `hx-trigger="sse:<tab>"`
+   listeners drive the per-tab fragment refreshes directly.
+
+   What's left for this module is the connection-lifecycle UI plus the
+   "any disk change might affect the open note modal" reconcile pass.
+   We hang both off the htmx SSE events:
+
+   - `htmx:sseOpen`    → hide the reconnecting pill
+   - `htmx:sseError`   → show the reconnecting pill
+   - `htmx:sseClose`   → show the reconnecting pill
+   - `htmx:sseMessage` → run `_reconcileNoteModal` so the open-note
+                         modal refreshes if its underlying file just
+                         changed on disk.
+
+   This replaces the hand-rolled EventSource lifecycle that used to
+   live here (own EventSource, exponential-backoff reconnect, separate
+   addEventListener per tab name, dispatch into stale-poll's
+   `_scheduleCheckUpdates`) — htmx's extension owns the connection +
+   retry now, and per-tab refreshes go through `hx-trigger="sse:<tab>"`
+   directly without round-tripping through stale-poll. The export
+   shape (`initSseSideEffects`) is unchanged so `dashboard-main.js`
+   doesn't need to know. */
+
 import { _reconcileNoteModal } from './note-reconcile.js';
-
-const sseState = {
-    eventSource: null,
-    reconnectTimer: null,
-    reconnectDelay: 1000,
-};
-
-function _startEventStream() {
-    if (typeof EventSource !== 'function') return;  // no push, stick with boot checkUpdates
-    try {
-        sseState.eventSource = new EventSource('/events');
-    } catch (e) {
-        _setReconnecting(true);
-        _scheduleEventReconnect();
-        return;
-    }
-    sseState.eventSource.addEventListener('hello', function() {
-        _setReconnecting(false);
-        sseState.reconnectDelay = 1000;
-        // Reconcile: the stream may have missed changes during the
-        // gap. checkUpdates diffs fingerprints and picks them up.
-        checkUpdates();
-    });
-    sseState.eventSource.addEventListener('ping', function() { /* keepalive */ });
-    // Each frame now carries a named event matching its `tab` field
-    // (`projects` / `knowledge` / `code`) so htmx can trigger on a
-    // specific tab via `hx-trigger="sse:projects"`. Named events bypass
-    // `onmessage`, so we register a per-tab listener that funnels back
-    // into the same staleness + note-reconcile pipeline as before.
-    var onTabFrame = function() {
-        _scheduleCheckUpdates();
-        _reconcileNoteModal();
-    };
-    sseState.eventSource.addEventListener('projects', onTabFrame);
-    sseState.eventSource.addEventListener('knowledge', onTabFrame);
-    sseState.eventSource.addEventListener('code', onTabFrame);
-    sseState.eventSource.onerror = function() {
-        _setReconnecting(true);
-        try { sseState.eventSource.close(); } catch (e) {}
-        sseState.eventSource = null;
-        _scheduleEventReconnect();
-    };
-}
-
-function _scheduleEventReconnect() {
-    if (sseState.reconnectTimer) return;
-    sseState.reconnectTimer = setTimeout(function() {
-        sseState.reconnectTimer = null;
-        sseState.reconnectDelay = Math.min(sseState.reconnectDelay * 2, 30000);
-        _startEventStream();
-    }, sseState.reconnectDelay);
-}
 
 function _setReconnecting(on) {
     var pill = document.getElementById('reconnecting-pill');
@@ -65,15 +34,19 @@ function _setReconnecting(on) {
     else pill.setAttribute('hidden', '');
 }
 
-/* Register the stream. Called from dashboard-main.js's module-init
-   trailer so we know stale-poll.js + the note-reconcile function
-   dashboard-main.js still owns have finished evaluating. */
 function initSseSideEffects() {
-    _startEventStream();
+    document.body.addEventListener('htmx:sseOpen', function() {
+        _setReconnecting(false);
+    });
+    document.body.addEventListener('htmx:sseError', function() {
+        _setReconnecting(true);
+    });
+    document.body.addEventListener('htmx:sseClose', function() {
+        _setReconnecting(true);
+    });
+    document.body.addEventListener('htmx:sseMessage', function() {
+        _reconcileNoteModal();
+    });
 }
 
-export {
-    sseState,
-    _startEventStream, _scheduleEventReconnect, _setReconnecting,
-    initSseSideEffects,
-};
+export { initSseSideEffects };

@@ -17,8 +17,9 @@ use condash_parser::{
 };
 use condash_render::git_render::render_git_repo_fragment;
 use condash_render::{
-    render_card_fragment, render_history_pane, render_knowledge_card_fragment,
-    render_knowledge_group_fragment, render_page,
+    render_card_fragment, render_cards_pane, render_code_pane, render_history_pane,
+    render_knowledge_card_fragment, render_knowledge_group_fragment, render_knowledge_pane,
+    render_page,
 };
 use condash_state::{collect_git_repos, compute_git_node_fingerprints, git_fingerprint};
 use serde::Deserialize;
@@ -192,6 +193,34 @@ pub(super) async fn fragment_history(
 ) -> impl IntoResponse {
     let items = state.cache.get_items(&state.ctx);
     html_response(render_history_pane(&state.ctx, &items, &s.q))
+}
+
+/// HTML fragment for the Knowledge pane content. Driven by the htmx
+/// attributes on `#knowledge` in `dashboard.html`; refreshed on
+/// `sse:knowledge` so the server's file watcher → fragment swap path
+/// covers what `_reloadInPlace` used to handle for this tab.
+pub(super) async fn fragment_knowledge(State(state): State<AppState>) -> impl IntoResponse {
+    let knowledge = state.cache.get_knowledge(&state.ctx);
+    html_response(render_knowledge_pane(knowledge.as_ref().as_ref()))
+}
+
+/// HTML fragment for the Code pane content (the git strip). Refreshed
+/// on `sse:code`. The runner-viewer mounts inside carry
+/// `hx-preserve="true"` so xterm + WebSocket-attached terminals
+/// survive a parent-pane morph swap.
+pub(super) async fn fragment_code(State(state): State<AppState>) -> impl IntoResponse {
+    let live_runners = live_runners_snapshot(&state);
+    html_response(render_code_pane(&state.ctx, &live_runners))
+}
+
+/// HTML fragment for the Projects pane content (the cards grid).
+/// Refreshed on `sse:projects`. Card identity is preserved by morph
+/// swap (each card has a stable `id`), and the `htmx:beforeSwap` hook
+/// in `htmx-state-preserve.js` re-applies user-driven state (expanded
+/// cards, open `<details>`) onto the swapped DOM.
+pub(super) async fn fragment_projects(State(state): State<AppState>) -> impl IntoResponse {
+    let items = state.cache.get_items(&state.ctx);
+    html_response(render_cards_pane(&items))
 }
 
 pub(super) async fn favicon_svg(State(state): State<AppState>) -> impl IntoResponse {

@@ -13,14 +13,14 @@ Groups:
 
 | Area | Routes | Purpose |
 |---|---|---|
-| Dashboard shell | `/`, `/favicon.*`, `/fragment` | Page HTML, favicons, partial re-renders |
-| Change polling | `/check-updates`, `/search-history` | Fingerprints + global search |
+| Dashboard shell | `/`, `/favicon.*`, `/fragment`, `/fragment/{history,knowledge,code,projects}` | Page HTML, favicons, per-node + per-pane fragments |
+| Change polling | `/check-updates`, `/events` | Per-node fingerprints (legacy reloadNode); SSE stream that drives htmx tab refreshes |
 | Notes | `/note`, `/note-raw`, `/note/*` | Read, edit, rename, create, upload |
 | Assets | `/asset/{*path}` | Streaming bytes for PDFs, images, arbitrary files under the conception tree |
 | Mutations | `/toggle`, `/add-step`, `/edit-step`, `/remove-step`, `/reorder-all`, `/set-priority` | README edits |
 | Openers | `/open`, `/open-doc`, `/open-folder`, `/open-external` | Launch external processes |
 | Meta | `/configuration`, `/config`, `/recent-screenshot` | Config r/w, summary, screenshot-paste lookup |
-| Vendored assets | `/vendor/{*path}` | PDF.js + xterm.js + CodeMirror + Mermaid bundles |
+| Vendored assets | `/vendor/{*path}` | PDF.js + xterm.js + CodeMirror + Mermaid + htmx bundles |
 | Terminal | `WS /ws/term` | Interactive PTY |
 
 For mutation semantics (what each route writes), see [Mutation model](mutations.md).
@@ -31,9 +31,13 @@ For mutation semantics (what each route writes), see [Mutation model](mutations.
 |---|---|---|
 | GET | `/` | Full dashboard HTML. Re-parses the conception tree on every call. |
 | GET | `/favicon.svg`, `/favicon.ico` | Bundled SVG app icon |
-| GET | `/fragment?id=<id>` | HTML subtree for one card or one knowledge directory |
+| GET | `/fragment?id=<id>` | HTML subtree for one card or one knowledge node (the legacy per-id surface; called from `reloadNode` after explicit mutations) |
+| GET | `/fragment/history?q=<query>` | History pane content. Empty `q` → month-grouped tree; non-empty `q` → search-results list. Driven by htmx on `#history-content` |
+| GET | `/fragment/knowledge` | Knowledge tree pane content. Refreshed on `sse:knowledge` |
+| GET | `/fragment/code` | Git strip pane content. Refreshed on `sse:code`. Runner-viewer mounts inside carry `hx-preserve="true"` so xterm + WebSocket-attached terminals survive the morph swap |
+| GET | `/fragment/projects` | Cards-grid pane content. Refreshed on `sse:projects`. Each card has `id="<slug>"` so Idiomorph keys swaps by it; client `htmx:beforeSwap`/`afterSwap` hooks re-apply expanded class + active-subtab visibility |
 
-`/fragment` ids:
+`/fragment` ids (legacy per-node):
 
 | Shape | Returns |
 |---|---|
@@ -47,8 +51,8 @@ For mutation semantics (what each route writes), see [Mutation model](mutations.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/check-updates` | Cheap full-tree fingerprint — client polls every 5 s |
-| GET | `/search-history?q=<query>` | Ranked search across README bodies, notes, filenames |
+| GET | `/check-updates` | Per-node fingerprint map. Now only used by `reloadNode` callers to refresh a single subtree's baseline after an explicit mutation; the htmx-driven panes don't poll |
+| GET | `/events` | Server-sent events stream. Each frame is a named event (`event: projects` / `knowledge` / `code`) carrying `{tab, ts, file?}`; `hx-trigger="sse:<tab>"` on each pane re-fetches the matching `/fragment/<tab>` |
 
 `/check-updates` response shape:
 
@@ -67,7 +71,7 @@ For mutation semantics (what each route writes), see [Mutation model](mutations.
 
 `fingerprint` is the 16-hex MD5 of the whole-tree repr; a change at any level flips it. `nodes` is a flat map that lets the client decide **which** subtree changed and re-fetch just that — preventing full-page flicker on a single step toggle. See [internals](../explanation/internals.md#parser-and-fingerprints) for how the hashes are computed.
 
-`/search-history` returns a list of per-item hits ranked by [`condash-state::search::search_items`](https://github.com/vcoeur/condash/blob/main/crates/condash-state/src/search.rs). Empty `q` returns `[]`.
+The History tab's full-text search route used to be `GET /search-history?q=<query>` returning JSON. It moved to the htmx-driven `GET /fragment/history?q=<query>` (HTML) when the History tab migrated; the JSON route is gone.
 
 ## Notes
 
@@ -152,6 +156,7 @@ The single route covers four vendored subtrees:
 | `/vendor/xterm/…` | xterm.js library + CSS + `addon-fit`. |
 | `/vendor/codemirror/…` | CodeMirror 6 editor bundle used by the note editor and the gear modal's YAML pane. |
 | `/vendor/mermaid/…` | Mermaid's UMD bundle for rendering Mermaid code blocks inside the note preview modal. |
+| `/vendor/htmx/…` | htmx core + the SSE + Idiomorph extensions. Drives the per-tab fragment refresh on `sse:<tab>` and identity-stable swap (cards, knowledge tree, runner mounts). |
 
 `..` and null bytes are rejected; paths outside the bundled directory 403.
 

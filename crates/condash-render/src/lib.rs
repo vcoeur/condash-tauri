@@ -223,22 +223,12 @@ pub fn render_history_pane(ctx: &RenderCtx, items: &[Item], q: &str) -> String {
     render_history_search_results(&results, trimmed)
 }
 
-/// Public entry point for `/` — the full dashboard HTML.
-///
-/// `items` is typically `cache.get_items(ctx)`; `knowledge` is
-/// `cache.get_knowledge(ctx)`. `version` is rendered verbatim into
-/// the `{{VERSION}}` placeholder — the Tauri host passes its own
-/// version string from `env!("CARGO_PKG_VERSION")`.
-pub fn render_page(
-    ctx: &RenderCtx,
-    items: &[Item],
-    knowledge: Option<&KnowledgeNode>,
-    version: &str,
-    live_runners: &git_render::LiveRunners,
-) -> String {
-    // Sort: by priority (Now < Soon < … < Done — the enum's derived
-    // Ord uses variant declaration order), then within each priority
-    // reverse by slug[:10].
+/// Sort items into the order the Projects pane renders them in: by
+/// priority (Now < Soon < … < Done), then within each priority reverse
+/// by slug[:10]. Pulled out of `render_page` so the htmx fragment
+/// endpoint (`/fragment/projects`) can reuse it without duplicating
+/// the layout rules.
+fn order_items_for_cards(items: &[Item]) -> Vec<&Item> {
     let mut sorted: Vec<&Item> = items.iter().collect();
     sorted.sort_by(|a, b| {
         a.readme.priority.cmp(&b.readme.priority).then_with(|| {
@@ -263,14 +253,16 @@ pub fn render_page(
         ordered.extend(group);
         i = j;
     }
-    let all_items = ordered;
+    ordered
+}
 
-    // Emit "Now / Soon / Later / Review" group headings before the
-    // first card of each priority (only the first four — backlog /
-    // done never get a visible heading).
+/// Render the inner HTML of `#cards` — group headings + sorted cards.
+/// Used by `/fragment/projects` for htmx-driven swap on `sse:projects`.
+pub fn render_cards_pane(items: &[Item]) -> String {
+    let ordered = order_items_for_cards(items);
     let mut parts: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for item in &all_items {
+    for item in &ordered {
         let pri = item.readme.priority.as_str();
         if let Some(label) = labelled_priority(pri) {
             if seen.insert(pri) {
@@ -282,7 +274,42 @@ pub fn render_page(
         }
         parts.push(render_card(item));
     }
-    let cards = parts.join("\n");
+    parts.join("\n")
+}
+
+/// Render the inner HTML of `#knowledge` — the full notes tree.
+/// Used by `/fragment/knowledge` for htmx-driven swap on
+/// `sse:knowledge`. Alias for [`render_knowledge`] kept under the
+/// pane-named umbrella so `dashboard.html` and the route layer use a
+/// consistent vocabulary.
+pub fn render_knowledge_pane(root: Option<&KnowledgeNode>) -> String {
+    render_knowledge(root)
+}
+
+/// Render the inner HTML of `#git-panel` — the git strip with all
+/// repo cards (and runner-viewer mounts inside, which carry
+/// `hx-preserve="true"` so xterm + WebSockets survive a parent morph
+/// swap). Used by `/fragment/code`.
+pub fn render_code_pane(ctx: &RenderCtx, live_runners: &git_render::LiveRunners) -> String {
+    let groups = collect_git_repos(ctx);
+    git_render::render_git_repos(ctx, &groups, live_runners)
+}
+
+/// Public entry point for `/` — the full dashboard HTML.
+///
+/// `items` is typically `cache.get_items(ctx)`; `knowledge` is
+/// `cache.get_knowledge(ctx)`. `version` is rendered verbatim into
+/// the `{{VERSION}}` placeholder — the Tauri host passes its own
+/// version string from `env!("CARGO_PKG_VERSION")`.
+pub fn render_page(
+    ctx: &RenderCtx,
+    items: &[Item],
+    knowledge: Option<&KnowledgeNode>,
+    version: &str,
+    live_runners: &git_render::LiveRunners,
+) -> String {
+    let all_items = order_items_for_cards(items);
+    let cards = render_cards_pane(items);
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
 

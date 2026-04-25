@@ -31,10 +31,24 @@
      re-fetches without going through the legacy stale-poll pipeline. -->
 <script src="/vendor/htmx/htmx.min.js" defer></script>
 <script src="/vendor/htmx/htmx-ext-sse.js" defer></script>
+<!-- Idiomorph: identity-stable swap so card collapse state, runner
+     viewer DOM (with attached WebSockets), and any other subtree we'd
+     normally lose under innerHTML/outerHTML keep their identity. Used
+     via `hx-swap="morph"` on the per-tab swap targets. -->
+<script src="/vendor/htmx/idiomorph-ext.min.js" defer></script>
 <link rel="stylesheet" href="/assets/dist/bundle.css">
 <script src="/assets/dist/bundle.js" defer></script>
 </head>
-<body>
+<body hx-ext="sse,morph" sse-connect="/events">
+<!-- htmx surface:
+     - hx-ext="sse,morph": load the SSE + Idiomorph extensions globally.
+     - sse-connect="/events": open the single dashboard SSE stream once
+       per page; per-pane `hx-trigger="sse:<tab>"` listeners fire on the
+       matching named event without re-opening their own EventSource.
+     The named events (event: projects / knowledge / code) are emitted
+     by `src-tauri/src/server/events.rs`. The legacy reconnect/reconcile
+     plumbing in sections/sse.js now hangs off htmx:sseOpen/sseError/
+     sseMessage instead of owning the EventSource. -->
 <!-- #dash-main wraps all server-rendered content so _reloadInPlace() can
      swap it without touching the terminal pane (a sibling below) or any
      modal. Inline onclick handlers inside this block survive the swap;
@@ -99,19 +113,43 @@
 </div>
 <main id="main-scroll">
     <div id="projects-pane" data-node-id="projects">
-        <div id="cards">{{CARDS}}</div>
+        <!-- Cards grid. htmx swaps the inner HTML on `sse:projects`
+             using Idiomorph (hx-swap="morph:innerHTML") so each card's
+             identity (id="<slug>") is preserved across the swap —
+             expand/collapse class is re-applied by the
+             htmx-state-preserve.js before/after-swap hooks. -->
+        <div id="cards"
+             hx-get="/fragment/projects"
+             hx-trigger="sse:projects"
+             hx-target="this"
+             hx-swap="morph:innerHTML">{{CARDS}}</div>
     </div>
     <div id="code-pane" style="display:none" data-node-id="code">
-        <div id="git-panel" class="git-panel">{{GIT_REPOS}}</div>
+        <!-- Git strip. Refreshes on `sse:code`. Runner-viewer mounts
+             carry hx-preserve="true" so xterm + WebSocket-attached
+             terminals survive the parent morph swap. -->
+        <div id="git-panel" class="git-panel"
+             hx-get="/fragment/code"
+             hx-trigger="sse:code"
+             hx-target="this"
+             hx-swap="morph:innerHTML">{{GIT_REPOS}}</div>
     </div>
     <div id="knowledge-pane" style="display:none" data-node-id="knowledge">
         <div class="search-toolbar knowledge-toolbar">
             <input id="knowledge-search" type="search" placeholder="Search knowledge — title, description, or path…" oninput="filterKnowledge(this.value)" autocomplete="off" data-preserve="condash.search.knowledge">
         </div>
-        <div id="knowledge">{{KNOWLEDGE}}</div>
+        <!-- Knowledge tree. Refreshes on `sse:knowledge`. The
+             folder-open state lives in localStorage (notes-tree-state.js)
+             and is re-applied via htmx:afterSwap in
+             htmx-state-preserve.js. The client-side filter
+             (filterKnowledge) is also re-applied after swap. -->
+        <div id="knowledge"
+             hx-get="/fragment/knowledge"
+             hx-trigger="sse:knowledge"
+             hx-target="this"
+             hx-swap="morph:innerHTML">{{KNOWLEDGE}}</div>
     </div>
-    <div id="history-pane" style="display:none" data-node-id="history"
-         hx-ext="sse" sse-connect="/events">
+    <div id="history-pane" style="display:none" data-node-id="history">
         <div class="search-toolbar history-toolbar">
             <input id="history-search" type="search" name="q"
                    placeholder="Search history — title, apps, notes, filenames…"

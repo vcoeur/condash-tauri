@@ -67,14 +67,14 @@ import {
     initRunnerViewersSideEffects,
 } from './sections/runner-viewers.js';
 import {
-    staleState,
-    _renderStale, _deriveLegacyFlags,
-    checkUpdates, _scheduleCheckUpdates,
     updateBaseline, reloadNode, refreshAll,
 } from './sections/stale-poll.js';
 import {
     initSseSideEffects,
 } from './sections/sse.js';
+import {
+    initHtmxStatePreserve,
+} from './sections/htmx-state-preserve.js';
 import {
     openNotePreview, noteNavBack, closeNotePreview,
 } from './sections/note-preview.js';
@@ -187,24 +187,12 @@ function _persistTabState() {
 
 export function switchTab(tab) {
     if (!PRIMARY_TABS.includes(tab)) tab = 'projects';
-    // Clicking the already-active tab refreshes the dashboard when its
-    // Phase 3: the active tab auto-reloads, so the old "click same
-    // stale tab = refresh" branch is gone. Clicking an inactive tab
-    // that has its binary dot rebuilds #dash-main so the fresh tab
-    // content lands before the user sees stale data.
-    var clickedSameTab = tab === _activeTab;
-    _deriveLegacyFlags();
-    var clickedTabStale =
-        ((tab === 'projects' || tab === 'history') && staleState.itemsStale) ||
-        (tab === 'code' && staleState.gitStale) ||
-        (tab === 'knowledge' && staleState.knowledgeStale);
-    if (!clickedSameTab && clickedTabStale) {
-        // Commit the new tab first so _reloadInPlace's post-swap
-        // _rebindDashHandlers → switchTab(_activeTab) lands on it.
-        _activeTab = tab;
-        _reloadInPlace();
-        return;
-    }
+    // Pre-htmx, an inactive tab with a "stale dot" forced
+    // `_reloadInPlace()` on click so the user landed on fresh content.
+    // htmx now refreshes every pane on the matching `sse:<tab>`
+    // event, so every tab is always live and the staleness check is
+    // gone — switchTab is a pure visibility toggle plus subtab/state
+    // bookkeeping.
     _activeTab = tab;
     document.querySelectorAll('.tabs-primary .tab').forEach(function(t) {
         t.classList.toggle('active', t.getAttribute('data-tab') === tab);
@@ -218,9 +206,6 @@ export function switchTab(tab) {
     document.getElementById('projects-subtabs').style.display = tab === 'projects' ? '' : 'none';
     if (tab === 'projects') _applySubtab(_activeSubtab);
     _persistTabState();
-    // Re-render dots so the newly-active tab loses its marker and any
-    // previously-active tab that remained dirty gains one.
-    if (typeof _renderStale === 'function') _renderStale();
 }
 
 export function switchSubtab(sub) {
@@ -323,19 +308,13 @@ export async function _reloadInPlace() {
             reloadState.pendingInPlace = true;
             return;
         }
-        // A successful global swap is authoritative. Clear any residual
-        // dirty entries synchronously so the _renderStale inside
-        // switchTab (called from _rebindDashHandlers below) doesn't paint
-        // a dot based on ids the server just re-rendered for us. The
-        // async updateBaseline() that follows confirms the empty set
-        // against a fresh /check-updates. condash#14.
-        staleState.dirtyNodes = new Set();
-        // htmx attaches its triggers + SSE wiring on element processing.
-        // focusSafeSwap inserts the fresh #dash-main via replaceWith,
-        // which htmx's MutationObserver doesn't see — call process()
-        // explicitly so `hx-trigger`/`sse-connect` on the History pane
-        // re-bind and `htmx:load` fires on the freshly inserted
-        // #history-content.
+        // htmx attaches its triggers + SSE wiring on element
+        // processing. focusSafeSwap inserts the fresh #dash-main via
+        // replaceWith, which htmx's MutationObserver doesn't see —
+        // process() the swapped subtree so each pane's
+        // `hx-trigger="sse:<tab>"` (and `sse-connect` on body) re-bind
+        // and the `hx-trigger="load"` on `#history-content` fires
+        // against the (data-preserve-restored) input value.
         if (window.htmx) window.htmx.process(fresh);
         _rebindDashHandlers();
         firePostReloadHooks();
@@ -664,13 +643,15 @@ initRunnerViewersSideEffects();
 initInNoteSearchSideEffects();
 initNoteModeSideEffects();
 
-// Phase 6: event-driven staleness. /events streams tab-level hints;
-// checkUpdates() runs on connect + every hint to reconcile the real
-// node-level dirty set. The 5s poll is gone. If the SSE connection
-// drops, a visible indicator surfaces and reconnect logic re-runs
-// checkUpdates() as soon as the stream is back.
-checkUpdates();
+// htmx owns the `/events` SSE connection and per-tab refresh; the
+// only remaining JS-side responsibility is the reconnecting pill +
+// open-note reconcile pass, both wired in `sections/sse.js` against
+// htmx's `htmx:sseOpen / sseError / sseClose / sseMessage` events.
 initSseSideEffects();
+// htmx:beforeSwap / afterSwap hooks that re-apply user-driven state
+// (card expand class, knowledge-folder open state, knowledge filter
+// query) onto morph-swapped panes.
+initHtmxStatePreserve();
 
 /* On first load, detect an unset conception_path and surface the setup
    banner + auto-open the config modal so the user lands on the editor. */
