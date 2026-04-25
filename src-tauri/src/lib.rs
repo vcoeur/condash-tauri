@@ -91,8 +91,7 @@ pub fn run() {
                     let runner_registry = state.runner_registry.clone();
                     let pty_registry = state.pty_registry.clone();
                     let shutdown_tx = state.shutdown_tx.clone();
-                    let force_stop_templates =
-                        state.ctx().repo_force_stop_templates.clone();
+                    let force_stop_templates = state.ctx().repo_force_stop_templates.clone();
                     api.prevent_close();
                     tauri::async_runtime::spawn(async move {
                         // Flip the latch so any subscriber (e.g. event
@@ -102,12 +101,8 @@ pub fn run() {
                         // SIGTERM each PTY child, awaiting EOF so the
                         // pump-thread cleanup runs to completion.
                         let grace = std::time::Duration::from_secs(5);
-                        runner_registry::shutdown(
-                            &runner_registry,
-                            &force_stop_templates,
-                            grace,
-                        )
-                        .await;
+                        runner_registry::shutdown(&runner_registry, &force_stop_templates, grace)
+                            .await;
                         pty_registry.shutdown(grace).await;
                         app.exit(0);
                     });

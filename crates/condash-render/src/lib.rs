@@ -106,7 +106,8 @@ pub fn render_knowledge(root: Option<&KnowledgeNode>) -> String {
         root => match root {
             Some(r) => Value::from_serialize(r),
             None => Value::from(()),
-        }
+        },
+        icons => icons::icons_value(),
     };
     templating::render("knowledge_tree.html.j2", ctx)
 }
@@ -415,14 +416,8 @@ mod tests {
             html.contains("invalid-status-badge"),
             "missing badge class: {html}"
         );
-        assert!(
-            html.contains("!? InProgress"),
-            "badge body wrong: {html}"
-        );
-        assert!(
-            html.contains("Unknown Status"),
-            "tooltip missing: {html}"
-        );
+        assert!(html.contains("!? InProgress"), "badge body wrong: {html}");
+        assert!(html.contains("Unknown Status"), "tooltip missing: {html}");
     }
 
     #[test]

@@ -1,50 +1,95 @@
 /* --- Knowledge explorer panel ---
    A separate content region, swapped in when the Knowledge tab is
    active. One group per knowledge/ subfolder; each entry renders as a
-   compact card the user can click to open in the note modal. */
-.knowledge-panel { display: flex; flex-direction: column; gap: 1.1rem; }
+   compact card the user can click to open in the note modal.
+
+   Visual treatment matches the conservative-refinement handoff
+   (projects/2026-04-25-condash-design-improvement/local/styles.css):
+   serif headings give the tab a "reading-room" feel, the directory
+   tree carries a count chip + an open-in-file-manager button on the
+   right, and notes inside an expanded folder render in a 2-column
+   grid with a serif title + single-line description. */
+.knowledge-panel { display: flex; flex-direction: column; gap: 0.4rem; }
+
 .knowledge-group {
-    border: 1px solid var(--border); border-radius: 10px;
-    background: var(--bg-card); padding: 0.8rem 1rem; box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-card);
+    overflow: hidden;
 }
 .knowledge-group-heading {
-    display: flex; align-items: center; gap: 0.5rem;
+    display: flex; align-items: center; gap: 0.55rem;
     cursor: pointer; user-select: none;
-    padding: 0.1rem 0;
+    padding: 0.55rem 0.85rem;
     list-style: none; /* hide Firefox default marker */
 }
 .knowledge-group-heading::-webkit-details-marker { display: none; }
-.knowledge-group[open] > .knowledge-group-heading { margin-bottom: 0.55rem; }
+.knowledge-group-heading:hover { background: var(--bg-card-hover); }
+.knowledge-group[open] > .knowledge-group-heading {
+    border-bottom: 1px solid var(--border-light);
+}
 .knowledge-chevron {
-    display: inline-block; font-size: 0.75rem; line-height: 1;
-    color: var(--text-secondary); transition: transform 0.15s ease;
+    display: inline-block; font-size: 0.65rem; line-height: 1;
+    color: var(--text-muted); transition: transform 0.15s ease;
+    width: 10px;
 }
 .knowledge-group[open] > .knowledge-group-heading > .knowledge-chevron {
     transform: rotate(90deg);
 }
 .knowledge-group-name {
-    font-size: 0.95rem; font-weight: 600; color: var(--text);
-    letter-spacing: 0; text-transform: none;
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    color: var(--text);
 }
-.knowledge-count { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
-/* Subdirectory groups render inside their parent — drop the card chrome
-   so they read as a section rather than a peer, and add a left rule so
-   the depth is still legible. The wrapper-level gap handles spacing. */
+.knowledge-count {
+    font-size: 0.7rem; font-weight: 500; color: var(--text-muted);
+    padding: 0.15rem 0.45rem; border-radius: 999px;
+    background: var(--bg); border: 1px solid var(--border);
+    line-height: 1.2;
+}
+.knowledge-heading-spacer { flex: 1; }
+
+/* Open-in-file-manager affordance — sits at the right edge of every
+   group heading and every note row. Stops click propagation so the
+   group's expand/collapse never fires from this button. */
+.knowledge-open-folder {
+    appearance: none; background: var(--bg); border: 1px solid var(--border);
+    width: 22px; height: 22px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 5px; cursor: pointer;
+    color: var(--text-muted); flex-shrink: 0;
+    transition: background 120ms, color 120ms, border-color 120ms;
+}
+.knowledge-open-folder:hover {
+    background: var(--bg-card-hover); color: var(--text);
+    border-color: var(--text-muted);
+}
+.knowledge-open-folder svg { width: 12px; height: 12px; }
+.knowledge-open-folder.is-ok { color: var(--git-clean); border-color: var(--git-clean); }
+.knowledge-open-folder.is-err { color: var(--pri-now); border-color: var(--pri-now); }
+
+/* Subdirectory groups render inside their parent — drop the card
+   chrome so they read as a section rather than a peer, and add a
+   left rule so the depth is still legible. */
 .knowledge-group .knowledge-group {
     border: none; box-shadow: none; background: transparent;
-    padding: 0.2rem 0 0.2rem 0.75rem;
-    border-left: 2px solid var(--border-light);
     border-radius: 0;
-    margin-top: 0.6rem;
+    margin-top: 0;
 }
-/* Index files are pointers, not content — render as a clickable pill in
-   the heading instead of a card alongside body files. The top-level
-   variant sits above the first group on its own row. */
+.knowledge-group .knowledge-group > .knowledge-group-heading {
+    padding-left: 1.6rem;
+}
+.knowledge-group .knowledge-group .knowledge-list { padding-left: 1.6rem; }
+
+/* Index files are pointers, not content — render as a clickable pill
+   in the heading instead of a card alongside body files. */
 .knowledge-index-badge {
     display: inline-block;
     padding: 0.1rem 0.55rem;
     border: 1px solid var(--accent); border-radius: 999px;
-    font-size: 0.7rem; font-weight: 600;
+    font-size: 0.68rem; font-weight: 600;
     color: var(--accent); background: var(--accent-bg);
     text-transform: uppercase; letter-spacing: 0.05em;
     cursor: pointer;
@@ -53,26 +98,69 @@
 .knowledge-index-badge:hover { filter: brightness(1.1); }
 .knowledge-index-badge:active { transform: translateY(1px); }
 .knowledge-index-top {
-    align-self: flex-start; margin-bottom: 0.5rem;
-    font-size: 0.72rem; padding: 0.15rem 0.65rem;
+    align-self: flex-start; margin: 0 0 0.6rem;
+    font-size: 0.7rem; padding: 0.15rem 0.65rem;
 }
+
+/* Body of an expanded folder — 2-column grid of compact note tiles. */
 .knowledge-list {
-    display: grid; gap: 0.55rem;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    display: grid; gap: 4px 12px;
+    /* Responsive auto-fill so the body grid breathes on wide windows
+       (3+ cols) and falls to 1 column on narrow ones. minmax(0, …) on
+       the column lets children ellipsis text without overflow. */
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+    padding: 0.55rem 0.85rem 0.7rem;
+    background: var(--bg);
 }
 .knowledge-card {
-    border: 1px solid var(--border-light); border-radius: 8px;
-    padding: 0.55rem 0.75rem; background: var(--bg-card-hover);
-    cursor: pointer; transition: border-color 0.1s, background 0.1s;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+        "title open"
+        "desc  desc"
+        "path  path";
+    column-gap: 10px; row-gap: 2px;
+    padding: 0.45rem 0.6rem; border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
 }
-.knowledge-card:hover { border-color: var(--accent); background: var(--accent-bg); }
-.knowledge-title { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+.knowledge-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-light);
+}
+.knowledge-title {
+    grid-area: title;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.012em;
+    color: var(--text);
+    align-self: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.knowledge-card .knowledge-open-folder { grid-area: open; align-self: center; }
 .knowledge-desc {
-    font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.15rem;
-    overflow: hidden; text-overflow: ellipsis;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    grid-area: desc;
+    font-family: var(--font-sans);
+    font-weight: 400;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    /* Single line — full text on the destination page. */
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .knowledge-path {
-    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
-    font-size: 0.72rem; color: var(--text-muted); margin-top: 0.3rem;
+    grid-area: path;
+    font-family: var(--font-mono);
+    font-size: 0.7rem; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-top: 0.15rem;
 }
+
+/* When the panel is empty (no body, no children), drop padding so
+   the heading row doesn't carry a phantom gap below it. */
+.knowledge-group:not([open]) > .knowledge-list { display: none; }
+.knowledge-group:has(> .knowledge-list:empty) > .knowledge-list { display: none; }

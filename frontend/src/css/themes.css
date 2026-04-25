@@ -1,12 +1,78 @@
+/* Vendored web fonts (frontend/vendor/fonts/, see `make update-fonts`).
+   The whole dashboard runs on Lexend — it's a readability-first sans
+   designed by Bonnie Shaver-Troup and the Lexend team. Hierarchy
+   comes from weight (300–800) + size, not from a secondary serif:
+   one coherent family across every surface. */
+@font-face {
+    font-family: "Lexend";
+    font-style: normal;
+    font-weight: 300;
+    font-display: swap;
+    src: url("/vendor/fonts/lexend-300-normal.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Lexend";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/vendor/fonts/lexend-400-normal.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Lexend";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("/vendor/fonts/lexend-500-normal.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Lexend";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/vendor/fonts/lexend-600-normal.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Lexend";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/vendor/fonts/lexend-700-normal.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Lexend";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("/vendor/fonts/lexend-800-normal.woff2") format("woff2");
+}
+
+:root {
+    /* Type families — Lexend everywhere the user reads UI text.
+       --font-display is an alias of --font-sans so that headlines
+       (card titles, hero, history months) can opt into a slightly
+       wider tracking via per-element rules without juggling stacks.
+       Mono stays separate for code + paths. */
+    --font-sans:    "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-display: "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono:    ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    /* Back-compat alias — older rules still reference --font-serif.
+       Resolves to the same Lexend stack so nothing falls through. */
+    --font-serif:   var(--font-display);
+}
+
 :root, [data-theme="light"] {
-    --bg: #f4f4f5;
-    --bg-card: #fff;
-    --bg-card-hover: #fafafa;
-    --text: #18181b;
-    --text-secondary: #52525b;
-    --text-muted: #a1a1aa;
-    --border: #e4e4e7;
-    --border-light: #f4f4f5;
+    /* Editorial warm-paper neutral. Slightly off-zinc — keeps every
+       page from reading like a stock dashboard while staying tame
+       enough that the kind tints + accent blue still pop. Cards drop
+       to a true white so they sit one step above the page. */
+    --bg: #f6f3ee;
+    --bg-card: #ffffff;
+    --bg-card-hover: #fbf8f3;
+    --text: #1a1418;
+    --text-secondary: #4f4953;
+    --text-muted: #9a9095;
+    --border: #e8e1d9;
+    --border-light: #f0eae3;
 
     --accent: #2563eb;
     --accent-bg: #eff6ff;
@@ -60,14 +126,16 @@
 }
 
 [data-theme="dark"] {
-    --bg: #111113;
-    --bg-card: #1c1c1f;
-    --bg-card-hover: #232326;
-    --text: #ececef;
-    --text-secondary: #b0b0b8;
-    --text-muted: #6e6e76;
-    --border: #2c2c30;
-    --border-light: #232326;
+    /* Slightly warm dark — same editorial character as the paper light
+       theme, just inverted. The deep ink lifts the serif headlines. */
+    --bg: #14111a;
+    --bg-card: #1f1c25;
+    --bg-card-hover: #28242e;
+    --text: #efe7e9;
+    --text-secondary: #b6acb1;
+    --text-muted: #777078;
+    --border: #322c34;
+    --border-light: #28242e;
 
     --accent: #7cacf8;
     --accent-bg: #1c2536;

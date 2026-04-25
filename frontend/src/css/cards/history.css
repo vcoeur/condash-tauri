@@ -1,12 +1,49 @@
 /* History pane — reuses .knowledge-* scaffolding (groups, badges, card
-   grid) but each item row carries a small row of status + kind pills. */
+   grid) but each item row carries a small row of status + kind pills.
+   The card-level .knowledge-card rules in cards/knowledge.css use a
+   transparent flat style suitable for the Knowledge tab; the history
+   tab needs a touch more visual separation between months and items,
+   so we re-paint the chrome here. */
+.history-card {
+    /* Restore the bordered tile look (knowledge cards inside an
+       expanded directory render as flat rows). */
+    border: 1px solid var(--border-light);
+    background: var(--bg-card);
+    padding: 0.55rem 0.75rem;
+}
+.history-card:hover {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+}
+.history-card .knowledge-title {
+    /* Lexend, slightly smaller than the knowledge tile — project
+       cards, not editorial entries. */
+    font-size: 0.82rem;
+    letter-spacing: -0.01em;
+}
 .history-meta {
     display: flex; flex-wrap: wrap; gap: 0.3rem;
-    margin-top: 0.35rem;
+    /* Sits in the implicit grid row after title/desc/path. */
+    grid-column: 1 / -1;
+    margin-top: 0.25rem;
 }
 .history-meta .pill {
     font-size: 0.7rem; padding: 0.05rem 0.5rem;
     text-transform: uppercase; letter-spacing: 0.03em;
+}
+
+/* Month group heading — bigger Lexend display weight so the archive
+   reads as a year-by-year ledger instead of a flat folder. */
+.history-group > .knowledge-group-heading > .knowledge-group-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.2rem;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+}
+.history-group > .knowledge-group-heading {
+    padding-top: 0.7rem;
+    padding-bottom: 0.7rem;
 }
 
 /* History search results — flat list rendered when the query is non-empty.

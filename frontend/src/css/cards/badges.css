@@ -1,11 +1,17 @@
-/* --- Kind badges --- */
+/* --- Kind badges ---
+   Tiny uppercase tag in the card header. Mirrors the redesign's
+   `.r-kind` block: monospaced, slightly padded, with a faint per-kind
+   tint that pairs the label with the card's left stripe. */
 .kind-prefix {
-    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.04em; margin-right: 0.3rem; border: none;
+    font: 700 0.65rem/1 var(--font-mono);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 3px;
+    margin-right: 0.3rem;
+    display: inline-block;
 }
-.kind-incident { color: var(--kind-incident); }
-.kind-project { color: var(--kind-project); }
-.kind-document { color: var(--kind-document); }
+.kind-incident { color: var(--kind-incident); background: color-mix(in srgb, var(--kind-incident) 12%, transparent); }
+.kind-project  { color: var(--kind-project);  background: color-mix(in srgb, var(--kind-project)  12%, transparent); }
+.kind-document { color: var(--kind-document); background: color-mix(in srgb, var(--kind-document) 12%, transparent); }
 
 /* --- Priority badges --- */
 .pri-wrap { position: relative; display: inline-block; }

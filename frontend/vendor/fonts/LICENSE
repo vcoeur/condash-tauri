@@ -1,0 +1,7 @@
+Vendored web fonts — SIL Open Font License 1.1
+
+Lexend — https://fonts.google.com/specimen/Lexend
+  Source: @fontsource/lexend@5 via jsdelivr
+  Files:  lexend-{300,400,500,600,700,800}-normal.woff2
+
+Bumped via condash/Makefile — see LEXEND_FONTSOURCE_VERSION.

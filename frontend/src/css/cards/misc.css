@@ -1,16 +1,26 @@
 /* --- Misc --- */
 .date {
     color: var(--text-muted); font-size: 0.75rem;
-    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-family: var(--font-mono);
 }
 .pill {
     font-size: 0.65rem; background: var(--pill-bg); color: var(--pill-text);
     padding: 1px 6px; border-radius: 8px;
 }
-.progress-text { font-size: 0.75rem; color: var(--text-secondary); }
-.progress-bar {
-    display: inline-block; width: 50px; height: 5px;
-    border-radius: 3px; vertical-align: middle; margin-left: 3px;
+/* Progress: count + a real bar. The bar carries the visual weight; the
+   count stays as monospace digits for steady cadence. */
+.progress-text {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600;
+    color: var(--text-secondary);
 }
-.progress-fill { display: block; height: 100%; border-radius: 3px; }
+.progress-bar {
+    display: inline-block; width: 56px; height: 4px;
+    border-radius: 999px; vertical-align: middle;
+    overflow: hidden;
+}
+.progress-fill {
+    display: block; height: 100%; border-radius: inherit;
+    transition: width 0.2s ease;
+}
 .summary { color: var(--text-secondary); font-size: 0.82rem; }

@@ -32,7 +32,9 @@ pub(super) async fn toggle(
     }
     match toggle_checkbox(&full, p.line as usize) {
         Ok(Some(status)) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({
                 "ok": true,
                 "status": status,
@@ -66,7 +68,9 @@ pub(super) async fn add_step_route(
     let section = p.section.as_deref();
     match add_step(&full, text, section) {
         Ok(line) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true, "line": line}))
         }
         Err(e) => error_json(StatusCode::INTERNAL_SERVER_ERROR, &format!("add-step: {e}")),
@@ -91,7 +95,9 @@ pub(super) async fn remove_step_route(
     }
     match remove_step(&full, p.line as usize) {
         Ok(true) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true}))
         }
         Ok(false) => error_json(StatusCode::BAD_REQUEST, "cannot remove"),
@@ -123,7 +129,9 @@ pub(super) async fn edit_step_route(
     }
     match edit_step(&full, p.line as usize, text) {
         Ok(true) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true}))
         }
         Ok(false) => error_json(StatusCode::BAD_REQUEST, "cannot edit"),
@@ -146,7 +154,9 @@ pub(super) async fn set_priority_route(
     };
     match set_priority(&full, &p.priority) {
         Ok(true) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({
                 "ok": true,
                 "priority": p.priority,
@@ -179,7 +189,9 @@ pub(super) async fn reorder_all_route(
     let order: Vec<usize> = p.order.iter().map(|&n| n as usize).collect();
     match reorder_all(&full, &order) {
         Ok(true) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true}))
         }
         Ok(false) => error_json(StatusCode::BAD_REQUEST, "cannot reorder"),

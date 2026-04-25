@@ -94,6 +94,13 @@ static VALID_ITEM_DIR_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("VALID_ITEM_DIR_RE compiles")
 });
 
+/// Any directory under `knowledge/` (or `knowledge/` itself). Used by
+/// `/open-folder` so the per-folder open-in-file-manager affordance
+/// in the Knowledge tab can resolve against the conception tree.
+static VALID_KNOWLEDGE_DIR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^knowledge(?:/[\w.-]+)*/?$").expect("VALID_KNOWLEDGE_DIR_RE compiles")
+});
+
 /// `<name>.<ext>` — validates the target filename of create_note /
 /// rename_note.
 pub static VALID_NOTE_FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -174,6 +181,18 @@ pub fn validate_note_path(base_dir: &Path, rel_path: &str) -> Option<ValidatedPa
 /// workspace/worktrees sandbox).
 pub fn validate_item_dir(base_dir: &Path, rel_path: &str) -> Option<ValidatedPath> {
     let full = safe_resolve(base_dir, rel_path, &[&VALID_ITEM_DIR_RE], false)?;
+    if !full.as_path().is_dir() {
+        return None;
+    }
+    Some(full)
+}
+
+/// Validate a knowledge directory path (`knowledge/`, `knowledge/topics`,
+/// `knowledge/topics/security/`, etc.) under `base_dir`. Used by
+/// `/open-folder` so the Knowledge tab's per-folder open-in-file-manager
+/// affordance lands on the right directory inside the conception tree.
+pub fn validate_knowledge_dir(base_dir: &Path, rel_path: &str) -> Option<ValidatedPath> {
+    let full = safe_resolve(base_dir, rel_path, &[&VALID_KNOWLEDGE_DIR_RE], false)?;
     if !full.as_path().is_dir() {
         return None;
     }
@@ -282,6 +301,24 @@ mod tests {
     }
 
     #[test]
+    fn validate_knowledge_dir_accepts_root_and_subdirs() {
+        let (_tmp, base) = seeded_tree();
+        assert!(validate_knowledge_dir(&base, "knowledge").is_some());
+        assert!(validate_knowledge_dir(&base, "knowledge/").is_some());
+        assert!(validate_knowledge_dir(&base, "knowledge/topics").is_some());
+    }
+
+    #[test]
+    fn validate_knowledge_dir_rejects_files_and_traversal() {
+        let (_tmp, base) = seeded_tree();
+        // Files (not dirs) and paths outside knowledge/ are rejected.
+        assert!(validate_knowledge_dir(&base, "knowledge/conventions.md").is_none());
+        assert!(validate_knowledge_dir(&base, "projects").is_none());
+        assert!(validate_knowledge_dir(&base, "knowledge/../projects").is_none());
+        assert!(validate_knowledge_dir(&base, "").is_none());
+    }
+
+    #[test]
     fn valid_item_notes_file_re_gates_rename_source() {
         assert!(
             VALID_ITEM_NOTES_FILE_RE.is_match("projects/2026-04/2026-04-22-demo/notes/first.md")
@@ -294,9 +331,18 @@ mod tests {
     fn resolve_under_item_empty_is_item_dir() {
         let (_tmp, base) = seeded_tree();
         let item = base.join("projects/2026-04/2026-04-22-demo");
-        assert_eq!(resolve_under_item(&item, "").map(|v| v.into_inner()), Some(item.clone()));
-        assert_eq!(resolve_under_item(&item, "   ").map(|v| v.into_inner()), Some(item.clone()));
-        assert_eq!(resolve_under_item(&item, "/").map(|v| v.into_inner()), Some(item.clone()));
+        assert_eq!(
+            resolve_under_item(&item, "").map(|v| v.into_inner()),
+            Some(item.clone())
+        );
+        assert_eq!(
+            resolve_under_item(&item, "   ").map(|v| v.into_inner()),
+            Some(item.clone())
+        );
+        assert_eq!(
+            resolve_under_item(&item, "/").map(|v| v.into_inner()),
+            Some(item.clone())
+        );
     }
 
     #[test]
@@ -304,7 +350,9 @@ mod tests {
         let (_tmp, base) = seeded_tree();
         let item = base.join("projects/2026-04/2026-04-22-demo");
         let got = resolve_under_item(&item, "notes").expect("notes exists");
-        assert!(got.as_path().ends_with("projects/2026-04/2026-04-22-demo/notes"));
+        assert!(got
+            .as_path()
+            .ends_with("projects/2026-04/2026-04-22-demo/notes"));
     }
 
     #[test]
@@ -324,7 +372,9 @@ mod tests {
         // code path. Should still resolve, since the regex + ".." reject
         // keep us safe.
         let got = resolve_under_item(&item, "freshly/nested").expect("ok");
-        assert!(got.as_path().ends_with("projects/2026-04/2026-04-22-demo/freshly/nested"));
+        assert!(got
+            .as_path()
+            .ends_with("projects/2026-04/2026-04-22-demo/freshly/nested"));
     }
 
     #[test]

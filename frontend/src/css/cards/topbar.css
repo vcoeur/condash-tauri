@@ -2,11 +2,13 @@
    First row of the app. Primary tabs take the stage on the left; a
    thin vertical divider separates them from the icon cluster on the
    right. The gap + divider give the tabs room to breathe without
-   leaving the icons visually orphaned. */
+   leaving the icons visually orphaned. A faint hairline rule under
+   the bar anchors the page like a magazine masthead. */
 .topbar {
     display: flex; align-items: center; gap: 1.75rem;
-    padding: 0.35rem 0;
-    margin-bottom: 1.6rem;
+    padding: 0.6rem 0 0.85rem;
+    margin-bottom: 1.4rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 .topbar .tabs { margin-bottom: 0; border-bottom: none; flex: 1 1 auto; min-width: 0; }
 .topbar .header-actions { flex-shrink: 0; gap: 0.3rem; }

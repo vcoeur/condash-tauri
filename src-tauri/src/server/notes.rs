@@ -78,7 +78,9 @@ pub(super) async fn post_note(
     }
     match write_note(&full, &p.content, p.expected_mtime) {
         Ok(WriteNoteResult::Ok { mtime, .. }) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true, "mtime": mtime}))
         }
         Ok(WriteNoteResult::Err { reason, mtime, .. }) => {
@@ -113,7 +115,9 @@ pub(super) async fn post_note_rename(
     }
     match rename_note(&full, &p.new_stem, &state.ctx().base_dir) {
         Ok(RenameResult::Ok { path, mtime, .. }) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(full.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                full.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true, "path": path, "mtime": mtime}))
         }
         Ok(RenameResult::Err { reason, .. }) => error_json(StatusCode::BAD_REQUEST, &reason),
@@ -151,7 +155,9 @@ pub(super) async fn post_note_create(
         subdir_was_supplied,
     ) {
         Ok(CreateNoteResult::Ok { path, mtime, .. }) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(readme.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                readme.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({"ok": true, "path": path, "mtime": mtime}))
         }
         Ok(CreateNoteResult::Err { reason, .. }) => error_json(StatusCode::BAD_REQUEST, &reason),
@@ -196,7 +202,9 @@ pub(super) async fn post_note_mkdir(
             subdir_key,
             ..
         }) => {
-            state.cache.consume(condash_state::MutationOutput::for_path(readme.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                readme.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({
                 "ok": true,
                 "rel_dir": rel_dir,
@@ -262,7 +270,8 @@ pub(super) async fn post_note_upload(
         return error_json(StatusCode::BAD_REQUEST, "no files in upload");
     }
 
-    let Some(readme) = crate::paths::validate_readme_path(&state.ctx().base_dir, &item_readme) else {
+    let Some(readme) = crate::paths::validate_readme_path(&state.ctx().base_dir, &item_readme)
+    else {
         return error_json(StatusCode::BAD_REQUEST, "invalid item");
     };
     let Some(item_dir) = readme.parent() else {
@@ -296,7 +305,9 @@ pub(super) async fn post_note_upload(
                     .unwrap_or_else(|| "upload failed".into());
                 return error_json(StatusCode::BAD_REQUEST, &reason);
             }
-            state.cache.consume(condash_state::MutationOutput::for_path(readme.as_path().to_path_buf()));
+            state.cache.consume(condash_state::MutationOutput::for_path(
+                readme.as_path().to_path_buf(),
+            ));
             json_response(&serde_json::json!({
                 "ok": true,
                 "stored": res.stored,

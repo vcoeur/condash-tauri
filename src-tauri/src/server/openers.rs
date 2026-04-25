@@ -67,10 +67,13 @@ pub(super) async fn post_open_folder(
     }
     // Item folders live inside the conception tree (base_dir), not the
     // workspace/worktrees sandbox — the card-button passes a path like
-    // `projects/2026-04/2026-04-23-slug/` relative to base_dir. Resolve
-    // against base_dir, and fall back to the workspace sandbox for any
-    // other folder target a future caller might feed in.
+    // `projects/2026-04/2026-04-23-slug/` relative to base_dir. The
+    // Knowledge tab's per-folder affordance hands in `knowledge/...`
+    // paths under the same root. Try both, then fall back to the
+    // workspace sandbox for any other folder target a future caller
+    // might feed in.
     let validated = crate::paths::validate_item_dir(&state.ctx().base_dir, &p.path)
+        .or_else(|| crate::paths::validate_knowledge_dir(&state.ctx().base_dir, &p.path))
         .or_else(|| validate_open_path(&state.ctx(), &p.path));
     let Some(validated) = validated else {
         return error_json(StatusCode::FORBIDDEN, "path out of sandbox");

@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "condash"
-version = "1.6.1"
+version = "1.7.1"
 dependencies = [
  "anyhow",
  "arc-swap",

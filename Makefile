@@ -131,6 +131,7 @@ frontend: ## Bundle the dashboard source (frontend/src/) into dist/bundle.{js,cs
 	    "$$SRC_CSS" \
 	    --bundle --target=es2019 \
 	    --minify --sourcemap \
+	    --external:'/vendor/*' \
 	    --outfile="$$DEST/bundle.css" --log-level=warning; \
 	echo "Frontend bundle:"; \
 	du -sh "$$DEST"
@@ -274,6 +275,42 @@ update-htmx: ## Re-vendor htmx + sse + idiomorph extensions into frontend/vendor
 	echo "Vendored htmx $(HTMX_VERSION):"; \
 	du -sh "$$DEST"
 
+# Vendored web fonts. The dashboard runs a single coherent family —
+# Lexend — across everything UI. Lexend is engineered for reading
+# speed (variable axes for inter-letter spacing); we ship the static
+# weights we use. Hierarchy comes from weight + size, not from a
+# secondary serif. Falls back to system sans if the woff2 files are
+# absent.
+#
+# Source: @fontsource (npm), served by jsdelivr — same pattern as the
+# CodeMirror / Mermaid / xterm vendoring above. SIL Open Font 1.1.
+LEXEND_FONTSOURCE_VERSION := 5
+
+update-fonts: ## Re-vendor Lexend woff2 weights into frontend/vendor/fonts/
+	@set -e; \
+	DEST=frontend/vendor/fonts; \
+	rm -rf "$$DEST"; \
+	mkdir -p "$$DEST"; \
+	BASE_L="https://cdn.jsdelivr.net/npm/@fontsource/lexend@$(LEXEND_FONTSOURCE_VERSION)/files"; \
+	echo "Downloading Lexend (latin, 300 + 400 + 500 + 600 + 700 + 800)"; \
+	curl -sSLf -o "$$DEST/lexend-300-normal.woff2" "$$BASE_L/lexend-latin-300-normal.woff2"; \
+	curl -sSLf -o "$$DEST/lexend-400-normal.woff2" "$$BASE_L/lexend-latin-400-normal.woff2"; \
+	curl -sSLf -o "$$DEST/lexend-500-normal.woff2" "$$BASE_L/lexend-latin-500-normal.woff2"; \
+	curl -sSLf -o "$$DEST/lexend-600-normal.woff2" "$$BASE_L/lexend-latin-600-normal.woff2"; \
+	curl -sSLf -o "$$DEST/lexend-700-normal.woff2" "$$BASE_L/lexend-latin-700-normal.woff2"; \
+	curl -sSLf -o "$$DEST/lexend-800-normal.woff2" "$$BASE_L/lexend-latin-800-normal.woff2"; \
+	{ \
+	    echo "Vendored web fonts — SIL Open Font License 1.1"; \
+	    echo ""; \
+	    echo "Lexend — https://fonts.google.com/specimen/Lexend"; \
+	    echo "  Source: @fontsource/lexend@$(LEXEND_FONTSOURCE_VERSION) via jsdelivr"; \
+	    echo "  Files:  lexend-{300,400,500,600,700,800}-normal.woff2"; \
+	    echo ""; \
+	    echo "Bumped via condash/Makefile — see LEXEND_FONTSOURCE_VERSION."; \
+	} > "$$DEST/LICENSE"; \
+	echo "Vendored fonts:"; \
+	du -sh "$$DEST"
+
 # MkDocs site build — the GitHub Action at .github/workflows/docs.yml
 # pins mkdocs-material to this same version, so local builds match CI.
 MKDOCS_MATERIAL_VERSION := 9.5.49
@@ -287,4 +324,4 @@ docs-serve: ## Live-reload preview of the mkdocs site on http://127.0.0.1:8000/
 docs-clean: ## Remove the generated ./site/ directory
 	rm -rf site
 
-.PHONY: help setup run serve build check test smoke format frontend docs docs-serve docs-clean update-pdfjs update-codemirror update-mermaid update-xterm update-htmx
+.PHONY: help setup run serve build check test smoke format frontend docs docs-serve docs-clean update-pdfjs update-codemirror update-mermaid update-xterm update-htmx update-fonts

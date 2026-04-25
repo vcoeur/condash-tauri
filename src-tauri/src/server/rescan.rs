@@ -12,6 +12,8 @@ use axum::response::IntoResponse;
 use super::{json_response, AppState};
 
 pub(super) async fn post_rescan(State(state): State<AppState>) -> impl IntoResponse {
-    state.cache.consume(condash_state::MutationOutput::full_flush());
+    state
+        .cache
+        .consume(condash_state::MutationOutput::full_flush());
     json_response(&serde_json::json!({"ok": true}))
 }

@@ -139,11 +139,25 @@
 {% endmacro %}
 
 
+{% macro open_folder_btn(rel_path, label) %}
+{# data-prevent stops the surrounding <summary> from toggling and the
+   parent .knowledge-card from triggering open-note-preview when the
+   user clicks the open-folder affordance. #}
+<button type="button" class="knowledge-open-folder"
+  title="Open {{ rel_path }} in file manager"
+  aria-label="Open {{ label }} folder in file manager"
+  data-action="open-folder" data-stop="1" data-prevent="1"
+  data-rel-dir="{{ rel_path }}">{{ icons.folder | safe }}</button>
+{% endmacro %}
+
+
 {% macro knowledge_card(e) %}
+{% set parent_dir = e.path | dirname %}
 <div class="knowledge-card" data-node-id="{{ e.path }}"
   data-action="open-note-preview"
   data-path="{{ e.path }}" data-title="{{ e.title }}">
   <div class="knowledge-title">{{ e.title }}</div>
+  {{ open_folder_btn(parent_dir, e.title) }}
   {% if e.desc %}<div class="knowledge-desc">{{ e.desc }}</div>{% endif %}
   <div class="knowledge-path">{{ e.path }}</div>
 </div>
@@ -155,8 +169,10 @@
   <summary class="knowledge-group-heading">
     <span class="knowledge-chevron" aria-hidden="true">&#9656;</span>
     <span class="knowledge-group-name">{{ node.label }}</span>
-    <span class="knowledge-count">({{ node.count }})</span>
+    <span class="knowledge-count">{{ node.count }} {% if node.count == 1 %}note{% else %}notes{% endif %}</span>
     {% if node.index %}{{ index_badge(node.index, top_level=false) }}{% endif %}
+    <span class="knowledge-heading-spacer"></span>
+    {{ open_folder_btn(node.rel_dir, node.label) }}
   </summary>
   {% if node.body %}
   <div class="knowledge-list">

@@ -56,9 +56,9 @@ pub(super) async fn post_create_item(
             month,
             ..
         }) => {
-            state.cache.consume(
-                condash_state::MutationOutput::default().with_items_flush(),
-            );
+            state
+                .cache
+                .consume(condash_state::MutationOutput::default().with_items_flush());
             json_response(&serde_json::json!({
                 "ok": true,
                 "rel_path": rel_path,
