@@ -47,6 +47,13 @@ impl EventPayload {
             ts,
         }
     }
+
+    /// Public factory used by routes that need to publish a tab refresh
+    /// (currently the configuration save handler — see
+    /// [`server::config_surface`](crate::server::config_surface)).
+    pub fn for_tab(tab: impl Into<String>) -> Self {
+        Self::new(tab)
+    }
 }
 
 /// Thread-safe fan-out channel. `Clone` is cheap — the inner broadcast

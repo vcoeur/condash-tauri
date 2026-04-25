@@ -106,7 +106,7 @@ pub fn run() {
             let pty_registry = pty::PtyRegistry::new();
             let runner_registry = runner_registry::RunnerRegistry::new();
             let state = server::AppState {
-                ctx: ctx.clone(),
+                ctx_swap: Arc::new(arc_swap::ArcSwap::from(ctx.clone())),
                 cache,
                 assets: asset_source,
                 version: Arc::new(env!("CARGO_PKG_VERSION").to_string()),

@@ -89,11 +89,11 @@ async fn handle_term_ws(mut socket: axum::extract::ws::WebSocket, state: AppStat
                     None
                 }
             })
-            .unwrap_or_else(|| state.ctx.base_dir.clone());
+            .unwrap_or_else(|| state.ctx().base_dir.clone());
         let use_launcher = q.launcher.as_deref() == Some("1");
         let launcher_argv = if use_launcher {
             state
-                .ctx
+                .ctx()
                 .terminal
                 .launcher_command
                 .as_deref()

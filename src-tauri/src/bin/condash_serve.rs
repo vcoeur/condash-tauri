@@ -62,7 +62,7 @@ async fn async_main() -> Result<()> {
     condash_lib::events::spawn_cache_invalidator(event_bus.clone(), cache.clone());
 
     let state = condash_lib::server::AppState {
-        ctx,
+        ctx_swap: Arc::new(arc_swap::ArcSwap::from(ctx)),
         cache,
         assets: asset_source,
         version: Arc::new(env!("CARGO_PKG_VERSION").to_string()),

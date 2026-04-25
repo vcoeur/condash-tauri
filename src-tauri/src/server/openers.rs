@@ -30,10 +30,11 @@ pub(super) async fn post_open(
     if p.path.trim().is_empty() || p.tool.trim().is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "path and tool required");
     }
-    let Some(validated) = validate_open_path(&state.ctx, &p.path) else {
+    let ctx = state.ctx();
+    let Some(validated) = validate_open_path(&ctx, &p.path) else {
         return error_json(StatusCode::FORBIDDEN, "path out of sandbox");
     };
-    let Some(slot) = state.ctx.open_with.get(&p.tool) else {
+    let Some(slot) = ctx.open_with.get(&p.tool) else {
         return error_json(StatusCode::NOT_FOUND, &format!("unknown tool: {}", p.tool));
     };
     if slot.commands.is_empty() {
@@ -43,7 +44,9 @@ pub(super) async fn post_open(
         );
     }
     let value = validated.as_path().to_string_lossy().into_owned();
-    match crate::launcher::try_chain(&slot.commands, "path", &value) {
+    let commands = slot.commands.clone();
+    drop(ctx);
+    match crate::launcher::try_chain(&commands, "path", &value) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
         None => error_json(StatusCode::BAD_GATEWAY, "all commands failed"),
     }
@@ -67,8 +70,8 @@ pub(super) async fn post_open_folder(
     // `projects/2026-04/2026-04-23-slug/` relative to base_dir. Resolve
     // against base_dir, and fall back to the workspace sandbox for any
     // other folder target a future caller might feed in.
-    let validated = crate::paths::validate_item_dir(&state.ctx.base_dir, &p.path)
-        .or_else(|| validate_open_path(&state.ctx, &p.path));
+    let validated = crate::paths::validate_item_dir(&state.ctx().base_dir, &p.path)
+        .or_else(|| validate_open_path(&state.ctx(), &p.path));
     let Some(validated) = validated else {
         return error_json(StatusCode::FORBIDDEN, "path out of sandbox");
     };
@@ -118,12 +121,12 @@ pub(super) async fn post_open_doc(
     // already sandbox-safe (the note path itself was validated to open
     // the modal), so we first try the raw value and fall back to
     // base_dir-rooted resolution.
-    let full = match validate_open_path(&state.ctx, &p.path) {
+    let full = match validate_open_path(&state.ctx(), &p.path) {
         Some(v) => v,
         None => {
-            let rel = state.ctx.base_dir.join(&p.path);
+            let rel = state.ctx().base_dir.join(&p.path);
             match std::fs::canonicalize(&rel).ok().and_then(|c| {
-                let base = std::fs::canonicalize(&state.ctx.base_dir).ok()?;
+                let base = std::fs::canonicalize(&state.ctx().base_dir).ok()?;
                 if c.starts_with(&base) {
                     Some(crate::paths::ValidatedPath::from_canonical_in_sandbox(c))
                 } else {
@@ -138,13 +141,13 @@ pub(super) async fn post_open_doc(
     let value = full.as_path().to_string_lossy().into_owned();
     // Prefer the user's configured pdf_viewer chain; fall back to the
     // xdg-open / gio open chain.
-    let chain: Vec<String> = if state.ctx.pdf_viewer.is_empty() {
+    let chain: Vec<String> = if state.ctx().pdf_viewer.is_empty() {
         crate::launcher::DOC_FALLBACKS
             .iter()
             .map(|s| s.to_string())
             .collect()
     } else {
-        state.ctx.pdf_viewer.clone()
+        state.ctx().pdf_viewer.clone()
     };
     match crate::launcher::try_chain(&chain, "path", &value) {
         Some(used) => json_response(&serde_json::json!({"ok": true, "command": used})),
@@ -198,7 +201,7 @@ fn resolved_screenshot_dir(ctx: &condash_state::RenderCtx) -> std::path::PathBuf
 }
 
 pub(super) async fn get_recent_screenshot(State(state): State<AppState>) -> Response {
-    let dir = resolved_screenshot_dir(&state.ctx);
+    let dir = resolved_screenshot_dir(&state.ctx());
     let dir_str = dir.to_string_lossy().into_owned();
     let payload_err = |reason: &str| {
         json_response(&serde_json::json!({

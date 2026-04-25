@@ -37,6 +37,7 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
+use arc_swap::{ArcSwap, Guard};
 use condash_state::{RenderCtx, WorkspaceCache};
 use tokio::net::TcpListener as TokioTcpListener;
 
@@ -53,9 +54,14 @@ mod terminal;
 
 /// Application state shared across every handler. Cheap to clone
 /// (all fields live behind `Arc`).
+///
+/// `ctx_swap` holds the active [`RenderCtx`] inside an [`ArcSwap`] so
+/// the [`config_surface`] save handler can hot-replace it without a
+/// restart. Per-request reads go through [`AppState::ctx`], which
+/// returns a cheap RCU guard.
 #[derive(Clone)]
 pub struct AppState {
-    pub ctx: Arc<RenderCtx>,
+    pub ctx_swap: Arc<ArcSwap<RenderCtx>>,
     pub cache: Arc<WorkspaceCache>,
     /// Source of the dashboard shell (`dashboard.html`),
     /// `favicon.{svg,ico}`, `dist/`, and `vendor/`. Production
@@ -77,6 +83,16 @@ pub struct AppState {
     /// Per-process registry of inline dev-server runners — used by
     /// `/api/runner/{start,stop}` and `/ws/runner/:key`.
     pub runner_registry: crate::runner_registry::RunnerRegistry,
+}
+
+impl AppState {
+    /// Snapshot the active [`RenderCtx`]. Returns an [`arc_swap::Guard`]
+    /// that derefs to `&RenderCtx`. The guard is cheap; do not hold it
+    /// across `.await` points — clone the inner `Arc` first if you need
+    /// to (`Arc::clone(&*guard)`).
+    pub fn ctx(&self) -> Guard<Arc<RenderCtx>> {
+        self.ctx_swap.load()
+    }
 }
 
 /// Start the axum server on the given localhost port (`0` means any

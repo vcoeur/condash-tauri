@@ -26,7 +26,7 @@ fn state_with_bus() -> (TempDir, AppState, EventBus) {
     let cache = Arc::new(WorkspaceCache::new());
     let bus = EventBus::default();
     let state = AppState {
-        ctx,
+        ctx_swap: Arc::new(arc_swap::ArcSwap::from(ctx)),
         cache,
         assets: condash_lib::assets::AssetSource::Embedded,
         version: Arc::new("test".into()),

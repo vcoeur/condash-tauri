@@ -37,7 +37,7 @@ fn harness() -> Harness {
     let ctx = Arc::new(RenderCtx::with_base_dir(&base));
     let cache = Arc::new(WorkspaceCache::new());
     let state = AppState {
-        ctx,
+        ctx_swap: Arc::new(arc_swap::ArcSwap::from(ctx)),
         cache,
         assets: condash_lib::assets::AssetSource::Embedded,
         version: Arc::new("test".into()),

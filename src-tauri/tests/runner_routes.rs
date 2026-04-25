@@ -50,7 +50,7 @@ fn harness_with(templates: Vec<(&str, &str)>) -> Harness {
     ctx.repo_run_keys = ctx.repo_run_templates.keys().cloned().collect();
 
     let state = AppState {
-        ctx: Arc::new(ctx),
+        ctx_swap: Arc::new(arc_swap::ArcSwap::from(Arc::new(ctx))),
         cache: Arc::new(WorkspaceCache::new()),
         assets: condash_lib::assets::AssetSource::Embedded,
         version: Arc::new("test".into()),

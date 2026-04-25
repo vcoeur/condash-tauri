@@ -34,13 +34,13 @@ pub(super) async fn runner_start_route(
     if key.is_empty() || checkout_key.is_empty() || path_raw.is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "key, checkout_key, path required");
     }
-    let Some(template) = state.ctx.repo_run_templates.get(key).cloned() else {
+    let Some(template) = state.ctx().repo_run_templates.get(key).cloned() else {
         return error_json(
             StatusCode::NOT_FOUND,
             &format!("no run command configured for {key}"),
         );
     };
-    let Some(validated) = validate_open_path(&state.ctx, path_raw) else {
+    let Some(validated) = validate_open_path(&state.ctx(), path_raw) else {
         return error_json(
             StatusCode::BAD_REQUEST,
             &format!("path out of sandbox: {path_raw}"),
@@ -140,7 +140,7 @@ pub(super) async fn runner_force_stop_route(
     if key.is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "key required");
     }
-    let Some(command) = state.ctx.repo_force_stop_templates.get(key).cloned() else {
+    let Some(command) = state.ctx().repo_force_stop_templates.get(key).cloned() else {
         return error_json(
             StatusCode::NOT_FOUND,
             &format!("no force_stop command configured for {key}"),

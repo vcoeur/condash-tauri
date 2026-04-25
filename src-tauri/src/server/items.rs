@@ -47,7 +47,7 @@ pub(super) async fn post_create_item(
         severity: p.severity,
         languages: p.languages,
     };
-    match create_item(&state.ctx.base_dir, spec, ymd) {
+    match create_item(&state.ctx().base_dir, spec, ymd) {
         Ok(CreateItemResult::Ok {
             rel_path,
             slug,

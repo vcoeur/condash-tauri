@@ -17,11 +17,11 @@ use serde::Deserialize;
 use super::{error_json, html_response, live_runners_snapshot, AppState};
 
 pub(super) async fn index(State(state): State<AppState>) -> impl IntoResponse {
-    let items = state.cache.get_items(&state.ctx);
-    let knowledge = state.cache.get_knowledge(&state.ctx);
+    let items = state.cache.get_items(&state.ctx());
+    let knowledge = state.cache.get_knowledge(&state.ctx());
     let live_runners = live_runners_snapshot(&state);
     let html = render_page(
-        &state.ctx,
+        &state.ctx(),
         &items,
         knowledge.as_ref().as_ref(),
         &state.version,
@@ -45,8 +45,8 @@ pub(super) async fn fragment_history(
     State(state): State<AppState>,
     Query(s): Query<HistoryFragmentQuery>,
 ) -> impl IntoResponse {
-    let items = state.cache.get_items(&state.ctx);
-    html_response(render_history_pane(&state.ctx, &items, &s.q))
+    let items = state.cache.get_items(&state.ctx());
+    html_response(render_history_pane(&state.ctx(), &items, &s.q))
 }
 
 /// HTML fragment for the Knowledge pane content. Driven by the htmx
@@ -54,7 +54,7 @@ pub(super) async fn fragment_history(
 /// `sse:knowledge` whenever the file watcher reports a change under
 /// `knowledge/`.
 pub(super) async fn fragment_knowledge(State(state): State<AppState>) -> impl IntoResponse {
-    let knowledge = state.cache.get_knowledge(&state.ctx);
+    let knowledge = state.cache.get_knowledge(&state.ctx());
     html_response(render_knowledge_pane(knowledge.as_ref().as_ref()))
 }
 
@@ -64,7 +64,7 @@ pub(super) async fn fragment_knowledge(State(state): State<AppState>) -> impl In
 /// survive a parent-pane morph swap.
 pub(super) async fn fragment_code(State(state): State<AppState>) -> impl IntoResponse {
     let live_runners = live_runners_snapshot(&state);
-    html_response(render_code_pane(&state.ctx, &live_runners))
+    html_response(render_code_pane(&state.ctx(), &live_runners))
 }
 
 /// HTML fragment for the Projects pane content (the cards grid).
@@ -73,7 +73,7 @@ pub(super) async fn fragment_code(State(state): State<AppState>) -> impl IntoRes
 /// in `htmx-state-preserve.js` re-applies user-driven state (expanded
 /// cards, open `<details>`) onto the swapped DOM.
 pub(super) async fn fragment_projects(State(state): State<AppState>) -> impl IntoResponse {
-    let items = state.cache.get_items(&state.ctx);
+    let items = state.cache.get_items(&state.ctx());
     html_response(render_cards_pane(&items))
 }
 
@@ -125,7 +125,7 @@ pub(super) async fn conception_asset(
     State(state): State<AppState>,
     axum::extract::Path(rel_path): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    serve_under(&state.ctx.base_dir, &rel_path, None)
+    serve_under(&state.ctx().base_dir, &rel_path, None)
 }
 
 fn serve_under(base: &std::path::Path, rel: &str, mime_override: Option<&str>) -> Response {

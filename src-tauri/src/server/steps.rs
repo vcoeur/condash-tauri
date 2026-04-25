@@ -24,7 +24,7 @@ pub(super) async fn toggle(
     State(state): State<AppState>,
     Json(p): Json<TogglePayload>,
 ) -> impl IntoResponse {
-    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx().base_dir, &p.file) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
     if p.line < 0 {
@@ -60,7 +60,7 @@ pub(super) async fn add_step_route(
     if text.is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "empty text");
     }
-    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx().base_dir, &p.file) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
     let section = p.section.as_deref();
@@ -83,7 +83,7 @@ pub(super) async fn remove_step_route(
     State(state): State<AppState>,
     Json(p): Json<RemoveStepPayload>,
 ) -> impl IntoResponse {
-    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx().base_dir, &p.file) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
     if p.line < 0 {
@@ -115,7 +115,7 @@ pub(super) async fn edit_step_route(
     if text.is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "empty text");
     }
-    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx().base_dir, &p.file) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
     if p.line < 0 {
@@ -141,7 +141,7 @@ pub(super) async fn set_priority_route(
     State(state): State<AppState>,
     Json(p): Json<SetPriorityPayload>,
 ) -> impl IntoResponse {
-    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx().base_dir, &p.file) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
     match set_priority(&full, &p.priority) {
@@ -170,7 +170,7 @@ pub(super) async fn reorder_all_route(
     State(state): State<AppState>,
     Json(p): Json<ReorderAllPayload>,
 ) -> impl IntoResponse {
-    let Some(full) = crate::paths::validate_readme_path(&state.ctx.base_dir, &p.file) else {
+    let Some(full) = crate::paths::validate_readme_path(&state.ctx().base_dir, &p.file) else {
         return error_json(StatusCode::BAD_REQUEST, "invalid path");
     };
     if p.order.iter().any(|&n| n < 0) {
