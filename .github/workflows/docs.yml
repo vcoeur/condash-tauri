@@ -1,12 +1,22 @@
-name: Docs
+name: Pages (docs + apt repo)
+
+# Builds the public site at condash.vcoeur.com:
+#   - mkdocs site at the root
+#   - Debian apt repository under /apt/
+#
+# Trigger: a GitHub Release is published (the draft created by
+# release.yml has been promoted by a human), or manual dispatch.
+# This guarantees every .deb attached to the release is already
+# uploaded by the time apt metadata is regenerated.
+#
+# The apt repo is rebuilt deterministically from scratch on every
+# run by re-fetching every .deb from every GitHub Release — no
+# state is preserved between deploys, so a corrupted Pages deploy
+# can be recovered by re-running the workflow.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - ".github/workflows/docs.yml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +27,11 @@ permissions:
 concurrency:
   group: pages
   cancel-in-progress: false
+
+env:
+  APT_SIGNING_KEY_FPR: BC6C98E8D6D80FFBC408057FD1D69E3E4A005621
+  APT_SUITE: stable
+  APT_COMPONENT: main
 
 jobs:
   build:
@@ -29,11 +44,70 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install aptly + gnupg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aptly gnupg
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Build site
+      - name: Build mkdocs site
         run: uv run --with "mkdocs-material==9.5.49" mkdocs build --strict
+
+      - name: Import apt signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          echo "$APT_SIGNING_KEY" | gpg --batch --import
+          gpg --list-secret-keys "$APT_SIGNING_KEY_FPR" >/dev/null
+
+      - name: Download all .deb from GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p debs
+          # Iterate every release tag and pull its .deb assets. Drafts
+          # and prereleases are skipped — only published, non-prerelease
+          # tags ship through apt.
+          for tag in $(gh release list --limit 200 --json tagName,isDraft,isPrerelease \
+                       -q '.[] | select(.isDraft==false and .isPrerelease==false) | .tagName'); do
+            echo "Fetching .deb assets from $tag"
+            gh release download "$tag" --pattern '*.deb' --dir debs/ --skip-existing || true
+          done
+          ls -la debs/
+
+      - name: Build apt repo with aptly
+        run: |
+          set -euo pipefail
+          # Fresh aptly DB each run — fully deterministic.
+          rm -rf ~/.aptly
+          aptly repo create -distribution="$APT_SUITE" -component="$APT_COMPONENT" condash
+          if compgen -G "debs/*.deb" >/dev/null; then
+            aptly repo add condash debs/
+          else
+            echo "No .deb files found — publishing empty repo." >&2
+          fi
+          SNAPSHOT="release-$(date -u +%Y%m%d%H%M%S)"
+          aptly snapshot create "$SNAPSHOT" from repo condash
+          aptly publish snapshot \
+            -batch \
+            -gpg-key="$APT_SIGNING_KEY_FPR" \
+            -distribution="$APT_SUITE" \
+            "$SNAPSHOT" condash
+
+      - name: Assemble apt subtree into site/
+        run: |
+          set -euo pipefail
+          mkdir -p site/apt
+          # aptly publishes to ~/.aptly/public/<prefix>/ — we used
+          # prefix "condash", so its output is the apt root.
+          cp -r ~/.aptly/public/condash/. site/apt/
+          # Export the public key alongside the metadata so users can
+          # fetch it directly. Single source of truth: the GPG keyring
+          # we just imported, not a committed file.
+          gpg --armor --export "$APT_SIGNING_KEY_FPR" > site/apt/pubkey.asc
+          ls -la site/apt/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
