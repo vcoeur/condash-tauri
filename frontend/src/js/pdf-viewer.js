@@ -1,18 +1,18 @@
-/* Markdown-preview bundle — migrated verbatim from the inline <script type="module"> in dashboard.html on 2026-04-22 (F3/F4 of condash-frontend-split). */
-
 /* PDF.js viewer bootstrap.
    Loads the vendored pdfjs-dist library (under /vendor/pdfjs/ — served
-   by app.py:pdfjs_asset) and exposes window.__pdfjs = { mount, ready }.
-   The classic script above calls _mountPdfsIn() on any .note-pdf-host
-   after it renders a note, which either mounts immediately or marks
-   the host pending so this module can flush it once ready.
+   by the axum host's `/vendor/{*path}` route) and exposes
+   `window.__pdfjs = { mount(host), ready, error? }`. The note-preview
+   module's `_mountPdfsIn(container)` walks every `.note-pdf-host` it
+   finds and either calls `mount()` immediately when this module has
+   resolved or marks the host with `data-pdf-pending="1"` so the IIFE
+   below can flush it once ready.
 
    Why a custom viewer instead of stock pdfjs-dist web/viewer.html:
    * condash theme (toolbar uses --bg-card, --border, --accent, …);
-   * no 10 MB of unused viewer assets (locale strings, thumbnail panel,
+   * no ~10 MB of unused viewer assets (locale strings, thumbnail panel,
      annotation editor UI, print preview);
-   * direct access to the rendering loop for future integration with
-     the modal's note-search-bar (Find in PDF). */
+   * direct access to the rendering loop for the modal's
+     note-search-bar (Find in PDF). */
 (async function() {
     const COMMON = {
         cMapUrl: '/vendor/pdfjs/cmaps/',
@@ -548,7 +548,7 @@
         pagesEl.focus();
     }
 
-    window.__pdfjs = { lib: pdfjsLib, mount: mount, ready: true };
+    window.__pdfjs = { mount: mount, ready: true };
 
     // Flush any hosts that were marked pending before we finished loading.
     const pending = document.querySelectorAll('.note-pdf-host[data-pdf-pending="1"]');
