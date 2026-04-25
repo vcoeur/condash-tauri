@@ -18,19 +18,11 @@
      serve, mirroring the original.
    - `refreshAll()`        — the hard-refresh button. Invalidates the
      server-side caches via `/rescan` and does a real `location.reload`.
-   - `updateBaseline()`    — kept as a no-op stub. Old call sites in
-     `steps.js` invoked it after a successful mutation to "reset the
-     dirty baseline so the next /check-updates poll doesn't re-flag the
-     same node"; with the polling layer gone there's nothing to reset,
-     but leaving the symbol means we don't have to chase those call
-     sites in this PR.
 
-   The previously-exported `staleState`, `checkUpdates`,
-   `_scheduleCheckUpdates`, `_renderStale`, `_deriveLegacyFlags`,
-   `_autoReloadActiveTab`, `_idInTab`, `_tabForNodeId`,
-   `_minimalRoots` are gone — htmx + per-pane fragments cover their
-   work, and importing-but-not-calling them in dashboard-main is no
-   longer required. */
+   `staleState`, `checkUpdates`, `_scheduleCheckUpdates`, `_renderStale`,
+   `_deriveLegacyFlags`, `_autoReloadActiveTab`, `_idInTab`,
+   `_tabForNodeId`, `_minimalRoots`, `updateBaseline` are gone —
+   htmx + per-pane fragments cover their work. */
 
 import { _activeTab, _activeSubtab, _reloadInPlace, _applySubtab } from '../dashboard-main.js';
 import { reloadState } from './reload-guards.js';
@@ -38,10 +30,6 @@ import { _supportsFragmentFetch } from './local-subtree-reload.js';
 import { focusSafeSwap } from './dom-swap.js';
 import { restoreNotesTreeState } from './notes-tree-state.js';
 import { firePostReloadHooks } from './reload-hooks.js';
-
-/* No-op now — see header. Kept so steps.js can keep calling it
-   without an import-graph chase in this PR. */
-function updateBaseline() {}
 
 /* Hard refresh — last-resort escape hatch. Invalidates the
    server-side items/knowledge caches via /rescan, then does a real
@@ -104,4 +92,4 @@ async function reloadNode(nodeId) {
     }
 }
 
-export { reloadNode, refreshAll, updateBaseline };
+export { reloadNode, refreshAll };

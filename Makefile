@@ -230,8 +230,12 @@ update-htmx: ## Re-vendor htmx + sse + idiomorph extensions into frontend/vendor
 	echo "Downloading htmx $(HTMX_VERSION) + sse ext $(HTMX_SSE_EXT_VERSION) + idiomorph $(IDIOMORPH_VERSION)"; \
 	curl -sSL -o "$$DEST/htmx.min.js" \
 	    "https://unpkg.com/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js"; \
-	curl -sSL -o "$$DEST/htmx-ext-sse.js" \
+	curl -sSL -o "$$DEST/htmx-ext-sse.src.js" \
 	    "https://unpkg.com/htmx-ext-sse@$(HTMX_SSE_EXT_VERSION)/sse.js"; \
+	NPM_CONFIG_CACHE="$${TMPDIR:-/tmp}/.npm-cache" npx --yes esbuild@$(ESBUILD_VERSION) \
+	    "$$DEST/htmx-ext-sse.src.js" --minify --target=es2019 --legal-comments=none \
+	    --outfile="$$DEST/htmx-ext-sse.js" --log-level=warning; \
+	rm "$$DEST/htmx-ext-sse.src.js"; \
 	curl -sSL -o "$$DEST/idiomorph-ext.min.js" \
 	    "https://unpkg.com/idiomorph@$(IDIOMORPH_VERSION)/dist/idiomorph-ext.min.js"; \
 	{ \

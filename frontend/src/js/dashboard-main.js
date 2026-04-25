@@ -15,8 +15,6 @@
    initTabDragSideEffects() called at the bottom of this file. */
 
 import {
-    _termChipPointerDown, _termStartRename, _termDefaultLabel, _termCloseTab,
-    _termCreateTab, _termSyncOpenFlag, _loadTermShortcuts,
     toggleTerminal, termNewTab, termNewLauncherTab,
     termDragStart, termSplitStart, pasteRecentScreenshot,
     initTabDragSideEffects,
@@ -27,9 +25,6 @@ import {
 import {
     openAboutModal, closeAboutModal, initAboutModalSideEffects,
 } from './sections/about-modal.js';
-import {
-    _refreshShadowCache, _consumeShadowCache, _clearShadowCache,
-} from './sections/shadow-cache.js';
 import {
     openPath, openInTerminal, workOn, openFolder,
     gitToggleOpenPopover, gitClosePopovers, initGitActionsSideEffects,
@@ -42,32 +37,21 @@ import {
     _NOTES_OPEN_KEY, restoreNotesTreeState, initNotesTreeStateSideEffects,
 } from './sections/notes-tree-state.js';
 import {
-    _cm, _mountCm, _destroyCm, _cmRetheme,
-} from './sections/cm6-mount.js';
-import {
     initCm6ThemeSyncSideEffects,
 } from './sections/cm6-theme-sync.js';
 import {
     reloadState,
-    _noteModalDirty, _runnerActiveIn,
-    _defaultReloadSkipIf, _flushPendingReloads,
 } from './sections/reload-guards.js';
-import {
-    _supportsFragmentFetch,
-    _captureDetailsOpenState,
-    _restoreDetailsOpenState,
-} from './sections/local-subtree-reload.js';
 import {
     focusSafeSwap,
 } from './sections/dom-swap.js';
 import {
-    runnerReattachAll,
     runnerStart, runnerSwitch, runnerStop, runnerStopInline,
     runnerToggleCollapse, runnerForceStop, runnerJump, runnerPopout,
     initRunnerViewersSideEffects,
 } from './sections/runner-viewers.js';
 import {
-    updateBaseline, reloadNode, refreshAll,
+    reloadNode, refreshAll,
 } from './sections/stale-poll.js';
 import {
     initSseSideEffects,
@@ -253,7 +237,6 @@ async function pickPriority(file, val, wrap) {
     switchTab(_activeTab);
     if (_activeTab === 'projects') switchSubtab(_activeSubtab);
     updateTabCounts();
-    updateBaseline();
 }
 
 document.addEventListener('click', function(e) {
@@ -287,16 +270,9 @@ export async function _reloadInPlace() {
     if (_reloadInPlaceInFlight) { _reloadInPlacePending = true; return; }
     _reloadInPlaceInFlight = true;
     try {
-        // Phase 4: consume the shadow cache when present so a tab click
-        // that landed right after a background prefetch doesn't re-issue
-        // the same fetch. Any other path falls back to a live fetch.
-        var prefetched = _consumeShadowCache();
-        var html = prefetched;
-        if (!html) {
-            var res = await fetch('/', {cache: 'no-store'});
-            if (!res.ok) { location.reload(); return; }
-            html = await res.text();
-        }
+        var res = await fetch('/', {cache: 'no-store'});
+        if (!res.ok) { location.reload(); return; }
+        var html = await res.text();
         var fresh = new DOMParser()
             .parseFromString(html, 'text/html')
             .getElementById('dash-main');
@@ -332,13 +308,11 @@ export async function _reloadInPlace() {
 /* Re-apply state to the freshly-swapped #dash-main. Inline onclick
    attributes inside the new HTML are already wired by the browser;
    document/window-level listeners never went away. What's left is to
-   restore the active primary/sub tab selection and refresh counters
-   + the "stale" reload-indicator baseline. */
+   restore the active primary/sub tab selection and refresh counters. */
 function _rebindDashHandlers() {
     switchTab(_activeTab);
     if (_activeTab === 'projects') switchSubtab(_activeSubtab);
     updateTabCounts();
-    updateBaseline();
     _reapplySearches();
     restoreNotesTreeState();
 }
@@ -504,12 +478,14 @@ async function createNotesSubdir(readmePath, parentRelToItem) {
 }
 
 
-// The "Stale-detection polling" region (checkUpdates, _renderStale,
-// staleState, reloadNode, refreshAll, updateBaseline, …) now lives in
-// `sections/stale-poll.js`. The "SSE event stream" region
-// (_startEventStream, reconnect bookkeeping) now lives in
-// `sections/sse.js`. Both were extracted on 2026-04-24 as P-09 cut 3 —
-// see notes/05-p09-cut3.md for the design decisions.
+// What used to be the polling-based stale-detection region
+// (checkUpdates, _renderStale, staleState, …) is gone after the htmx
+// migration; only `reloadNode` + `refreshAll` survive in
+// `sections/stale-poll.js` (each pane refreshes itself via
+// `hx-trigger="sse:<tab>"`). The legacy EventSource lifecycle in
+// `sections/sse.js` is also gone — htmx-ext-sse owns the connection;
+// the module is now a 50-line bridge for the reconnecting pill +
+// note-modal reconcile.
 
 // The "Tab drag" region that used to live here (pointer-event drag,
 // tab create/close/rename, splitter drag, pane-resize drag, shortcuts,
