@@ -14,6 +14,13 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    # Swatinem/rust-cache@v2 auto-detects sccache and exports RUSTC_WRAPPER
+    # when it finds it on PATH. The hosted runner's sccache install is
+    # unreliable across image revisions — keep the wrapper unset so cargo
+    # invokes rustc directly. The cache action's actual cache hits work
+    # without it; we lose only the rustc-cache speedup.
+    env:
+      RUSTC_WRAPPER: ""
     steps:
       - uses: actions/checkout@v4
 
