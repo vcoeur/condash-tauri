@@ -27,7 +27,17 @@
     position: relative;
     border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.75rem;
     box-shadow: var(--shadow-sm); background: var(--bg-card);
-    transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+    /* `box-shadow` is intentionally not animated — the hover state still
+       changes shadow, but we let it snap instead of repainting a blurred
+       drop-shadow on every frame. `transform` is GPU-only and `border-color`
+       only repaints the border edge, so animating those is essentially free. */
+    transition: border-color 0.18s ease, transform 0.18s ease;
+    /* Each card is its own paint + layout atom, so an SSE-driven morph swap
+       invalidates only the changed cards instead of the full pane. The
+       :has(.pri-menu.open) rule below drops paint containment because the
+       open popover overflows the card's bottom edge — contain:paint would
+       clip it. */
+    contain: layout paint;
 }
 .card:hover {
     box-shadow: var(--shadow-md);
@@ -37,7 +47,7 @@
 /* Lift the card above later siblings while its status popover is open — the
    popover overflows the card's bottom edge and would otherwise paint behind
    the next card in DOM order. */
-.card:has(.pri-menu.open) { position: relative; z-index: 10; }
+.card:has(.pri-menu.open) { position: relative; z-index: 10; contain: layout; }
 .card[data-kind="incident"] { border-left: 3px solid var(--card-incident-border); background: var(--card-incident); }
 .card[data-kind="project"] { border-left: 3px solid var(--card-project-border); background: var(--card-project); }
 .card[data-kind="document"] { border-left: 3px solid var(--card-document-border); background: var(--card-document); }

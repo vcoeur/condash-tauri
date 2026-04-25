@@ -125,6 +125,7 @@
     background: transparent;
     cursor: pointer;
     transition: border-color 0.12s, background 0.12s;
+    contain: layout paint;
 }
 .knowledge-card:hover {
     background: var(--bg-card-hover);
