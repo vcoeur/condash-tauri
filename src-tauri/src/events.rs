@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use notify::event::{CreateKind, RemoveKind};
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tokio::sync::broadcast;
@@ -178,6 +179,11 @@ pub struct WatchConfig {
     pub projects: Option<PathBuf>,
     pub knowledge: Option<PathBuf>,
     pub git_dirs: Vec<PathBuf>,
+    /// Parent directory of git worktrees (typically `~/src/worktrees/`).
+    /// Watched non-recursively so a brand-new branch directory landing at
+    /// runtime triggers a `code` pane refresh — the per-`.git/` watchers
+    /// in `git_dirs` only cover subdirs that existed at startup.
+    pub worktrees_root: Option<PathBuf>,
 }
 
 impl WatchConfig {
@@ -210,6 +216,7 @@ impl WatchConfig {
             projects: projects.is_dir().then_some(projects),
             knowledge: knowledge.is_dir().then_some(knowledge),
             git_dirs,
+            worktrees_root: worktrees.and_then(|wt| wt.is_dir().then(|| wt.to_path_buf())),
         }
     }
 }
@@ -259,15 +266,19 @@ pub fn classify(path: &Path, cfg: &WatchConfig) -> Option<PathClass> {
                     _ => None,
                 })
                 .collect();
-            if parts.len() >= 2 {
+            if parts.len() >= 3 {
                 // Past the slug dir → item-internal.
                 return Some(PathClass {
                     pane: "projects",
                     id: Some(parts[1].to_string()),
                 });
             }
-            // Path is `projects/` itself or `projects/<month>/` — a
-            // structural change (new item dir landed, deletion, etc.).
+            // Path is `projects/`, `projects/<month>/`, or
+            // `projects/<month>/<slug>/` itself — a structural change
+            // (new item dir landed, deletion, etc.). The slug-dir-self
+            // event has to land on the pane-wide debouncer key, not the
+            // per-item one, so the README write that follows isn't
+            // suppressed by a key collision.
             return Some(PathClass {
                 pane: "projects",
                 id: None,
@@ -316,6 +327,18 @@ pub fn classify(path: &Path, cfg: &WatchConfig) -> Option<PathClass> {
             return Some(PathClass {
                 pane: "code",
                 id: repo,
+            });
+        }
+    }
+    // Direct child of the worktrees root — a brand-new branch dir
+    // landed (or an existing one was renamed/removed). Coarse code-pane
+    // event so the frontend re-runs `git worktree list` and picks up
+    // the new entry.
+    if let Some(root) = &cfg.worktrees_root {
+        if path.starts_with(root) {
+            return Some(PathClass {
+                pane: "code",
+                id: None,
             });
         }
     }
@@ -378,8 +401,10 @@ pub fn spawn_cache_invalidator(
 /// the shared `Arc`, so events reach every SSE subscriber without
 /// blocking the HTTP runtime.
 pub fn start_watcher(bus: EventBus, cfg: WatchConfig) -> Option<WatcherHandle> {
-    let nothing_to_watch =
-        cfg.projects.is_none() && cfg.knowledge.is_none() && cfg.git_dirs.is_empty();
+    let nothing_to_watch = cfg.projects.is_none()
+        && cfg.knowledge.is_none()
+        && cfg.git_dirs.is_empty()
+        && cfg.worktrees_root.is_none();
     if nothing_to_watch {
         return None;
     }
@@ -394,6 +419,7 @@ pub fn start_watcher(bus: EventBus, cfg: WatchConfig) -> Option<WatcherHandle> {
         projects: cfg.projects.clone(),
         knowledge: cfg.knowledge.clone(),
         git_dirs: cfg.git_dirs.clone(),
+        worktrees_root: cfg.worktrees_root.clone(),
     };
 
     let mut watcher = recommended_watcher(move |res: notify::Result<Event>| {
@@ -413,17 +439,28 @@ pub fn start_watcher(bus: EventBus, cfg: WatchConfig) -> Option<WatcherHandle> {
             // noise (objects/, lock churn). The check has to live here,
             // not in `classify`, because `classify` is also called from
             // tests with synthetic paths.
-            if cfg_for_classify
-                .git_dirs
-                .iter()
-                .any(|g| src.starts_with(g))
+            if cfg_for_classify.git_dirs.iter().any(|g| src.starts_with(g))
                 && !matches!(leaf.as_str(), "HEAD" | "index" | "packed-refs")
             {
                 continue;
             }
-            let Some(class) = classify(src, &cfg_for_classify) else {
+            let Some(mut class) = classify(src, &cfg_for_classify) else {
                 continue;
             };
+            // Directory create/remove events under `projects/` always
+            // ride the pane-wide debouncer key. Without this, mkdir of
+            // `<slug>/notes/` (per-item key) suppresses the README
+            // write event that follows in the same 750 ms window — the
+            // exact race that left new projects invisible until the
+            // user clicked hard-refresh.
+            if class.pane == "projects"
+                && matches!(
+                    event.kind,
+                    EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder)
+                )
+            {
+                class.id = None;
+            }
             let payload = match &class.id {
                 Some(id) => EventPayload::for_item(class.pane, id),
                 None => EventPayload::for_tab(class.pane),
@@ -445,6 +482,13 @@ pub fn start_watcher(bus: EventBus, cfg: WatchConfig) -> Option<WatcherHandle> {
     }
     for gitdir in &cfg.git_dirs {
         let _ = watcher.watch(gitdir, RecursiveMode::NonRecursive);
+    }
+    if let Some(wt) = &cfg.worktrees_root {
+        // Non-recursive on purpose: we only care about new top-level
+        // branch dirs landing here. Recursive would drown the bus in
+        // `<branch>/<repo>/.git/objects/` churn that the per-`.git/`
+        // watchers above already handle.
+        let _ = watcher.watch(wt, RecursiveMode::NonRecursive);
     }
 
     Some(WatcherHandle { _watcher: watcher })
@@ -543,6 +587,39 @@ mod tests {
         let p = base.join("projects/2026-04");
         let c = classify(&p, &cfg).unwrap();
         assert_eq!(c.pane, "projects");
+        assert!(c.id.is_none());
+
+        // The slug dir itself → structural (regression: previously
+        // classified as per-item, which collided with the README write
+        // on the debouncer and left new projects invisible).
+        let p = base.join("projects/2026-04/2026-04-22-foo");
+        let c = classify(&p, &cfg).unwrap();
+        assert_eq!(c.pane, "projects");
+        assert!(c.id.is_none());
+    }
+
+    #[test]
+    fn watch_config_picks_up_worktrees_root() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+        let wt = base.join("worktrees");
+        std::fs::create_dir_all(&wt).unwrap();
+        let cfg = WatchConfig::from_ctx(base, None, Some(&wt));
+        assert_eq!(cfg.worktrees_root.as_deref(), Some(wt.as_path()));
+    }
+
+    #[test]
+    fn classify_routes_new_worktree_dir_to_code_pane() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+        let wt = base.join("worktrees");
+        std::fs::create_dir_all(&wt).unwrap();
+        let cfg = WatchConfig::from_ctx(base, None, Some(&wt));
+
+        // Direct child of worktrees/ — a brand-new branch dir landed.
+        let p = wt.join("feature-x");
+        let c = classify(&p, &cfg).unwrap();
+        assert_eq!(c.pane, "code");
         assert!(c.id.is_none());
     }
 
