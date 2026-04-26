@@ -161,10 +161,7 @@ pub fn build_router(state: AppState) -> Router {
             "/fragment/projects/{slug}",
             get(shell::fragment_projects_one),
         )
-        .route(
-            "/fragment/history/{slug}",
-            get(shell::fragment_history_one),
-        )
+        .route("/fragment/history/{slug}", get(shell::fragment_history_one))
         .route(
             "/fragment/knowledge/one",
             get(shell::fragment_knowledge_one),

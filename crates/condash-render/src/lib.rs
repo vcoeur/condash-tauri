@@ -501,10 +501,10 @@ mod tests {
             .expect("found entry");
         assert!(html.contains("class=\"knowledge-card\""));
         assert!(html.contains("Condash"));
-        assert!(html.contains(
-            "hx-trigger=\"sse:knowledge-knowledge/internal/condash.md\""
-        ));
-        assert!(html.contains("hx-get=\"/fragment/knowledge/one?path=knowledge/internal/condash.md\""));
+        assert!(html.contains("hx-trigger=\"sse:knowledge-knowledge/internal/condash.md\""));
+        assert!(
+            html.contains("hx-get=\"/fragment/knowledge/one?path=knowledge/internal/condash.md\"")
+        );
         // Missing path returns None.
         assert!(render_one_knowledge_card(Some(&root), "knowledge/missing.md").is_none());
     }
