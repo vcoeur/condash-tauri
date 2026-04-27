@@ -42,29 +42,47 @@ jobs:
   release-init:
     name: release-init
     runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create draft release for this tag
+      - name: Create or find draft release for this tag
+        id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; skipping create."
-            exit 0
-          fi
-          gh release create "$TAG" \
-            --draft \
-            --title "condash-tauri $TAG" \
-            --notes "Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
+          # Look for an existing draft for this tag — drafts created
+          # by gh have URL slug `untagged-XXX` (the git tag is bound
+          # only at publish time), so we match on tag_name + draft via
+          # the API rather than `gh release view <tag>`.
+          ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
+                 --jq ".[] | select(.tag_name==\"$TAG\" and .draft==true) | .id" \
+                 | head -n 1)
+          if [[ -z "$ID" ]]; then
+            gh release create "$TAG" \
+              --draft \
+              --title "condash-tauri $TAG" \
+              --notes "Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
 
           Install bypass per OS: see docs/guides/install-desktop.md.
 
           - Windows: SmartScreen → \"More info\" → \"Run anyway\".
           - macOS: System Settings → Privacy & Security → \"Open Anyway\".
           - Linux: \`chmod +x\` the AppImage, run."
+            ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
+                   --jq ".[] | select(.tag_name==\"$TAG\" and .draft==true) | .id" \
+                   | head -n 1)
+          fi
+          if [[ -z "$ID" ]]; then
+            echo "Failed to resolve release id for $TAG" >&2
+            exit 1
+          fi
+          echo "Resolved release id: $ID"
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
 
   # Build the frontend bundle once on Linux and hand it to each per-OS
   # bundle job as an artifact. `frontend/dist/` is gitignored — the
@@ -166,21 +184,15 @@ jobs:
         with:
           # tauri.conf.json lives under src-tauri/.
           projectPath: src-tauri
-          # Reuse the GitHub-provided tag for the release name. The
-          # `__VERSION__` placeholder gets substituted by the action
-          # against the bumped Cargo.toml version.
-          tagName: ${{ github.ref_name }}
-          releaseName: 'condash-tauri ${{ github.ref_name }}'
-          releaseBody: |
-            Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
-
-            Install bypass per OS: see docs/guides/install-desktop.md.
-
-            - Windows: SmartScreen → "More info" → "Run anyway".
-            - macOS: System Settings → Privacy & Security → "Open Anyway".
-            - Linux: `chmod +x` the AppImage, run.
-          releaseDraft: true
-          prerelease: false
+          # Attach to the draft pre-created by `release-init` rather
+          # than letting tauri-action look it up by tag — drafts have
+          # an `untagged-XXX` URL slug until publish, so the by-tag
+          # lookup misses and each matrix job ends up creating its
+          # own ghost draft (assets fragment, /releases page renders
+          # empty). With `releaseId` set, tauri-action skips the
+          # lookup and uploads directly. Title/body/draft/prerelease
+          # are owned by `release-init` and ignored here.
+          releaseId: ${{ needs.release-init.outputs.release_id }}
 
       # linuxdeploy wraps the stock AppImageKit `AppRun.wrapped` binary,
       # which unconditionally exports PYTHONHOME/PYTHONPATH/PERLLIB/…
