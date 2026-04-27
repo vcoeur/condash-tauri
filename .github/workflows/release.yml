@@ -31,6 +31,56 @@ permissions:
   contents: write
 
 jobs:
+  # Pre-create the draft release for this tag and hand its numeric id
+  # to the matrix below. Without this, each per-OS bundle job runs
+  # tauri-action in parallel, each one's "look up draft by tag" misses
+  # (drafts have URL slug `untagged-XXX` and the by-tag API doesn't
+  # return them), each creates its own untagged draft, and assets
+  # fragment across multiple drafts — concretely, on v1.8.8 macOS
+  # ended up on a different draft from the one that got published, so
+  # the published release shipped with no .dmg.
+  #
+  # `gh api -X POST` returns the new release's id directly, avoiding
+  # the subsecond-propagation lag we hit on v1.8.5 when we tried to
+  # `gh release create` and then list-query for the new id. The draft
+  # is created via the workflow's GITHUB_TOKEN (so the author is
+  # `github-actions[bot]` — that's fine; drafts are reached through
+  # the Drafts sub-page or a direct URL regardless of author).
+  release-init:
+    name: release-init
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or find draft release for this tag
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
+                 --jq "[.[] | select(.tag_name==\"$TAG\" and .draft==true)][0].id // empty")
+          if [[ -z "$ID" ]]; then
+            BODY=$'Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).\n\nInstall bypass per OS: see docs/guides/install-desktop.md.\n\n- Windows: SmartScreen → "More info" → "Run anyway".\n- macOS: System Settings → Privacy & Security → "Open Anyway".\n- Linux: `chmod +x` the AppImage, run.'
+            ID=$(gh api -X POST "repos/$GH_REPO/releases" \
+              -f tag_name="$TAG" \
+              -F draft=true \
+              -F prerelease=false \
+              -f name="condash-tauri $TAG" \
+              -f body="$BODY" \
+              --jq .id)
+          fi
+          if [[ -z "$ID" ]]; then
+            echo "Failed to resolve release id for $TAG" >&2
+            exit 1
+          fi
+          echo "Resolved release id: $ID"
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
+
   # Build the frontend bundle once on Linux and hand it to each per-OS
   # bundle job as an artifact. `frontend/dist/` is gitignored — the
   # bundle must exist on disk when tauri-action runs `cargo tauri build`
@@ -58,7 +108,7 @@ jobs:
           retention-days: 1
 
   build:
-    needs: frontend
+    needs: [release-init, frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -131,21 +181,12 @@ jobs:
         with:
           # tauri.conf.json lives under src-tauri/.
           projectPath: src-tauri
-          # Reuse the GitHub-provided tag for the release name. The
-          # `__VERSION__` placeholder gets substituted by the action
-          # against the bumped Cargo.toml version.
-          tagName: ${{ github.ref_name }}
-          releaseName: 'condash-tauri ${{ github.ref_name }}'
-          releaseBody: |
-            Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
-
-            Install bypass per OS: see docs/guides/install-desktop.md.
-
-            - Windows: SmartScreen → "More info" → "Run anyway".
-            - macOS: System Settings → Privacy & Security → "Open Anyway".
-            - Linux: `chmod +x` the AppImage, run.
-          releaseDraft: true
-          prerelease: false
+          # Attach to the draft pre-created by `release-init`. Title,
+          # body, draft, prerelease are owned by that job and ignored
+          # here — passing `releaseId` skips tauri-action's by-tag
+          # lookup, which is what fragments matrix runs into multiple
+          # drafts when we let it manage releases itself.
+          releaseId: ${{ needs.release-init.outputs.release_id }}
 
       # linuxdeploy wraps the stock AppImageKit `AppRun.wrapped` binary,
       # which unconditionally exports PYTHONHOME/PYTHONPATH/PERLLIB/…
