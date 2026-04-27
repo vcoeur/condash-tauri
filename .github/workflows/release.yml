@@ -60,22 +60,20 @@ jobs:
           # only at publish time), so we match on tag_name + draft via
           # the API rather than `gh release view <tag>`.
           ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
-                 --jq ".[] | select(.tag_name==\"$TAG\" and .draft==true) | .id" \
-                 | head -n 1)
+                 --jq "[.[] | select(.tag_name==\"$TAG\" and .draft==true)][0].id // empty")
           if [[ -z "$ID" ]]; then
-            gh release create "$TAG" \
-              --draft \
-              --title "condash-tauri $TAG" \
-              --notes "Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
-
-          Install bypass per OS: see docs/guides/install-desktop.md.
-
-          - Windows: SmartScreen → \"More info\" → \"Run anyway\".
-          - macOS: System Settings → Privacy & Security → \"Open Anyway\".
-          - Linux: \`chmod +x\` the AppImage, run."
-            ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
-                   --jq ".[] | select(.tag_name==\"$TAG\" and .draft==true) | .id" \
-                   | head -n 1)
+            # Create directly via the API so the response gives us the
+            # numeric id immediately. `gh release create` only prints
+            # the URL and a follow-up list query can hit subsecond
+            # propagation lag (failure mode observed on v1.8.5).
+            BODY=$'Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).\n\nInstall bypass per OS: see docs/guides/install-desktop.md.\n\n- Windows: SmartScreen → "More info" → "Run anyway".\n- macOS: System Settings → Privacy & Security → "Open Anyway".\n- Linux: `chmod +x` the AppImage, run.'
+            ID=$(gh api -X POST "repos/$GH_REPO/releases" \
+              -f tag_name="$TAG" \
+              -F draft=true \
+              -F prerelease=false \
+              -f name="condash-tauri $TAG" \
+              -f body="$BODY" \
+              --jq .id)
           fi
           if [[ -z "$ID" ]]; then
             echo "Failed to resolve release id for $TAG" >&2
