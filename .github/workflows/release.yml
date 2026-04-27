@@ -31,65 +31,6 @@ permissions:
   contents: write
 
 jobs:
-  # Pre-create the draft release for this tag so the parallel matrix
-  # below all attach to the same draft. Without this, each per-OS job
-  # races on tauri-action's "look for draft / create if missing" check
-  # and ends up creating its own untagged ghost draft — assets get
-  # fragmented across 3 drafts and the /releases page shows none of
-  # them (untagged drafts don't surface there). See
-  # conception/projects/2026-04/2026-04-27-condash-tauri-spinoff for
-  # the v1.8.3 incident that prompted this.
-  release-init:
-    name: release-init
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create.outputs.release_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create or find draft release for this tag
-        id: create
-        # Use a personal access token here so the draft is authored by
-        # the repo maintainer rather than `github-actions[bot]`. Drafts
-        # owned by the bot are invisible on GitHub's /releases web tab
-        # (it only surfaces drafts whose author == current viewer);
-        # PAT-authored drafts show up normally and can be published
-        # from the UI without chasing untagged-XXX direct URLs. The
-        # bundle jobs below keep the default GITHUB_TOKEN — they only
-        # need contents:write to upload assets to an existing release.
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          TAG: ${{ github.ref_name }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          # Look for an existing draft for this tag — drafts created
-          # by gh have URL slug `untagged-XXX` (the git tag is bound
-          # only at publish time), so we match on tag_name + draft via
-          # the API rather than `gh release view <tag>`.
-          ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
-                 --jq "[.[] | select(.tag_name==\"$TAG\" and .draft==true)][0].id // empty")
-          if [[ -z "$ID" ]]; then
-            # Create directly via the API so the response gives us the
-            # numeric id immediately. `gh release create` only prints
-            # the URL and a follow-up list query can hit subsecond
-            # propagation lag (failure mode observed on v1.8.5).
-            BODY=$'Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).\n\nInstall bypass per OS: see docs/guides/install-desktop.md.\n\n- Windows: SmartScreen → "More info" → "Run anyway".\n- macOS: System Settings → Privacy & Security → "Open Anyway".\n- Linux: `chmod +x` the AppImage, run.'
-            ID=$(gh api -X POST "repos/$GH_REPO/releases" \
-              -f tag_name="$TAG" \
-              -F draft=true \
-              -F prerelease=false \
-              -f name="condash-tauri $TAG" \
-              -f body="$BODY" \
-              --jq .id)
-          fi
-          if [[ -z "$ID" ]]; then
-            echo "Failed to resolve release id for $TAG" >&2
-            exit 1
-          fi
-          echo "Resolved release id: $ID"
-          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
-
   # Build the frontend bundle once on Linux and hand it to each per-OS
   # bundle job as an artifact. `frontend/dist/` is gitignored — the
   # bundle must exist on disk when tauri-action runs `cargo tauri build`
@@ -117,7 +58,7 @@ jobs:
           retention-days: 1
 
   build:
-    needs: [release-init, frontend]
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -190,15 +131,21 @@ jobs:
         with:
           # tauri.conf.json lives under src-tauri/.
           projectPath: src-tauri
-          # Attach to the draft pre-created by `release-init` rather
-          # than letting tauri-action look it up by tag — drafts have
-          # an `untagged-XXX` URL slug until publish, so the by-tag
-          # lookup misses and each matrix job ends up creating its
-          # own ghost draft (assets fragment, /releases page renders
-          # empty). With `releaseId` set, tauri-action skips the
-          # lookup and uploads directly. Title/body/draft/prerelease
-          # are owned by `release-init` and ignored here.
-          releaseId: ${{ needs.release-init.outputs.release_id }}
+          # Reuse the GitHub-provided tag for the release name. The
+          # `__VERSION__` placeholder gets substituted by the action
+          # against the bumped Cargo.toml version.
+          tagName: ${{ github.ref_name }}
+          releaseName: 'condash-tauri ${{ github.ref_name }}'
+          releaseBody: |
+            Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
+
+            Install bypass per OS: see docs/guides/install-desktop.md.
+
+            - Windows: SmartScreen → "More info" → "Run anyway".
+            - macOS: System Settings → Privacy & Security → "Open Anyway".
+            - Linux: `chmod +x` the AppImage, run.
+          releaseDraft: true
+          prerelease: false
 
       # linuxdeploy wraps the stock AppImageKit `AppRun.wrapped` binary,
       # which unconditionally exports PYTHONHOME/PYTHONPATH/PERLLIB/…
