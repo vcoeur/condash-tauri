@@ -11,7 +11,7 @@ By the end, you'll have condash installed, running against the bundled `concepti
 
 ## 1. Install condash
 
-The fastest path is a prebuilt installer from the [GitHub Releases page](https://github.com/vcoeur/condash/releases). Each release ships a per-OS bundle:
+The fastest path is a prebuilt installer from the [GitHub Releases page](https://github.com/vcoeur/condash-tauri/releases). Each release ships a per-OS bundle:
 
 | Platform | Artifact |
 |---|---|
@@ -33,15 +33,15 @@ That's the same pipeline CI uses. You'll need a Rust toolchain and, on Linux, th
 
 ## 2. Fetch the demo tree
 
-The condash repo ships a realistic demo tree at [`examples/conception-demo/`](https://github.com/vcoeur/condash/tree/main/examples/conception-demo). It has nine items, all six statuses, a knowledge tree, and two deliverable PDFs — enough for every feature in the rest of the tutorials to have something to act on.
+The condash repo ships a realistic demo tree at [`examples/conception-demo/`](https://github.com/vcoeur/condash-tauri/tree/main/examples/conception-demo). It has nine items, all six statuses, a knowledge tree, and two deliverable PDFs — enough for every feature in the rest of the tutorials to have something to act on.
 
 Copy it into a working location:
 
 ```bash
 mkdir -p ~/conception-demo
-curl -fsSL https://codeload.github.com/vcoeur/condash/tar.gz/main \
+curl -fsSL https://codeload.github.com/vcoeur/condash-tauri/tar.gz/main \
   | tar -xz --strip-components=2 -C ~/conception-demo \
-      condash-main/examples/conception-demo
+      condash-tauri-main/examples/conception-demo
 ```
 
 Inspect what you got:

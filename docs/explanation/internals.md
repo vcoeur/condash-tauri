@@ -13,7 +13,7 @@ The stack: **axum** serves HTTP; **Tauri** wraps it in a native window; **rust-e
 
 ### Discovery
 
-`collect_items` in [`crates/condash-parser/src/collect.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/collect.rs) performs a single glob:
+`collect_items` in [`crates/condash-parser/src/collect.rs`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-parser/src/collect.rs) performs a single glob:
 
 ```
 <base_dir>/projects/*/*/README.md
@@ -70,7 +70,7 @@ The key design choice is what each hash **doesn't** include:
 - `projects/<priority>/<slug>` deliberately excludes the priority. Dragging a card across columns re-keys the id (new path), not re-hashes the card content — so the DOM can detach-and-reinsert, but the card's innerHTML survives.
 - The whole-tab hash covers the `(priority, slug)` set so that card adds / removes / moves do bubble up. A card content edit doesn't — only its card hash changes, only its `/fragment` is refetched.
 
-See [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/fingerprint.rs) for the computation and [HTTP API](../reference/http-api.md#change-polling) for the route shape.
+See [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-parser/src/fingerprint.rs) for the computation and [HTTP API](../reference/http-api.md#change-polling) for the route shape.
 
 Hashes are MD5 truncated to 16 hex chars. MD5 is fine here — this is an equality check, not a security primitive, and the 64-bit output is plenty to avoid collisions on trees of a few thousand items.
 
@@ -159,11 +159,11 @@ The dashboard's JavaScript and CSS live under `frontend/src/`:
 
 **Build step** is `make frontend`. It invokes esbuild transiently via `npx --yes esbuild@<pinned>` — **no `node_modules/` is ever created**; the tool runs, writes its output, and exits. Output lands in `frontend/dist/bundle.{js,css}`.
 
-**Embedding.** `frontend/dist/` is compiled into the Rust binary via `rust-embed` — see [`src-tauri/src/assets.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/assets.rs). The release binary carries the built bundle with it, so there's no runtime file-system lookup for the dashboard's own assets.
+**Embedding.** `frontend/dist/` is compiled into the Rust binary via `rust-embed` — see [`src-tauri/src/assets.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/assets.rs). The release binary carries the built bundle with it, so there's no runtime file-system lookup for the dashboard's own assets.
 
 **Committed output.** The built `frontend/dist/bundle.{js,css}` files are **committed** to git, so `cargo build` works on a machine with no Node toolchain. `make frontend` is only needed when you edit a source file under `frontend/src/`.
 
-**Serving.** `/assets/dist/{rel_path}` is a path-validated static route in [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/server.rs). In development, set `CONDASH_ASSET_DIR=frontend/` to serve from disk instead of the embedded copy.
+**Serving.** `/assets/dist/{rel_path}` is a path-validated static route in [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/server.rs). In development, set `CONDASH_ASSET_DIR=frontend/` to serve from disk instead of the embedded copy.
 
 **Shell discipline.** `frontend/dashboard.html` is structural-only. No inline `<script>` or `<style>` blocks — everything goes through the bundle. A size guard in the test suite fails if the file grows past a conservative threshold, catching drift back to the old monolithic layout.
 
@@ -207,9 +207,9 @@ All four live under `frontend/vendor/<name>/` and are served behind path-validat
 
 None of this is novel. The interesting parts are what we **didn't** build: no cache, no watcher, no schema, no lock files, no auth, no sync. The dashboard is a thin axum + Tauri layer over a directory of Markdown files, and the design is almost entirely about keeping it that way as features accumulate.
 
-If you want to contribute or poke deeper, the [source on GitHub](https://github.com/vcoeur/condash) is split across the Rust workspace. Good starting points:
+If you want to contribute or poke deeper, the [source on GitHub](https://github.com/vcoeur/condash-tauri) is split across the Rust workspace. Good starting points:
 
-- [`crates/condash-parser/src/collect.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/collect.rs) — the tree walker.
-- [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-parser/src/fingerprint.rs) — the change-polling hash computation.
-- [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs) — the write surface; compare against the [mutation model reference](../reference/mutations.md) for overlap.
-- [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/server.rs) — every HTTP route, plus the PTY session registry.
+- [`crates/condash-parser/src/collect.rs`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-parser/src/collect.rs) — the tree walker.
+- [`crates/condash-parser/src/fingerprint.rs`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-parser/src/fingerprint.rs) — the change-polling hash computation.
+- [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-mutations/src/lib.rs) — the write surface; compare against the [mutation model reference](../reference/mutations.md) for overlap.
+- [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/server.rs) — every HTTP route, plus the PTY session registry.

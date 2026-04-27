@@ -13,7 +13,7 @@ The Tauri builds of condash are **unsigned on purpose**. Signing Windows and mac
 
 > **Debian/Ubuntu users**: skip the download and jump to [Linux — apt repository](#linux--apt-repository-recommended) below — `apt` will fetch the package and keep it up to date for you.
 
-Start at the [latest release page](https://github.com/vcoeur/condash/releases/latest) and pick the artifact for your OS:
+Start at the [latest release page](https://github.com/vcoeur/condash-tauri/releases/latest) and pick the artifact for your OS:
 
 | OS | Artifact | Typical size |
 |---|---|---|
@@ -22,7 +22,7 @@ Start at the [latest release page](https://github.com/vcoeur/condash/releases/la
 | macOS | `condash_<version>_<arch>.dmg` | ~50 MB |
 | Windows | `condash_<version>_x64_en-US.msi` | ~20 MB |
 
-If the page says "No releases" or looks empty, the latest version may still be in draft state. Check **[All releases](https://github.com/vcoeur/condash/releases)** — draft releases are visible to the repo maintainer only. See **[Releases](releases.md)** for the full story.
+If the page says "No releases" or looks empty, the latest version may still be in draft state. Check **[All releases](https://github.com/vcoeur/condash-tauri/releases)** — draft releases are visible to the repo maintainer only. See **[Releases](releases.md)** for the full story.
 
 ## Linux — AppImage
 
@@ -42,15 +42,15 @@ sudo dnf install webkit2gtk4.1 libappindicator-gtk3               # Fedora
 
 ## Linux — apt repository (recommended)
 
-A signed apt repository at `condash.vcoeur.com/apt/` lets `apt` track new versions for you — `apt upgrade` becomes the update mechanism.
+A signed apt repository at `condash-tauri.vcoeur.com/apt/` lets `apt` track new versions for you — `apt upgrade` becomes the update mechanism.
 
 One-time setup:
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://condash.vcoeur.com/apt/pubkey.asc \
+curl -fsSL https://condash-tauri.vcoeur.com/apt/pubkey.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/condash.gpg
-echo "deb [signed-by=/etc/apt/keyrings/condash.gpg] https://condash.vcoeur.com/apt stable main" \
+echo "deb [signed-by=/etc/apt/keyrings/condash.gpg] https://condash-tauri.vcoeur.com/apt stable main" \
   | sudo tee /etc/apt/sources.list.d/condash.list
 
 sudo apt update

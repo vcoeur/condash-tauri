@@ -9,7 +9,10 @@ name: release
 # Trigger: push a tag matching `v*` (e.g. `v1.0.0`). The `tauri-v*`
 # prefix-workaround was retired on 2026-04-22 when the repo swap made
 # this the sole release pipeline in the Rust `condash` repo (see
-# conception/projects/2026-04/2026-04-22-condash-repo-swap).
+# conception/projects/2026-04/2026-04-22-condash-repo-swap). On
+# 2026-04-27 the Tauri lineage was spun off into vcoeur/condash-tauri
+# (project 2026-04-27-condash-tauri-spinoff) — this workflow now ships
+# releases of the preserved Tauri build from there.
 #
 # Build handoff: `tauri-apps/tauri-action` per OS:
 #   * runs `cargo tauri build`,
@@ -132,9 +135,9 @@ jobs:
           # `__VERSION__` placeholder gets substituted by the action
           # against the bumped Cargo.toml version.
           tagName: ${{ github.ref_name }}
-          releaseName: 'condash ${{ github.ref_name }}'
+          releaseName: 'condash-tauri ${{ github.ref_name }}'
           releaseBody: |
-            Unsigned Tauri build of condash.
+            Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
 
             Install bypass per OS: see docs/guides/install-desktop.md.
 

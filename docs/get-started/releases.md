@@ -5,7 +5,7 @@ description: How to find the latest condash release, what the version scheme mea
 
 # Releases
 
-condash is shipped as a pre-built desktop binary on GitHub Releases. This page is about **finding the right version** — one link above all else: **[releases/latest](https://github.com/vcoeur/condash/releases/latest)**.
+condash is shipped as a pre-built desktop binary on GitHub Releases. This page is about **finding the right version** — one link above all else: **[releases/latest](https://github.com/vcoeur/condash-tauri/releases/latest)**.
 
 ## Version scheme
 
@@ -23,8 +23,8 @@ Patches are the norm. Most weeks there's at least one; MINOR bumps are rarer, MA
 
 Three paths:
 
-- **The latest-release shortcut.** `https://github.com/vcoeur/condash/releases/latest` always redirects to the current top published release. If you don't care about the version number, start there.
-- **The all-releases list.** `https://github.com/vcoeur/condash/releases` shows the chronological list. Scroll to see changelogs per release.
+- **The latest-release shortcut.** `https://github.com/vcoeur/condash-tauri/releases/latest` always redirects to the current top published release. If you don't care about the version number, start there.
+- **The all-releases list.** `https://github.com/vcoeur/condash-tauri/releases` shows the chronological list. Scroll to see changelogs per release.
 - **The dashboard footer.** Running condash shows the version in the footer of the main window. Click it to open the release page for that exact version.
 
 ## Release notes
@@ -37,7 +37,7 @@ Each release carries:
 
 ## Draft releases
 
-If the [latest-release](https://github.com/vcoeur/condash/releases/latest) URL 404s or shows a release older than you expect, the newest build is probably still in **draft state**. Draft releases are:
+If the [latest-release](https://github.com/vcoeur/condash-tauri/releases/latest) URL 404s or shows a release older than you expect, the newest build is probably still in **draft state**. Draft releases are:
 
 - Visible to the maintainer only.
 - Usually published within a few hours of the draft appearing.

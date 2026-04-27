@@ -16,7 +16,7 @@ description: Live desktop dashboard for a Markdown-first project-tracking conven
 
 **Linux, macOS, Windows** — download the installer for your OS from the latest GitHub Release:
 
-→ **[github.com/vcoeur/condash/releases/latest](https://github.com/vcoeur/condash/releases/latest)**
+→ **[github.com/vcoeur/condash-tauri/releases/latest](https://github.com/vcoeur/condash-tauri/releases/latest)**
 
 | OS | File to download |
 |---|---|
@@ -29,8 +29,8 @@ The builds are **unsigned** — each OS asks you to confirm once on first launch
 Building from source (need a [rustup](https://rustup.rs) toolchain on 1.77+ and, on Linux, the usual Tauri system deps):
 
 ```bash
-git clone https://github.com/vcoeur/condash.git
-cd condash
+git clone https://github.com/vcoeur/condash-tauri.git
+cd condash-tauri
 make setup      # one-off — installs cargo-tauri
 make frontend   # bundle frontend/src/ to frontend/dist/ (required on every clone)
 make run        # open a dev window
@@ -60,7 +60,7 @@ make run        # open a dev window
 
 ## Links
 
-- [Source on GitHub](https://github.com/vcoeur/condash)
-- [Latest release](https://github.com/vcoeur/condash/releases/latest)
-- [All releases](https://github.com/vcoeur/condash/releases)
+- [Source on GitHub](https://github.com/vcoeur/condash-tauri)
+- [Latest release](https://github.com/vcoeur/condash-tauri/releases/latest)
+- [All releases](https://github.com/vcoeur/condash-tauri/releases)
 - [Author](https://vcoeur.com)

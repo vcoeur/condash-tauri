@@ -1,11 +1,11 @@
-site_name: condash
-site_url: https://condash.vcoeur.com/
+site_name: condash (Tauri)
+site_url: https://condash-tauri.vcoeur.com/
 site_description: Standalone desktop dashboard for markdown-based projects, incidents, and documents — live-rendered from the files you edit by hand.
 site_author: Alice Voland
 copyright: 'Developed by Alice Voland &middot; <a href="https://vcoeur.com">vcoeur.com</a> &middot; <a href="/legal/">Legal</a>'
 
-repo_url: https://github.com/vcoeur/condash
-repo_name: vcoeur/condash
+repo_url: https://github.com/vcoeur/condash-tauri
+repo_name: vcoeur/condash-tauri
 edit_uri: edit/main/docs/
 
 theme:
@@ -45,7 +45,7 @@ extra_css:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/vcoeur/condash
+      link: https://github.com/vcoeur/condash-tauri
 
 markdown_extensions:
   - admonition
