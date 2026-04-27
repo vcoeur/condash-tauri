@@ -1,6 +1,6 @@
 [package]
 name = "condash"
-version = "1.8.3"
+version = "1.8.4"
 description = "A dashboard for the Markdown you already write."
 authors = ["Alice Voland <alice@vcoeur.com>"]
 license = "MIT"
