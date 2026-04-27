@@ -31,6 +31,41 @@ permissions:
   contents: write
 
 jobs:
+  # Pre-create the draft release for this tag so the parallel matrix
+  # below all attach to the same draft. Without this, each per-OS job
+  # races on tauri-action's "look for draft / create if missing" check
+  # and ends up creating its own untagged ghost draft — assets get
+  # fragmented across 3 drafts and the /releases page shows none of
+  # them (untagged drafts don't surface there). See
+  # conception/projects/2026-04/2026-04-27-condash-tauri-spinoff for
+  # the v1.8.3 incident that prompted this.
+  release-init:
+    name: release-init
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft release for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping create."
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --draft \
+            --title "condash-tauri $TAG" \
+            --notes "Unsigned Tauri build of condash (Tauri lineage, preserved at vcoeur/condash-tauri).
+
+          Install bypass per OS: see docs/guides/install-desktop.md.
+
+          - Windows: SmartScreen → \"More info\" → \"Run anyway\".
+          - macOS: System Settings → Privacy & Security → \"Open Anyway\".
+          - Linux: \`chmod +x\` the AppImage, run."
+
   # Build the frontend bundle once on Linux and hand it to each per-OS
   # bundle job as an artifact. `frontend/dist/` is gitignored — the
   # bundle must exist on disk when tauri-action runs `cargo tauri build`
@@ -58,7 +93,7 @@ jobs:
           retention-days: 1
 
   build:
-    needs: frontend
+    needs: [release-init, frontend]
     strategy:
       fail-fast: false
       matrix:
