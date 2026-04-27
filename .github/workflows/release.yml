@@ -49,8 +49,16 @@ jobs:
 
       - name: Create or find draft release for this tag
         id: create
+        # Use a personal access token here so the draft is authored by
+        # the repo maintainer rather than `github-actions[bot]`. Drafts
+        # owned by the bot are invisible on GitHub's /releases web tab
+        # (it only surfaces drafts whose author == current viewer);
+        # PAT-authored drafts show up normally and can be published
+        # from the UI without chasing untagged-XXX direct URLs. The
+        # bundle jobs below keep the default GITHUB_TOKEN — they only
+        # need contents:write to upload assets to an existing release.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           TAG: ${{ github.ref_name }}
           GH_REPO: ${{ github.repository }}
         run: |
