@@ -4,11 +4,11 @@
 
 `condash` walks a `projects/YYYY-MM/YYYY-MM-DD-<slug>/` tree under a single **conception root** and renders a live dashboard of every item: its status, steps, notes, deliverables, and linked code. There is no database, no sync server, no account. The Markdown files are the source of truth; condash is the view layer.
 
-Full documentation, with tutorials and screenshots, lives at **[condash.vcoeur.com](https://condash.vcoeur.com/)**.
+Full documentation, with tutorials and screenshots, lives at **[condash-tauri.vcoeur.com](https://condash-tauri.vcoeur.com/)**.
 
 ## Install
 
-Download the installer for your platform from the [GitHub Releases page](https://github.com/vcoeur/condash/releases):
+Download the installer for your platform from the [GitHub Releases page](https://github.com/vcoeur/condash-tauri/releases):
 
 | Platform | Artifact |
 |---|---|
@@ -16,15 +16,15 @@ Download the installer for your platform from the [GitHub Releases page](https:/
 | macOS    | `condash_<version>_<arch>.dmg` |
 | Windows  | `condash_<version>_x64_en-US.msi` |
 
-The builds are **unsigned** on purpose — signing Windows + macOS binaries costs $180–400/year and condash is single-developer-scale. Each OS asks for confirmation once on first launch; see the [Install guide](https://condash.vcoeur.com/get-started/install/) for the per-platform gesture.
+The builds are **unsigned** on purpose — signing Windows + macOS binaries costs $180–400/year and condash is single-developer-scale. Each OS asks for confirmation once on first launch; see the [Install guide](https://condash-tauri.vcoeur.com/get-started/install/) for the per-platform gesture.
 
 ## Build from source
 
 You need a [rustup](https://rustup.rs)-managed Rust toolchain (1.90+). On Linux you also need the usual Tauri system deps (WebKitGTK, libappindicator, librsvg); `cargo tauri build` prints the exact package list for your distro.
 
 ```bash
-git clone https://github.com/vcoeur/condash.git
-cd condash
+git clone https://github.com/vcoeur/condash-tauri.git
+cd condash-tauri
 make setup                 # one-off: installs cargo-tauri into the rustup toolchain
 make frontend              # bundle frontend/src/{js,css}/ -> frontend/dist/ via esbuild
 make run                   # open the dev window
@@ -49,7 +49,7 @@ Configuration lives in two YAML files:
 - `<conception_path>/configuration.yml` — tree-level, versioned with the tree. Owns `workspace_path`, `worktrees_path`, `repositories` (with optional `run:` / `force_stop:`).
 - `${XDG_CONFIG_HOME:-~/.config}/condash/settings.yaml` — per-user, per-machine. Owns `conception_path`, `terminal`, `pdf_viewer`, `open_with`.
 
-On overlap, `settings.yaml` wins field by field. Full schema: [Config files reference](https://condash.vcoeur.com/reference/config/).
+On overlap, `settings.yaml` wins field by field. Full schema: [Config files reference](https://condash-tauri.vcoeur.com/reference/config/).
 
 ## What it does
 
@@ -77,15 +77,15 @@ condash/
 ├── frontend/                # dashboard HTML/CSS/JS + vendored PDF.js, xterm.js, CodeMirror, Mermaid
 ├── src-tauri/               # Tauri host + axum server + the two binaries
 ├── examples/                # sample conception trees + example Claude Code skill
-├── docs/                    # mkdocs site, published to condash.vcoeur.com
+├── docs/                    # mkdocs site, published to condash-tauri.vcoeur.com
 └── Makefile                 # make help for the full target list
 ```
 
 ## Links
 
-- Documentation: **[condash.vcoeur.com](https://condash.vcoeur.com/)**
-- Source: **[github.com/vcoeur/condash](https://github.com/vcoeur/condash)**
-- Releases: **[github.com/vcoeur/condash/releases](https://github.com/vcoeur/condash/releases)**
+- Documentation: **[condash-tauri.vcoeur.com](https://condash-tauri.vcoeur.com/)**
+- Source: **[github.com/vcoeur/condash-tauri](https://github.com/vcoeur/condash-tauri)**
+- Releases: **[github.com/vcoeur/condash-tauri/releases](https://github.com/vcoeur/condash-tauri/releases)**
 
 ## License
 

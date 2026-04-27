@@ -1,6 +1,6 @@
 name: Pages (docs + apt repo)
 
-# Builds the public site at condash.vcoeur.com:
+# Builds the public site at condash-tauri.vcoeur.com:
 #   - mkdocs site at the root
 #   - Debian apt repository under /apt/
 #

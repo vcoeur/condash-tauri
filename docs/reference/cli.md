@@ -16,7 +16,7 @@ condash ships two binaries. Neither takes subcommands or flags — everything th
 
 ## `condash`
 
-The main binary. Packaged into the per-OS installer on the [releases page](https://github.com/vcoeur/condash/releases); also produced by `make build` from source.
+The main binary. Packaged into the per-OS installer on the [releases page](https://github.com/vcoeur/condash-tauri/releases); also produced by `make build` from source.
 
 ```bash
 condash

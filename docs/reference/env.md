@@ -35,7 +35,7 @@ CONDASH_ASSET_DIR=frontend/ condash-serve
 # in another shell: edit frontend/src/..., then `make frontend`, then hard-refresh
 ```
 
-See [`src-tauri/src/assets.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/assets.rs) for the path resolution.
+See [`src-tauri/src/assets.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/assets.rs) for the path resolution.
 
 ## `CONDASH_PORT`
 

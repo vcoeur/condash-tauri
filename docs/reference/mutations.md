@@ -15,7 +15,7 @@ The dashboard's **write surface is small**. It touches three places only:
 
 It does **not** touch `.git/`, does not move or rename item directories, does not run shell commands other than the user-configured `open_with.*` / `pdf_viewer` / `terminal.launcher_command` chains.
 
-Every mutation is exposed as a POST route defined in [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/server.rs). If a route isn't listed here, condash doesn't write.
+Every mutation is exposed as a POST route defined in [`src-tauri/src/server.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/server.rs). If a route isn't listed here, condash doesn't write.
 
 ## README edits
 
@@ -55,7 +55,7 @@ Body (`application/json`):
 }
 ```
 
-Server-side rules (re-validated in [`condash-mutations::create_item`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs) — client input is never trusted):
+Server-side rules (re-validated in [`condash-mutations::create_item`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-mutations/src/lib.rs) — client input is never trusted):
 
 - `title` required.
 - `kind` ∈ `{project, incident, document}`.
@@ -86,7 +86,7 @@ Filename validation regexes are narrow on purpose:
 - Notes: `[\w.-]+` plus a single extension. No spaces, no parentheses.
 - Uploads: `[\w. \-()]+\.[A-Za-z0-9]+` — permissive enough for camera exports and scanned PDFs.
 
-See [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash/blob/main/crates/condash-mutations/src/lib.rs) for the exact regexes.
+See [`crates/condash-mutations/src/lib.rs`](https://github.com/vcoeur/condash-tauri/blob/main/crates/condash-mutations/src/lib.rs) for the exact regexes.
 
 ## Config edits
 
@@ -113,7 +113,7 @@ The `/open*` family launches an external process. These **do not** write to the 
 | Open a folder | `POST /open-folder` | Must match `projects/YYYY-MM/YYYY-MM-DD-slug/` | OS default file manager |
 | Open a URL | `POST /open-external` | `http://` or `https://` only | User's default browser |
 
-Paths outside the configured sandbox are rejected **before the shell sees them**. The validation lives in [`src-tauri/src/paths.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/paths.rs); the URL check in [`src-tauri/src/runners.rs`](https://github.com/vcoeur/condash/blob/main/src-tauri/src/runners.rs).
+Paths outside the configured sandbox are rejected **before the shell sees them**. The validation lives in [`src-tauri/src/paths.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/paths.rs); the URL check in [`src-tauri/src/runners.rs`](https://github.com/vcoeur/condash-tauri/blob/main/src-tauri/src/runners.rs).
 
 The one exception is the embedded terminal (`WS /ws/term`): its `?cwd=` query parameter goes through the same `_validate_open_path` check, so a forked shell can only start inside `workspace_path` or `worktrees_path`.
 

@@ -5,7 +5,7 @@ description: Legal notice and publisher information for the condash documentatio
 
 # Legal notice
 
-Mentions légales for the `condash.vcoeur.com` documentation site. The canonical French notice for the wider vcoeur family of sites is published at [vcoeur.com/legal](https://vcoeur.com/legal); this page is a per-site supplement documenting the specifics of this GitHub-hosted sub-project.
+Mentions légales for the `condash-tauri.vcoeur.com` documentation site. The canonical French notice for the wider vcoeur family of sites is published at [vcoeur.com/legal](https://vcoeur.com/legal); this page is a per-site supplement documenting the specifics of this GitHub-hosted sub-project.
 
 ## Publisher
 
@@ -13,7 +13,7 @@ Mentions légales for the `condash.vcoeur.com` documentation site. The canonical
 - **Contact**: `alice@vcoeur.com`
 - **Director of publication**: Alice Voland
 
-This site is maintained as a personal, non-commercial technical documentation project for the open-source [`condash`](https://github.com/vcoeur/condash) desktop application.
+This site is maintained as a personal, non-commercial technical documentation project for the open-source [`condash`](https://github.com/vcoeur/condash-tauri) desktop application.
 
 ## Host
 
@@ -49,4 +49,4 @@ This site sets no cookies. The theme toggle uses `localStorage`, which is not a 
 
 ## License
 
-Documentation content on this site is released under the same license as the source project — see the [`condash` repository](https://github.com/vcoeur/condash) for the canonical `LICENSE` file.
+Documentation content on this site is released under the same license as the source project — see the [`condash` repository](https://github.com/vcoeur/condash-tauri) for the canonical `LICENSE` file.
